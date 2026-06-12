@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% if page_title %}{{ page_title }} - {% endif %}丰源工作台</title>
+    
+<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+</head>
+<body>
+
+<nav class="navbar">
+    <a href="/" class="navbar-brand">📋 丰源工作台</a>
+    <button class="nav-arrow nav-arrow-left" onclick="navScroll(-1)" title="向前">◀</button>
+    <div class="nav-container">
+        <ul class="nav-links">
+            <li class="nav-dropdown">
+                <a href="#" class="nav-dropdown-toggle">📊 运营信息 ▾</a>
+                <div class="nav-dropdown-menu">
+                    <a href="/notice" class="{% if request.endpoint == 'notice' %}active{% endif %}">📢 公司通知</a>
+                    <a href="/notice-color" class="{% if request.endpoint == 'notice_color' %}active{% endif %}">🎨 通知彩色版</a>
+                    <a href="/workflow" class="{% if request.endpoint == 'workflow' %}active{% endif %}">🔀 业务流程</a>
+                    <a href="/warehouse" class="{% if request.endpoint == 'warehouse' %}active{% endif %}">🏭 仓库布局</a>
+                </div>
+            </li>
+            <li><a href="/stockout" class="{% if request.endpoint == 'stockout' %}active{% endif %}">🚫 当前缺货</a></li>
+            <li class="nav-dropdown">
+                <a href="#" class="nav-dropdown-toggle">📦 商品管理 ▾</a>
+                <div class="nav-dropdown-menu">
+                    <a href="/product-units" class="{% if request.endpoint == 'product_units' %}active{% endif %}">📐 商品单位</a>
+                    <a href="/product-categories" class="{% if request.endpoint == 'product_categories' %}active{% endif %}">📂 商品类型</a>
+                    <a href="/products" class="{% if request.endpoint == 'products' %}active{% endif %}">📦 产品管理</a>
+                </div>
+            </li>
+            <li><a href="/priceboard" class="{% if request.endpoint == 'priceboard' %}active{% endif %}">🧰 码数报价</a></li>
+            <li class="nav-dropdown">
+                <a href="#" class="nav-dropdown-toggle">📝 操作要点 ▾</a>
+                <div class="nav-dropdown-menu">
+                    <a href="/billing-tips" class="{% if request.endpoint == 'billing_tips' %}active{% endif %}">📝 开单要点</a>
+                    <a href="/huandan-guide" class="{% if request.endpoint == 'huandan_guide' %}active{% endif %}">🔄 换单要点</a>
+                    <a href="/count-tips" class="{% if request.endpoint == 'count_tips' %}active{% endif %}">🔢 点数要点</a>
+                </div>
+            </li>
+            <li class="nav-dropdown">
+                <a href="#" class="nav-dropdown-toggle">⌨️ 快速录入 ▾</a>
+                <div class="nav-dropdown-menu">
+                    <a href="/experience" class="{% if request.endpoint == 'experience' %}active{% endif %}">💡 工作经验</a>
+                    <a href="/errorlog" class="{% if request.endpoint == 'errorlog' %}active{% endif %}">⚠️ 错误经验</a>
+                    <a href="/todolist" class="{% if request.endpoint == 'todolist' %}active{% endif %}">✅ 待办事项</a>
+                    <a href="/vehicle-maintenance" class="{% if request.endpoint == 'vehicle_maintenance' %}active{% endif %}">🚛 车辆维护记录</a>
+                </div>
+            </li>
+            <li><a href="/loading-orders" class="{% if request.endpoint == 'loading_orders' %}active{% endif %}">📦 装柜订单</a></li>
+            <li><a href="/shipping-records" class="{% if request.endpoint == 'shipping_records' %}active{% endif %}">🚛 出货记录</a></li>
+            <li><a href="/inbound-records" class="{% if request.endpoint == 'inbound_records' %}active{% endif %}"><span style="display:inline-block;transform:scaleX(-1);font-size:1em;">🚚</span> 入库记录</a></li>
+        </ul>
+    </div>
+    <button class="nav-arrow nav-arrow-right" onclick="navScroll(1)" title="向后">▶</button>
+</nav>
+
+{% if all_notices %}
+
+<div class="notice-marquee-fixed" id="noticeMarquee">
+    <div class="notice-marquee-inner" id="marqueeInner">
+        {% for n in all_notices %}
+        <span class="notice-marquee-text">📢 {{ n.content }}</span>
+        {% endfor %}
+        {% for n in all_notices %}
+        <span class="notice-marquee-text">📢 {{ n.content }}</span>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<div class="container">
+    {# ==========================================================================
+       两套交互模式并存(historical):
+       - 旧功能(经验/错误/待办/通知/维护/商品分类/缺货)走传统 POST → redirect → flash
+         消息在下方 flash-messages 块里渲染
+       - 新功能(出货/入库/装柜三大订单 REST API、产品管理)走 fetch + DOM 局部刷新
+         用前端 alert / confirmDialog 提示,不走 flash
+       两套都能用,迁移成本不划算所以维持现状。新加表单先考虑用 REST + fetch。
+       ========================================================================== #}
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div class="flash-messages">
+        {% for category, message in messages %}
+        <div class="flash {{ category }}">{{ message }}</div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+
+<!-- ========== 公共图片预览弹框 ========== -->
+<div class="img-preview-modal" id="imgPreviewModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:99999;align-items:center;justify-content:center;cursor:pointer;">
+    <img id="imgPreviewTarget" style="max-width:90vw;max-height:85vh;border-radius:8px;transition:transform 0.3s ease;cursor:zoom-in;">
+    <button type="button" onclick="imgPreviewRotate()" style="position:absolute;bottom:1.5rem;left:50%;transform:translateX(-50%);padding:0.5rem 1.2rem;background:rgba(255,255,255,0.9);color:#333;border:none;border-radius:6px;cursor:pointer;font-size:0.9rem;font-weight:600;">🔄 旋转90°</button>
+</div>
+
+
+
+<!-- 运营信息下拉菜单 -->
+
+
+<div style="text-align:center; padding:0.5rem; background:#f8f9fa;">
+
+
+
+<script src="{{ url_for('static', filename='js/common.js') }}"></script>
+</body>
+</html>
+
+

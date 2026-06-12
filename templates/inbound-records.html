@@ -1,0 +1,1712 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+.inbound-page .card-title { color: #00b894; border-bottom-color: #d4f5e9; }
+.inbound-page .date-group { margin-bottom: 2rem; border-bottom: 1px dashed #dfe6e9; padding-bottom: 0.5rem; }
+.inbound-page .date-group[data-locked="1"] .lock-hide { display: none !important; }
+.inbound-page .date-group[data-locked="1"] .lock-show { display: inline-block !important; }
+.inbound-page .date-group[data-locked="0"] .lock-hide { display: inline-block !important; }
+.inbound-page .date-group[data-locked="0"] .lock-show { display: none !important; }
+.inbound-page .group-header {
+    display: flex; align-items: center; gap: 0.75rem;
+    padding: 0.5rem 0.8rem; background: linear-gradient(135deg, #f8fff8 0%, #e8f5e9 100%);
+    border-left: 4px solid #00b894; border-radius: 6px;
+    margin-bottom: 0.75rem;
+}
+.inbound-page .group-date {
+    font-size: 1rem; font-weight: 700; color: #2d3436;
+}
+.inbound-page .group-supplier {
+    font-size: 0.95rem; color: #00b894; font-weight: 600;
+    padding: 0.2rem 0.6rem; background: #d4f5e9; border-radius: 12px;
+}
+.inbound-page .record-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.inbound-page .record-table th {
+    background: #f8f9fa; padding: 0.5rem 0.75rem;
+    text-align: left; font-size: 0.8rem; color: #868e96;
+    border-bottom: 2px solid #e9ecef;
+}
+.inbound-page .record-table td {
+    padding: 0.6rem 0.75rem; border-bottom: 1px solid #f1f3f5;
+    font-size: 0.95rem; vertical-align: middle;
+}
+.inbound-page .record-table tr:hover td { background: #f8fff8; }
+.inbound-page .record-table tr.row-warn td { background: #ffdddd; }
+.inbound-page .record-table tr.row-warn td:first-child { border-left: 4px solid #e74c3c; }
+.inbound-page .record-table tr.row-warn:hover td { background: #ffcccc; }
+.inbound-page .record-table tr.row-info td { background: #ffebee; }
+.inbound-page .record-table tr.row-info td:first-child { border-left: 4px solid #ef9a9a; }
+.inbound-page .record-table tr.row-info:hover td { background: #ffcdd2; }
+/* 订单备注弹框 */
+.note-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1020; justify-content: center; align-items: center; }
+.note-modal.show { display: flex; }
+.note-modal .note-dialog { background: white; padding: 1.5rem; border-radius: 12px; min-width: 420px; max-width: 600px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+.note-modal .note-dialog h3 { margin: 0 0 0.5rem; color: #2d3436; font-size: 1.1rem; }
+.note-modal .note-dialog .order-info { color: #6c5ce7; font-size: 0.85rem; margin-bottom: 0.75rem; }
+.note-modal .note-dialog textarea { width: 100%; min-height: 120px; padding: 0.6rem; border: 1px solid #dfe6e9; border-radius: 6px; font-size: 0.9rem; font-family: inherit; box-sizing: border-box; resize: vertical; }
+.note-modal .note-dialog textarea:focus { outline: none; border-color: #6c5ce7; }
+.note-modal .note-dialog .actions { display: flex; gap: 0.75rem; justify-content: flex-end; margin-top: 1rem; }
+.inbound-page .qty-badge {
+    background: #d4f5e9; color: #00b894;
+    padding: 0.2rem 0.6rem; border-radius: 12px;
+    font-weight: 700; font-size: 0.85rem;
+    white-space: nowrap;
+}
+.inbound-page .unit-badge {
+    background: #f0f0f0; color: #555;
+    padding: 0.2rem 0.5rem; border-radius: 8px;
+    font-size: 0.82rem; font-weight: 600;
+    white-space: nowrap;
+}
+.inbound-page .quick-add-row td {
+    width: 100%;
+    display: table-cell;
+}
+.inbound-page .quick-add {
+    display: grid;
+    grid-template-columns: 150px 120px 100px 70px 1fr auto;
+    gap: 0.5rem; align-items: end;
+    padding: 0.75rem; background: #fafafa;
+    border-radius: 6px; margin-top: 0.5rem;
+    width: 100%;
+}
+.inbound-page .quick-add input, .inbound-page .quick-add select {
+    width: 100%; padding: 0.35rem 0.5rem;
+    border: 1px solid #dfe6e9; border-radius: 4px;
+    font-size: 0.85rem; background: #fff;
+    box-sizing: border-box;
+}
+.inbound-page .quick-add input:focus, .inbound-page .quick-add select:focus {
+    outline: none; border-color: #00b894;
+}
+.inbound-page .quick-add button {
+    padding: 0.35rem 0.8rem;
+}
+.inbound-page .form-grid {
+    display: grid;
+    grid-template-columns: 150px 1fr;
+    gap: 0.75rem; align-items: end;
+}
+.inbound-page .form-grid label { display: block; font-weight: 600; font-size: 0.85rem; margin-bottom: 0.25rem; }
+.inbound-page .form-grid input {
+    width: 100%; padding: 0.4rem 0.6rem;
+    border: 1px solid #dfe6e9; border-radius: 6px;
+    font-size: 0.9rem; background: #fff;
+    box-sizing: border-box;
+}
+.inbound-page .form-grid input:focus {
+    outline: none; border-color: #00b894;
+    box-shadow: 0 0 0 2px rgba(0,184,148,0.1);
+}
+.inbound-page .empty-state { text-align: center; padding: 3rem 1rem; color: #bbb; }
+.inbound-page .empty-state .icon { font-size: 3.5rem; margin-bottom: 1rem; }
+.inbound-page .remark-cell { color: #868e96; font-size: 0.88rem; }
+.inbound-page .remark-cell.has-content { color: #555; }
+
+/* Section styling - matches shipping page */
+.inbound-page .section {
+    background: #fff; border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    margin-bottom: 1.5rem;
+    overflow: hidden;
+}
+.inbound-page .section-title {
+    padding: 0.8rem 1rem; margin: 0;
+    background: linear-gradient(135deg, #f8fff8 0%, #e8f5e9 100%);
+    border-bottom: 1px solid #e9ecef;
+    font-size: 1rem; font-weight: 600; color: #00b894;
+}
+
+/* 新建入库单区域 */
+.inbound-page .create-section {
+    background: #fff; border-radius: 8px;
+    padding: 1rem 1.25rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+.inbound-page .create-form {
+    display: grid;
+    grid-template-columns: 150px 1fr auto;
+    gap: 0.75rem; align-items: end;
+}
+.inbound-page .create-form .form-group { margin-bottom: 0; }
+.inbound-page .create-form label {
+    display: block; font-weight: 600; font-size: 0.85rem; margin-bottom: 0.25rem; color: #555;
+}
+.inbound-page .create-form input {
+    width: 100%; padding: 0.45rem 0.6rem;
+    border: 1px solid #dfe6e9; border-radius: 6px;
+    font-size: 0.9rem; background: #fff;
+    box-sizing: border-box;
+}
+.inbound-page .create-form input:focus {
+    outline: none; border-color: #00b894;
+    box-shadow: 0 0 0 2px rgba(0,184,148,0.1);
+}
+
+/* 批量添加弹框 */
+.batch-modal {
+    display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.5); z-index: 1000;
+    align-items: center; justify-content: center;
+}
+.batch-modal.show { display: flex; }
+.batch-dialog {
+    background: #fff; border-radius: 12px; padding: 1.5rem;
+    width: 90%; max-width: 600px; max-height: 80vh;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+}
+.batch-dialog h3 {
+    margin: 0 0 0.5rem 0; color: #00b894; font-size: 1.1rem;
+}
+.batch-dialog .hint {
+    color: #868e96; font-size: 0.85rem; margin-bottom: 1rem;
+}
+.batch-dialog textarea {
+    width: 100%; height: 200px; padding: 0.75rem;
+    border: 1px solid #dfe6e9; border-radius: 6px;
+    font-size: 0.9rem; font-family: monospace;
+    resize: vertical; box-sizing: border-box;
+}
+.batch-dialog textarea:focus {
+    outline: none; border-color: #00b894;
+}
+.batch-dialog .actions {
+    display: flex; gap: 0.75rem; justify-content: flex-end; margin-top: 1rem;
+}
+
+@media (max-width: 640px) {
+    .inbound-page .quick-add { grid-template-columns: 1fr 1fr; }
+    .inbound-page .create-form { grid-template-columns: 1fr; }
+}
+
+/* 图片上传区域 */
+.inbound-page .image-section {
+    margin-top: 1rem;
+    padding: 1rem;
+    background: #f8f9fa;
+    border-radius: 8px;
+}
+.inbound-page .image-section h4 {
+    margin: 0 0 0.75rem 0;
+    font-size: 0.9rem;
+    color: #555;
+}
+.inbound-page .image-upload-area {
+    display: grid;
+    gap: 0.75rem;
+    align-items: center;
+}
+/* 图片列数切换 */
+.inbound-page .image-upload-area.columns-1 { grid-template-columns: 1fr; }
+.inbound-page .image-upload-area.columns-2 { grid-template-columns: repeat(2, 1fr); }
+.inbound-page .image-upload-area.columns-3 { grid-template-columns: repeat(3, 1fr); }
+.inbound-page .image-upload-area.columns-4 { grid-template-columns: repeat(4, 1fr); }
+.inbound-page .image-upload-area.columns-5 { grid-template-columns: repeat(5, 1fr); }
+/* 列数切换按钮 */
+.inbound-page .img-col-btn {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.8rem;
+    border: 1px solid #ddd;
+    background: #fff;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.inbound-page .img-col-btn:hover { background: #d0e8d0; border-color: #00b894; color: #00b894; }
+.inbound-page .img-col-btn.active { background: #00b894; color: white; border-color: #00b894; font-weight: 600; }
+.inbound-page .image-item {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    background: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 120px;
+}
+.inbound-page .image-item img {
+    max-width: 100%;
+    max-height: 300px;
+    object-fit: contain;
+    display: block;
+}
+.inbound-page .image-item .delete-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 32px;
+    height: 32px;
+    background: rgba(220, 53, 69, 0.9);
+    color: white;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+.inbound-page .image-item:hover .delete-btn {
+    opacity: 1;
+}
+.inbound-page .upload-btn-wrapper {
+    position: relative;
+    width: 120px;
+    height: 120px;
+    border: 2px dashed #dfe6e9;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.inbound-page .upload-btn-wrapper:hover {
+    border-color: #00b894;
+    background: rgba(0,184,148,0.05);
+}
+.inbound-page .upload-btn-wrapper input[type="file"] {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+}
+.inbound-page .upload-btn-wrapper .upload-icon {
+    font-size: 2rem;
+    color: #adb5bd;
+}
+.inbound-page .paste-hint {
+    font-size: 0.75rem;
+    color: #868e96;
+    margin-top: 0.5rem;
+}
+
+
+/* 图片上传弹框 */
+.image-modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.5);
+    z-index: 1500;
+    align-items: center;
+    justify-content: center;
+}
+.image-modal.show {
+    display: flex;
+}
+.image-modal .modal-dialog {
+    background: white;
+    border-radius: 12px;
+    padding: 1.5rem;
+    width: 500px;
+    max-width: 90%;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+}
+.image-modal .modal-title {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: #2d3436;
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.image-modal .modal-close {
+    float: right;
+    cursor: pointer;
+    font-size: 1.5rem;
+    color: #999;
+    line-height: 1;
+}
+.image-modal .modal-close:hover {
+    color: #333;
+}
+.image-modal .upload-options {
+    display: flex;
+    flex-direction: row;
+    gap: 0.75rem;
+}
+.image-modal .upload-box {
+    flex: 1;
+    border: 2px dashed #dfe6e9;
+    border-radius: 8px;
+    padding: 1rem;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.image-modal .upload-box:hover {
+    border-color: #6c5ce7;
+    background: rgba(108,92,231,0.05);
+}
+.image-modal .upload-box.active {
+    border-color: #00b894;
+    background: rgba(0,184,148,0.1);
+}
+.image-modal .upload-box .icon {
+    font-size: 1.5rem;
+    margin-bottom: 0.25rem;
+}
+.image-modal .upload-box .text {
+    font-size: 0.85rem;
+    color: #555;
+}
+.image-modal .upload-box .hint {
+    font-size: 0.72rem;
+    color: #868e96;
+    margin-top: 0.15rem;
+}
+.image-modal .file-input {
+    display: none;
+}
+.image-modal .modal-img-preview {
+    max-width: 100%;
+    border-radius: 8px;
+    margin: 1rem 0;
+    display: none;
+    text-align: center;
+    overflow: hidden;
+}
+.image-modal .modal-img-preview img {
+    max-width: 100%;
+    max-height: 300px;
+    border-radius: 8px;
+    transition: transform 0.3s ease;
+    transform-origin: center center;
+}
+.image-modal .preview-actions {
+    display: none;
+    gap: 0.5rem;
+    justify-content: center;
+    margin-top: 0.5rem;
+}
+.image-modal .preview-actions .btn {
+    padding: 0.4rem 1rem;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    font-size: 0.85rem;
+}
+.image-modal .preview-actions .btn-cancel {
+    background: #e9ecef;
+    color: #333;
+}
+.image-modal .preview-actions .btn-confirm {
+    background: #6c5ce7;
+    color: white;
+}
+
+</style>
+
+<div class="container inbound-page">
+    <!-- 新建入库单（日期+供应商） -->
+    <div class="card" style="margin-bottom: 1.5rem;">
+        <h2 class="card-title" style="margin-bottom: 0.75rem;">📥 新建入库单</h2>
+        <form id="createInboundForm" style="display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 150px;">
+                <label style="display: block; font-size: 0.85rem; color: #636e72; margin-bottom: 0.25rem;">日期</label>
+                <input type="date" name="date" value="{{ today }}" required style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #dfe6e9; border-radius: 6px; font-size: 0.95rem;">
+            </div>
+            <div style="flex: 1; min-width: 200px;">
+                <label style="display: block; font-size: 0.85rem; color: #636e72; margin-bottom: 0.25rem;">供应商</label>
+                <input type="text" name="supplier" placeholder="输入供应商名称" required style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #dfe6e9; border-radius: 6px; font-size: 0.95rem;">
+            </div>
+            <button type="submit" class="btn btn-primary" style="padding: 0.5rem 1.25rem;">➕ 创建入库单</button>
+        </form>
+    </div>
+
+    <!-- 入库记录列表 -->
+    <div class="card">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem;">
+            <h2 class="card-title" style="margin-bottom:0; border-bottom:none;">📋 入库记录</h2>
+            <div style="display:flex; align-items:center; gap:0.5rem;">
+            <input type="text" id="searchInput" placeholder="🔍 搜索供应商/商品" style="padding:0.3rem 0.6rem; border:1px solid #dfe6e9; border-radius:6px; font-size:0.82rem; width:160px;">
+            <button type="button" id="dateRangeBtn" style="padding:0.35rem 0.8rem; background:#e8f5e9; color:#00b894; border:1px solid #b2dfdb; border-radius:6px; font-size:0.82rem; cursor:pointer; font-weight:600; display:flex; align-items:center; gap:0.3rem;">⚙️ <span id="dateRangeLabel">{{ start_date }} ~ {{ end_date }}</span></button>
+            </div>
+        </div>
+
+        <script>
+        document.getElementById('searchInput').addEventListener('input', function() {
+            var kw = this.value.trim().toLowerCase();
+            document.querySelectorAll('.inbound-page .date-group').forEach(function(g) {
+                var supplier = (g.querySelector('.group-supplier') || {}).textContent || '';
+                var productNames = Array.from(g.querySelectorAll('.record-table td:nth-child(1)')).map(function(td) { return td.textContent; }).join(' ');
+                var specs = Array.from(g.querySelectorAll('.record-table td:nth-child(2)')).map(function(td) { return td.textContent; }).join(' ');
+                var match = !kw || supplier.toLowerCase().includes(kw) || productNames.toLowerCase().includes(kw) || specs.toLowerCase().includes(kw);
+                g.style.display = match ? '' : 'none';
+            });
+        });
+        </script>
+
+    <!-- 日期范围设置弹框 -->
+    <div id="dateRangeModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.4); z-index:9999; align-items:center; justify-content:center;">
+        <div style="background:#fff; border-radius:12px; padding:1.5rem; width:360px; max-width:90vw; box-shadow:0 10px 40px rgba(0,0,0,0.15);">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem;">
+                <h3 style="margin:0; font-size:1rem; color:#2d3436;">📅 显示范围设置</h3>
+                <button type="button" id="dateRangeClose" style="background:none; border:none; font-size:1.3rem; cursor:pointer; color:#999;">&times;</button>
+            </div>
+            <div style="display:flex; align-items:center; gap:0.6rem; margin-bottom:0.75rem;">
+                <label style="font-size:0.85rem; color:#636e72; min-width:60px;">开始日期</label>
+                <input type="date" id="startDate" style="flex:1; padding:0.4rem 0.6rem; border:1px solid #dfe6e9; border-radius:6px; font-size:0.9rem;">
+            </div>
+            <div style="display:flex; align-items:center; gap:0.6rem; margin-bottom:1rem;">
+                <label style="font-size:0.85rem; color:#636e72; min-width:60px;">结束日期</label>
+                <input type="date" id="endDate" style="flex:1; padding:0.4rem 0.6rem; border:1px solid #dfe6e9; border-radius:6px; font-size:0.9rem;">
+            </div>
+            <span id="dateError" style="color:#d63031; font-size:0.8rem; display:none; margin-bottom:0.5rem;"></span>
+            <div style="display:flex; gap:0.5rem; justify-content:flex-end; margin-top:0.75rem;">
+                <button type="button" id="dateRangeReset" style="padding:0.4rem 0.8rem; background:#f1f3f5; color:#636e72; border:none; border-radius:6px; font-size:0.85rem; cursor:pointer;">最近7天</button>
+                <button type="button" id="dateRangeCancel" style="padding:0.4rem 0.8rem; background:#f1f3f5; color:#333; border:none; border-radius:6px; font-size:0.85rem; cursor:pointer;">取消</button>
+                <button type="button" id="dateRangeConfirm" style="padding:0.4rem 1rem; background:#00b894; color:#fff; border:none; border-radius:6px; font-size:0.85rem; cursor:pointer; font-weight:600;">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        var modal = document.getElementById('dateRangeModal');
+        var btn = document.getElementById('dateRangeBtn');
+        var closeBtn = document.getElementById('dateRangeClose');
+        var cancelBtn = document.getElementById('dateRangeCancel');
+        var confirmBtn = document.getElementById('dateRangeConfirm');
+        var resetBtn = document.getElementById('dateRangeReset');
+        var startEl = document.getElementById('startDate');
+        var endEl = document.getElementById('endDate');
+        var errEl = document.getElementById('dateError');
+        var labelEl = document.getElementById('dateRangeLabel');
+
+        var currentStart = '{{ start_date }}';
+        var currentEnd = '{{ end_date }}';
+
+        // 初始化：localStorage 记忆
+        var savedStart = localStorage.getItem('inbound_start_date');
+        var savedEnd = localStorage.getItem('inbound_end_date');
+        if (savedStart && savedEnd && (savedStart !== currentStart || savedEnd !== currentEnd)) {
+            window.location.href = '/inbound-records?start_date=' + savedStart + '&end_date=' + savedEnd;
+            return;
+        }
+
+        function openModal() {
+            startEl.value = currentStart;
+            endEl.value = currentEnd;
+            errEl.style.display = 'none';
+            modal.style.display = 'flex';
+        }
+        function closeModal() {
+            modal.style.display = 'none';
+        }
+        function showError(msg) {
+            errEl.textContent = msg;
+            errEl.style.display = 'block';
+        }
+
+        btn.addEventListener('click', openModal);
+        closeBtn.addEventListener('click', closeModal);
+        cancelBtn.addEventListener('click', closeModal);
+        modal.addEventListener('click', function(e) { if (e.target === modal) closeModal(); });
+
+        resetBtn.addEventListener('click', function() {
+            var end = new Date();
+            var start = new Date();
+            start.setDate(start.getDate() - 6);
+            startEl.value = start.toISOString().split('T')[0];
+            endEl.value = end.toISOString().split('T')[0];
+            errEl.style.display = 'none';
+        });
+
+        // 联动：开始日期改变时，结束日期限制同月
+        startEl.addEventListener('change', function() {
+            var s = startEl.value;
+            if (s) {
+                var ym = s.substring(0, 7);
+                var parts = ym.split('-');
+                var y = parseInt(parts[0]), m = parseInt(parts[1]);
+                var lastDay = new Date(y, m, 0).getDate();
+                endEl.min = ym + '-01';
+                endEl.max = ym + '-' + String(lastDay).padStart(2, '0');
+            }
+        });
+
+        confirmBtn.addEventListener('click', function() {
+            errEl.style.display = 'none';
+            var s = startEl.value;
+            var e = endEl.value;
+            if (!s || !e) { showError('请选择起止日期'); return; }
+            if (s > e) { showError('开始日期不能晚于结束日期'); return; }
+            // 保存到 localStorage
+            localStorage.setItem('inbound_start_date', s);
+            localStorage.setItem('inbound_end_date', e);
+            window.location.href = '/inbound-records?start_date=' + s + '&end_date=' + e;
+        });
+    })();
+    </script>
+    
+    <!-- 入库单列表 -->
+    {% for group in groups %}
+    <div class="section date-group" data-order-id="{{ group.id }}" data-locked="{{ '1' if group.is_locked else '0' }}">
+        <div class="group-header">
+            <span class="group-date">{{ group.date }}</span>
+            <span class="group-supplier">{{ group.supplier }}</span>
+            <span class="group-num">#{{ group.order_num }}</span>
+            <!-- 紧邻订单号：批量添加 / 备注 / 上传图片 -->
+            <div style="display: flex; gap: 0.5rem;" class="lock-hide">
+                <button class="btn btn-sm" style="background: linear-gradient(135deg, #00b894, #00cec9); color: #fff; font-weight: 600; border: none; box-shadow: 0 2px 6px rgba(0,184,148,.35);" onclick="openBatchModal({{ group.id }})">📋 批量添加</button>
+                <button type="button" class="btn btn-sm note-btn" style="background:#a29bfe; color:#fff;{% if group.order_note %} box-shadow: 0 0 0 2px #6c5ce7;{% endif %}" data-pk="{{ group.id }}" data-note="{{ group.order_note|e }}" title="{% if group.order_note %}修改备注{% else %}添加备注{% endif %}">📝 备注</button>
+                <button class="btn btn-sm lock-hide" style="background: #6c5ce7; color: white;" onclick="openImageModal({{ group.id }})">📷 上传图片</button>
+            </div>
+            <!-- 推到最右：删除 / 锁定 -->
+            <div style="margin-left: auto; display: flex; gap: 0.5rem;" class="lock-hide">
+                <button type="button" class="btn btn-danger btn-sm" onclick="deleteInboundOrder({{ group.id }})">删除</button>
+                <button type="button" class="btn btn-sm" style="background:#74b9ff; color:#fff;" title="锁定订单" onclick="toggleInboundLock({{ group.id }}, true)">🔒</button>
+            </div>
+            <span class="lock-show" style="background:#fdcb6e; color:#2d3436; font-size:0.7rem; padding:0.2rem 0.5rem; border-radius:8px; margin-left:auto;">🔒 已锁定</span>
+            <button type="button" class="btn btn-sm lock-show" style="background:#55efc4; color:#2d3436;" onclick="toggleInboundLock({{ group.id }}, false)">🔓 解锁</button>
+        </div>
+
+        {% if group.order_note %}
+        <div class="order-note-row" id="orderNote{{ group.id }}" style="background:linear-gradient(90deg, #fff5e1 0%, #ffeaa7 100%); border-left:4px solid #fdcb6e; padding:0.5rem 0.75rem; margin:0.25rem 0; border-radius:6px; font-size:0.9rem; color:#2d3436; display:flex; align-items:flex-start; gap:0.5rem;">
+            <span style="font-weight:600; flex-shrink:0;">📝 备注：</span>
+            <span class="note-text" style="flex:1; white-space:pre-wrap; word-break:break-word;">{{ group.order_note }}</span>
+        </div>
+        {% endif %}
+
+        <table class="record-table">
+            <thead>
+                <tr>
+                    <th style="width: 18%;">商品名称</th>
+                    <th style="width: 14%;">规格</th>
+                    <th style="width: 10%;">数量</th>
+                    <th style="width: 8%;">单位</th>
+                    <th style="width: 14%;">备注</th>
+                    <th style="width: 12%;">辅助单位提示</th>
+                    <th style="width: 24%; white-space: nowrap;">操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for record in group.records %}
+                <tr data-record-id="{{ record.id }}" class="{% if record.mismatch == 'warn' %}row-warn{% elif record.mismatch == 'info' %}row-info{% endif %}">
+                    <td class="product-name" style="max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ record.product_name }}">{% if record.mismatch == 'warn' %}❌ {% elif record.mismatch == 'info' %}💡 {% endif %}{{ record.product_name }}</td>
+                    <td class="spec">{{ record.specification }}</td>
+                    <td><span class="qty-badge">{{ record.quantity }}</span></td>
+                    <td><span class="unit-badge">{{ record.unit }}</span></td>
+                    <td class="remark-cell{% if record.remark %} has-content{% endif %}">{{ record.remark or '-' }}</td>
+                    <td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">{{ record.unit_hint or '—' }}</td>
+                    <td style="white-space: nowrap;">
+                        <button type="button" class="btn btn-sm move-up-btn lock-hide" data-id="{{ record.id }}" title="上移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.2rem 0.4rem;font-size:0.75rem;">▲</button>
+                        <button type="button" class="btn btn-sm move-down-btn lock-hide" data-id="{{ record.id }}" title="下移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.2rem 0.4rem;font-size:0.75rem;">▼</button>
+                        <button type="button" class="btn btn-primary btn-sm edit-inbound-btn lock-hide" data-id="{{ record.id }}">✏️</button>
+                        <button type="button" class="btn btn-danger btn-sm lock-hide" onclick="deleteInboundRecord({{ record.id }}, this)">删除</button>
+                    </td>
+                </tr>
+                {% endfor %}
+                {% if group.summary_pieces > 0 or group.summary_loose_pieces > 0 %}
+                <tr class="summary-row" style="background:#f0fdf4; font-weight:600; border-top:2px solid #00b894;">
+                    <td colspan="5" style="text-align:right; padding:0.6rem 0.75rem; color:#00b894; font-size:0.9rem;">📊 备注汇总：</td>
+                    <td style="padding:0.6rem 0.75rem; color:#2d3436; font-size:0.9rem;">
+                        {{ group.summary_pieces }}支
+                        {% if group.summary_loose_pieces > 0 %}
+                        +{{ group.summary_loose_pieces }}支散码
+                        {% endif %}
+                    </td>
+                    <td style="padding:0.6rem 0.75rem;"></td>
+                    <td style="padding:0.6rem 0.75rem;"></td>
+                </tr>
+                {% endif %}
+            </tbody>
+        </table>
+
+        <!-- 添加明细表单 -->
+        {% if not group.is_locked %}
+        <div class="lock-hide" style="width:100%;box-sizing:border-box;padding:0.5rem 0.75rem;background:#fafafa;border-top:1px solid #eee;">
+            <form class="add-item-form" data-order-pk="{{ group.id }}" style="display:flex;gap:0.5rem;align-items:center;width:100%;">
+                <input type="hidden" name="order_pk" value="{{ group.id }}">
+                <input type="text" name="product_name" placeholder="商品名称" required style="flex:18;min-width:0;padding:0.4rem 0.5rem;border:1px solid #dfe6e9;border-radius:4px;font-size:0.85rem;">
+                <input type="text" name="specification" placeholder="规格" style="flex:14;min-width:0;padding:0.4rem 0.5rem;border:1px solid #dfe6e9;border-radius:4px;font-size:0.85rem;">
+                <input type="text" name="quantity" placeholder="数量" required style="flex:10;min-width:0;padding:0.4rem 0.5rem;border:1px solid #dfe6e9;border-radius:4px;font-size:0.85rem;">
+                <select name="unit" style="flex:8;min-width:0;padding:0.4rem 0.3rem;border:1px solid #dfe6e9;border-radius:4px;font-size:0.85rem;">
+                    <option value="支">支</option><option value="kg">kg</option><option value="y">y</option>
+                    <option value="桶">桶</option><option value="张">张</option><option value="件">件</option>
+                    <option value="箱">箱</option><option value="卷">卷</option><option value="块">块</option>
+                </select>
+                <input type="text" name="remark" placeholder="备注" style="flex:14;min-width:0;padding:0.4rem 0.5rem;border:1px solid #dfe6e9;border-radius:4px;font-size:0.85rem;">
+                <button type="submit" style="margin-left:auto;flex-shrink:0;background:#00b894;color:#fff;border:none;padding:0.4rem 1.2rem;border-radius:4px;cursor:pointer;font-size:0.85rem;font-weight:600;">➕ 添加</button>
+            </form>
+        </div>
+        {% endif %}
+        
+        <!-- 图片预览区域 -->
+        {% if group.images %}
+        <div class="image-section" id="images-{{ group.id }}">
+            <h4>📷 单据图片 ({{ group.images|length }}张)</h4>
+            <div class="image-upload-area" data-cols="1">
+                <div style="grid-column: 1 / -1; display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.25rem;">
+                    <span style="font-size:0.8rem;color:#888;">每行：</span>
+                    <button class="img-col-btn" onclick="setImgCols(this, 1)">1</button>
+                    <button class="img-col-btn" onclick="setImgCols(this, 2)">2</button>
+                    <button class="img-col-btn" onclick="setImgCols(this, 3)">3</button>
+                    <button class="img-col-btn" onclick="setImgCols(this, 4)">4</button>
+                    <button class="img-col-btn" onclick="setImgCols(this, 5)">5</button>
+                </div>
+                {% for image in group.images %}
+                <div class="image-item">
+                    <img src="/upload/{{ image.relative_path }}" alt="单据图片" onclick="showImgPreview('/upload/{{ image.relative_path }}')">
+                    <button class="delete-btn lock-hide" onclick="deleteImage({{ image.id }}, {{ group.id }})">×</button>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="icon">📦</div>
+        <p>暂无入库记录</p>
+    </div>
+    {% endfor %}
+    </div>
+
+    <!-- 备注弹框 -->
+    <div class="note-modal" id="noteModal">
+        <div class="note-dialog">
+            <h3 id="noteModalTitle">📝 订单备注</h3>
+            <p id="noteModalOrderInfo" class="order-info"></p>
+            <div style="margin-bottom:0.6rem;">
+                <label style="display:block; font-size:0.85rem; color:#636e72; margin-bottom:0.25rem; font-weight:600;">供应商</label>
+                <input type="text" id="noteCustomerInput" placeholder="供应商名称" style="width:100%; padding:0.5rem; border:1px solid #dfe6e9; border-radius:6px; font-size:0.9rem; box-sizing:border-box;">
+            </div>
+            <div>
+                <label style="display:block; font-size:0.85rem; color:#636e72; margin-bottom:0.25rem; font-weight:600;">订单备注</label>
+                <textarea id="noteTextarea" placeholder="请输入备注信息（可记录特殊情况、注意事项等）"></textarea>
+            </div>
+            <div class="actions">
+                <button type="button" class="btn" onclick="closeNoteModal()" style="background:#868e96;color:#fff;">取消</button>
+                <button type="button" class="btn" onclick="clearNote()" style="background:#fab1a0;color:#fff;">清空备注</button>
+                <button type="button" class="btn" onclick="saveNote()" style="background:#6c5ce7;color:#fff;">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 批量添加弹框 -->
+    <div id="batchModal" class="batch-modal">
+        <div class="batch-dialog">
+            <span class="modal-close" onclick="closeBatchModal()" style="float: right; cursor: pointer; font-size: 1.5rem; color: #999; line-height: 1;">&times;</span>
+            <h3>批量添加明细</h3>
+            <p class="hint">每行一个商品，格式：商品名称|规格|单位|数量|备注</p>
+            <div>
+                <input type="hidden" id="batchOrderPk" name="order_pk">
+                <textarea id="batchItemsText" placeholder="例如：&#10;PVC袋|1.2*1.8m|支|50|&#10;无纺布|2m|kg|30|"></textarea>
+                <div class="actions">
+                    <button type="button" class="btn" onclick="closeBatchModal()" style="background: #868e96;">取消</button>
+                    <button type="button" class="btn" onclick="submitBatchAdd()">批量添加</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Flash 消息 -->
+    {% with messages = get_flashed_messages() %}
+    {% if messages %}
+    <div style="position: fixed; top: 20px; right: 20px; z-index: 2000;">
+        {% for message in messages %}
+        <div style="background: #00b894; color: white; padding: 10px 20px; border-radius: 4px; margin-bottom: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.2);">
+            {{ message }}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% endwith %}
+</div>
+
+    <!-- 图片上传弹框 -->
+    <div id="imageModal" class="image-modal">
+        <div class="modal-dialog">
+            <span class="modal-close" onclick="closeImageModal()">&times;</span>
+            <div class="modal-title">📷 上传单据图片</div>
+            <div class="upload-options" id="uploadOptions">
+                <!-- 方式1：粘贴图片 -->
+                <div class="upload-box" id="pasteBox" onclick="activatePaste()">
+                    <div class="icon">📋</div>
+                    <div class="text">点击此处后按 Ctrl+V 粘贴图片</div>
+                    <div class="hint">支持从剪贴板粘贴截图</div>
+                </div>
+                <!-- 方式2：选择文件 -->
+                <div class="upload-box" onclick="document.getElementById('fileInput').click()">
+                    <div class="icon">📁</div>
+                    <div class="text">点击选择图片文件</div>
+                    <div class="hint">支持 jpg/png/gif/webp 格式</div>
+                    <input type="file" id="fileInput" class="file-input" accept="image/*" multiple onchange="handleFileSelect(this.files)">
+                </div>
+            </div>
+            <div id="modalImgPreview" class="modal-img-preview"></div>
+            <div style="text-align:center;">
+                <button type="button" id="rotateUploadBtn" onclick="rotateUploadImage();" style="display:none; padding:0.5rem 1rem; background:#f1f3f5; color:#333; border:1px solid #dfe6e9; border-radius:6px; cursor:pointer; font-size:0.85rem; font-weight:600;">🔄 旋转90°</button>
+            </div>
+            <div class="preview-actions" id="previewActions">
+                <button class="btn btn-cancel" onclick="clearPreview()">取消</button>
+                <button class="btn btn-confirm" onclick="confirmUpload()">确认上传</button>
+            </div>
+        </div>
+    </div>
+
+
+
+<script>
+var INBOUND_UNIT_LIST = {{ unit_list | default([]) | tojson }};
+
+function findInboundUnit(productName, spec) {
+    if (spec) {
+        for (var i = 0; i < INBOUND_UNIT_LIST.length; i++) {
+            var u = INBOUND_UNIT_LIST[i];
+            if (u.product_name === productName && u.spec_keyword && spec.indexOf(u.spec_keyword) !== -1) {
+                return u;
+            }
+        }
+    }
+    for (var i = 0; i < INBOUND_UNIT_LIST.length; i++) {
+        var u = INBOUND_UNIT_LIST[i];
+        if (u.product_name === productName && !u.spec_keyword) {
+            return u;
+        }
+    }
+    return null;
+}
+
+function getInboundUnitHint(productName, spec, quantity) {
+    var u = findInboundUnit(productName, spec);
+    if (!u || !u.is_usingyardforcounting || u.yards_per_piece <= 0) return '';
+    var qty = parseFloat(quantity);
+    if (isNaN(qty)) return '';
+    var ypp = u.yards_per_piece;
+    var pieces = Math.floor(qty / ypp);
+    var remainder = qty - (pieces * ypp);
+    if (remainder < 0.01) return pieces + '支';
+    return pieces + '支+' + Math.round(remainder * 100) / 100 + '码';
+}
+
+function checkInboundMismatch(remark, quantity, productName, spec) {
+    var u = findInboundUnit(productName, spec);
+    if (!u || !u.is_usingyardforcounting || u.yards_per_piece <= 0) return '';
+    if (!remark) return '';
+    var m = remark.match(/(\d+)支/);
+    if (!m) return '';
+    var pieces = parseInt(m[1]);
+    var ypp = u.yards_per_piece;
+
+    // * 形式 → 乘法语义（每支多少码），期望 = pieces × 每支码数（不再 + 那个码数）
+    // 例如 "3支*48.5y" → 期望 = 3 × 48.5 = 145.5
+    var perPieceYards = null;
+    var perPieceMatch = remark.match(/(\d+(?:\.\d+)?)\s*[yY码]\s*\*\s*(\d+)支/);
+    if (!perPieceMatch) {
+        perPieceMatch = remark.match(/(\d+)支\s*\*\s*(\d+(?:\.\d+)?)\s*[yY码]/);
+        if (perPieceMatch) perPieceYards = parseFloat(perPieceMatch[2]);
+    } else {
+        perPieceYards = parseFloat(perPieceMatch[1]);
+    }
+
+    // 散码：先把 * 形式整段抠掉，剩下 [+Yy / 裸 Yy] 才算散码
+    var remarkWithoutMul = remark
+        .replace(/(\d+(?:\.\d+)?)\s*[yY码]\s*\*\s*(\d+)支/g, '')
+        .replace(/(\d+)支\s*\*\s*(\d+(?:\.\d+)?)\s*[yY码]/g, '');
+    var loose = 0;
+    var yardRe = /(\d+(?:\.\d+)?)\s*[yY码]/g;
+    var ym;
+    while ((ym = yardRe.exec(remarkWithoutMul)) !== null) {
+        loose += parseFloat(ym[1]);
+    }
+
+    var yardsPerPiece = perPieceYards != null ? perPieceYards : ypp;
+    var expected = pieces * yardsPerPiece + loose;
+    var actual = parseFloat(quantity);
+    if (isNaN(actual)) return '';
+    if (Math.abs(expected - actual) <= 0.01) return '';
+    return pieces === 1 ? 'info' : 'warn';
+}
+
+function mismatchIcon(level) {
+    if (level === 'warn') return '❌ ';
+    if (level === 'info') return '💡 ';
+    return '';
+}
+
+function applyInboundMismatch(tr, level) {
+    tr.classList.remove('row-warn', 'row-info');
+    if (level) tr.classList.add(level === 'warn' ? 'row-warn' : 'row-info');
+}
+
+// 批量添加弹框
+function openBatchModal(orderPk) {
+    document.getElementById('batchOrderPk').value = orderPk;
+    document.getElementById('batchModal').classList.add('show');
+}
+
+function closeBatchModal() {
+    document.getElementById('batchModal').classList.remove('show');
+}
+
+// 图片上传弹框
+let currentImageOrderPk = null;
+let pasteActive = false;
+let pendingFile = null;
+let uploadImageRotation = 0;
+
+function openImageModal(orderPk) {
+    currentImageOrderPk = orderPk;
+    pasteActive = false;
+    pendingFile = null;
+    uploadImageRotation = 0;
+    document.getElementById('imageModal').classList.add('show');
+    document.getElementById('pasteBox').classList.remove('active');
+    document.getElementById('uploadOptions').style.display = 'flex';
+    clearPreview();
+}
+
+function closeImageModal() {
+    currentImageOrderPk = null;
+    pasteActive = false;
+    pendingFile = null;
+    uploadImageRotation = 0;
+    document.getElementById('imageModal').classList.remove('show');
+    document.getElementById('pasteBox').classList.remove('active');
+    clearPreview();
+}
+
+function activatePaste() {
+    pasteActive = true;
+    document.getElementById('pasteBox').classList.add('active');
+    document.getElementById('pasteBox').querySelector('.text').textContent = '请按 Ctrl+V 粘贴图片...';
+}
+
+// 处理粘贴事件
+document.addEventListener('paste', async (e) => {
+    if (!pasteActive || !currentImageOrderPk) return;
+    
+    const items = e.clipboardData.items;
+    for (let item of items) {
+        if (item.type.startsWith('image/')) {
+            const file = item.getAsFile();
+            showPreview(file);
+            break;
+        }
+    }
+});
+
+// 处理文件选择
+function handleFileSelect(files) {
+    if (!currentImageOrderPk || !files || files.length === 0) return;
+    // 只处理第一个文件
+    showPreview(files[0]);
+}
+
+// 显示预览
+function showPreview(file) {
+    pendingFile = file;
+    uploadImageRotation = 0;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const preview = document.getElementById('modalImgPreview');
+        preview.innerHTML = '<img src="' + e.target.result + '">';
+        preview.style.display = 'block';
+        document.getElementById('rotateUploadBtn').style.display = 'inline-block';
+        document.getElementById('previewActions').style.display = 'flex';
+        // 保留上传按钮，不隐藏
+    };
+    reader.readAsDataURL(file);
+}
+
+function clearPreview() {
+    pendingFile = null;
+    uploadImageRotation = 0;
+    const preview = document.getElementById('modalImgPreview');
+    preview.innerHTML = '';
+    preview.style.display = 'none';
+    document.getElementById('rotateUploadBtn').style.display = 'none';
+    document.getElementById('previewActions').style.display = 'none';
+    document.getElementById('fileInput').value = '';
+}
+
+function rotateUploadImage() {
+    uploadImageRotation = (uploadImageRotation + 90) % 360;
+    const img = document.querySelector('#modalImgPreview img');
+    if (img) {
+        img.style.transform = 'rotate(' + uploadImageRotation + 'deg)';
+    }
+}
+
+// 使用 Canvas 旋转图片并生成新文件
+function getRotatedImageFile(file, rotation) {
+    return new Promise(function(resolve, reject) {
+        if (rotation === 0) {
+            resolve(file);
+            return;
+        }
+        const img = new Image();
+        const objectUrl = URL.createObjectURL(file);
+        img.onload = function() {
+            URL.revokeObjectURL(objectUrl);
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+
+            // 计算旋转后的尺寸
+            const radians = rotation * Math.PI / 180;
+            const sin = Math.abs(Math.sin(radians));
+            const cos = Math.abs(Math.cos(radians));
+            const newWidth = img.width * cos + img.height * sin;
+            const newHeight = img.width * sin + img.height * cos;
+
+            canvas.width = newWidth;
+            canvas.height = newHeight;
+
+            // 旋转并绘制
+            ctx.translate(newWidth / 2, newHeight / 2);
+            ctx.rotate(radians);
+            ctx.drawImage(img, -img.width / 2, -img.height / 2);
+
+            // 转换为 Blob
+            canvas.toBlob(function(blob) {
+                const rotatedFile = new File([blob], file.name, { type: file.type });
+                resolve(rotatedFile);
+            }, file.type, 0.92);
+        };
+        img.onerror = function() {
+            URL.revokeObjectURL(objectUrl);
+            reject(new Error('图片加载失败'));
+        };
+        img.src = objectUrl;
+    });
+}
+
+// 确认上传
+async function confirmUpload() {
+    if (!pendingFile || !currentImageOrderPk) return;
+
+    try {
+        // 如果有旋转，先处理旋转
+        const fileToUpload = await getRotatedImageFile(pendingFile, uploadImageRotation);
+
+        const formData = new FormData();
+        formData.append('image', fileToUpload);
+
+        const res = await fetch(`/api/v1/inbound-orders/${currentImageOrderPk}/images`, {
+            method: 'POST',
+            body: formData
+        });
+        const data = await res.json();
+        if (data.success) {
+            closeImageModal();
+            // 追加图片到 DOM，不刷新
+            var dateGroup = document.querySelector('.date-group[data-order-id="' + currentImageOrderPk + '"]');
+            if (!dateGroup) { location.reload(); return; }
+            var imageSection = dateGroup.querySelector('.image-section');
+            var imageArea = imageSection ? imageSection.querySelector('.image-upload-area') : null;
+            if (!imageSection) {
+                // 从未有过图片区域，先创建
+                imageSection = document.createElement('div');
+                imageSection.className = 'image-section';
+                imageSection.id = 'images-' + currentImageOrderPk;
+                var savedCols = localStorage.getItem('inboundImgCols') || '5';
+                imageSection.innerHTML =
+                    '<h4>📷 单据图片 (<span class="img-count">0</span>张)</h4>' +
+                    '<div class="image-upload-area columns-' + savedCols + '" data-cols="' + savedCols + '"></div>';
+                dateGroup.appendChild(imageSection);
+                imageArea = imageSection.querySelector('.image-upload-area');
+            }
+            if (!imageArea) { location.reload(); return; }
+            var imgItem = document.createElement('div');
+            imgItem.className = 'image-item';
+            imgItem.innerHTML =
+                '<img src="/upload/' + data.image + '" alt="单据图片" onclick="showImgPreview(\'/upload/' + data.image + '\')">' +
+                '<button class="delete-btn lock-hide" onclick="deleteImage(' + data.image_id + ', ' + currentImageOrderPk + ')">×</button>';
+            imageArea.appendChild(imgItem);
+            // 更新计数
+            var countEl = imageSection.querySelector('.img-count');
+            if (countEl) {
+                var count = imageArea.querySelectorAll('.image-item').length;
+                countEl.textContent = count;
+            }
+        } else {
+            alert('上传失败: ' + data.error);
+        }
+    } catch (err) {
+        console.error('confirmUpload error:', err);
+        alert('上传出错: ' + err.message);
+    }
+}
+
+// 删除图片
+function deleteImage(imageId, orderPk) {
+    if (!confirm('确定删除这张图片吗？')) return;
+
+    fetch('/api/v1/inbound-orders/images/' + imageId, {
+        method: 'DELETE'
+    })
+    .then(function(res) {
+        if (!res.ok) throw new Error('网络请求失败: ' + res.status);
+        return res.json();
+    })
+    .then(function(data) {
+        if (data.success) {
+            // 从 DOM 中移除图片元素
+            var dateGroup = document.querySelector('.date-group[data-order-id="' + orderPk + '"]');
+            if (!dateGroup) { location.reload(); return; }
+            var imageSection = dateGroup.querySelector('.image-section');
+            var imageArea = imageSection ? imageSection.querySelector('.image-upload-area') : null;
+            if (imageArea) {
+                // 找到包含此 imageId 的删除按钮，移除其父元素
+                var delBtn = imageArea.querySelector('.delete-btn[onclick*="deleteImage(' + imageId + '"]');
+                if (delBtn) {
+                    delBtn.closest('.image-item').remove();
+                }
+                // 更新计数
+                var count = imageArea.querySelectorAll('.image-item').length;
+                var countEl = imageSection.querySelector('.img-count');
+                if (countEl) countEl.textContent = count;
+                // 如果没有图片了，移除整个图片区域
+                if (count === 0 && imageSection) {
+                    imageSection.remove();
+                }
+            }
+        } else {
+            alert('删除失败: ' + (data.error || '未知错误'));
+        }
+    })
+    .catch(function(err) {
+        console.error('deleteImage error:', err);
+        alert('删除失败: ' + err.message);
+    });
+}
+
+// 图片列数切换
+window.setImgCols = function(btn, cols) {
+    var area = btn.closest('.image-upload-area');
+    if (!area) return;
+    area.classList.remove('columns-1','columns-2','columns-3','columns-4','columns-5');
+    area.classList.add('columns-' + cols);
+    area.dataset.cols = cols;
+    localStorage.setItem('inboundImgCols', cols);
+    area.querySelectorAll('.img-col-btn').forEach(function(b) { b.classList.remove('active'); });
+    btn.classList.add('active');
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    var savedCols = localStorage.getItem('inboundImgCols') || '1';
+    document.querySelectorAll('.inbound-page .image-upload-area').forEach(function(area) {
+        area.classList.add('columns-' + savedCols);
+        area.parentElement.querySelectorAll('.img-col-btn').forEach(function(b) {
+            b.classList.toggle('active', parseInt(b.textContent.trim()) === parseInt(savedCols));
+        });
+    });
+});
+
+// === 订单备注功能 ===
+var currentNoteOrderPk = null;
+
+function openNoteModal(orderPk, orderDate, orderCustomer, currentNote) {
+    currentNoteOrderPk = orderPk;
+    document.getElementById('noteModal').classList.add('show');
+    document.getElementById('noteTextarea').value = currentNote || '';
+    document.getElementById('noteCustomerInput').value = orderCustomer || '';
+    document.getElementById('noteModalOrderInfo').textContent = '📦 ' + (orderDate || '') + ' ' + (orderCustomer || '');
+    document.getElementById('noteModalTitle').textContent = currentNote ? '✏️ 修改订单' : '📝 订单详情';
+    setTimeout(function() { document.getElementById('noteCustomerInput').focus(); }, 50);
+}
+
+function closeNoteModal() {
+    document.getElementById('noteModal').classList.remove('show');
+    currentNoteOrderPk = null;
+    document.getElementById('noteTextarea').value = '';
+    document.getElementById('noteCustomerInput').value = '';
+}
+
+function clearNote() {
+    document.getElementById('noteTextarea').value = '';
+}
+
+function saveNote() {
+    if (!currentNoteOrderPk) return;
+    var noteText = document.getElementById('noteTextarea').value.trim();
+    var customerText = document.getElementById('noteCustomerInput').value.trim();
+
+    var payload = {order_note: noteText};
+    if (customerText) payload.supplier = customerText;
+
+    fetch('/api/v1/inbound-orders/' + currentNoteOrderPk, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+    })
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+        if (data.success) {
+            updateNoteRow(currentNoteOrderPk, noteText);
+            updateNoteBtn(currentNoteOrderPk, noteText);
+            if (data.supplier) {
+                updateCustomerRow(currentNoteOrderPk, data.supplier);
+            }
+            closeNoteModal();
+        } else {
+            alert('保存失败：' + (data.error || '未知错误'));
+        }
+    })
+    .catch(function(err) { alert('请求失败：' + err); });
+}
+
+function updateCustomerRow(orderPk, newSupplier) {
+    var dateGroup = document.querySelector('.date-group[data-order-id="' + orderPk + '"]');
+    if (!dateGroup) { location.reload(); return; }
+    var supplierEl = dateGroup.querySelector('.group-supplier');
+    if (supplierEl) {
+        supplierEl.textContent = newSupplier;
+    }
+}
+
+function updateNoteRow(orderPk, noteText) {
+    var dateGroup = document.querySelector('.date-group[data-order-id="' + orderPk + '"]');
+    if (!dateGroup) { location.reload(); return; }
+    var groupHeader = dateGroup.querySelector('.group-header');
+    var noteRow = dateGroup.querySelector('.order-note-row');
+    if (noteText) {
+        if (noteRow) {
+            noteRow.querySelector('.note-text').textContent = noteText;
+        } else {
+            var newRow = document.createElement('div');
+            newRow.className = 'order-note-row';
+            newRow.id = 'orderNote' + orderPk;
+            newRow.style.cssText = 'background:linear-gradient(90deg, #fff5e1 0%, #ffeaa7 100%); border-left:4px solid #fdcb6e; padding:0.5rem 0.75rem; margin:0.25rem 0; border-radius:6px; font-size:0.9rem; color:#2d3436; display:flex; align-items:flex-start; gap:0.5rem;';
+            newRow.innerHTML = '<span style="font-weight:600; flex-shrink:0;">📝 备注：</span><span class="note-text" style="flex:1; white-space:pre-wrap; word-break:break-word;"></span>';
+            newRow.querySelector('.note-text').textContent = noteText;
+            var table = dateGroup.querySelector('table.record-table');
+            if (table) {
+                groupHeader.parentNode.insertBefore(newRow, table);
+            } else {
+                groupHeader.parentNode.appendChild(newRow);
+            }
+        }
+    } else {
+        if (noteRow) noteRow.remove();
+    }
+}
+
+function updateNoteBtn(orderPk, noteText) {
+    var btn = document.querySelector('.note-btn[data-pk="' + orderPk + '"]');
+    if (!btn) return;
+    btn.setAttribute('data-note', noteText);
+    if (noteText) {
+        btn.style.boxShadow = '0 0 0 2px #6c5ce7';
+        btn.title = '修改备注';
+    } else {
+        btn.style.boxShadow = '';
+        btn.title = '添加备注';
+    }
+}
+
+// 备注按钮事件绑定
+document.querySelectorAll('.note-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        var pk = this.getAttribute('data-pk');
+        var note = this.getAttribute('data-note') || '';
+        var orderInfo = this.closest('.group-header');
+        var date = orderInfo ? orderInfo.querySelector('.group-date').textContent.trim() : '';
+        var supplier = orderInfo ? orderInfo.querySelector('.group-supplier').textContent.trim() : '';
+        openNoteModal(pk, date, supplier, note);
+    });
+});
+
+document.getElementById('noteModal').addEventListener('click', function(e) {
+    if (e.target === this) closeNoteModal();
+});
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && document.getElementById('noteModal').classList.contains('show')) {
+        closeNoteModal();
+    }
+});
+
+// 点击遮罩关闭弹框
+document.getElementById('batchModal').addEventListener('click', function(e) {
+    if (e.target === this) closeBatchModal();
+});
+
+document.getElementById('imageModal').addEventListener('click', function(e) {
+    if (e.target === this) closeImageModal();
+});
+
+// 3秒后自动隐藏 flash 消息
+setTimeout(() => {
+    document.querySelectorAll('.flash-messages .flash, [style*="position: fixed"]').forEach(function(el) {
+        el.style.opacity = '0';
+        el.style.transition = 'opacity 0.3s';
+        setTimeout(function() { el.remove(); }, 300);
+    });
+}, 3000);
+
+    // ── 行内编辑（入库明细）──────────────────────────────
+    // ── 上移 / 下移 ──────────────────────────────
+    document.querySelectorAll('.move-up-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var recordId = this.getAttribute('data-id');
+            var tr = this.closest('tr');
+            fetch('/api/v1/inbound-orders/records/' + recordId + '/move', {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({direction: 'up'})
+            })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.success) {
+                        var prev = tr.previousElementSibling;
+                        if (prev) tr.parentNode.insertBefore(tr, prev);
+                    } else {
+                        alert(data.error || '操作失败');
+                    }
+                });
+        });
+    });
+    document.querySelectorAll('.move-down-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var recordId = this.getAttribute('data-id');
+            var tr = this.closest('tr');
+            fetch('/api/v1/inbound-orders/records/' + recordId + '/move', {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({direction: 'down'})
+            })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.success) {
+                        var nxt = tr.nextElementSibling;
+                        if (nxt) tr.parentNode.insertBefore(nxt, tr);
+                    } else {
+                        alert(data.error || '操作失败');
+                    }
+                });
+        });
+    });
+
+    document.querySelectorAll('.edit-inbound-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var recordId = this.getAttribute('data-id');
+            var tr = this.closest('tr');
+            var tds = tr.querySelectorAll('td');
+
+            // 如果已经是编辑状态（按钮文本为保存），执行保存
+            if (this.textContent.trim() === '💾') {
+                var inputs = tr.querySelectorAll('.edit-input');
+                var data = {
+                    product_name: inputs[0].value,
+                    specification: inputs[1].value,
+                    quantity: inputs[2].value,
+                    unit: inputs[3].value,
+                    remark: inputs[4].value
+                };
+                fetch('/api/v1/inbound-orders/records/' + recordId, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                })
+                .then(function(res) { return res.json(); })
+                .then(function(result) {
+                    if (result.success) {
+                        var r = result.record;
+                        var newMismatch = checkInboundMismatch(r.remark || '', r.quantity, r.product_name, r.specification || '');
+                        var rowNum = tds[0].textContent.replace('❌ ', '').replace('💡 ', '');
+                        tds[0].textContent = mismatchIcon(newMismatch) + r.product_name;
+                        tds[1].textContent = r.specification;
+                        tds[2].innerHTML = '<span class="qty-badge">' + r.quantity + '</span>';
+                        tds[3].innerHTML = '<span class="unit-badge">' + r.unit + '</span>';
+                        tds[4].textContent = r.remark || '-';
+                        tds[4].className = 'remark-cell' + (r.remark ? ' has-content' : '');
+                        tds[5].textContent = getInboundUnitHint(r.product_name, r.specification || '', r.quantity) || '—';
+                        applyInboundMismatch(tr, newMismatch);
+                        // 恢复按钮
+                        btn.textContent = '✏️';
+                        btn.classList.remove('btn-success');
+                        btn.classList.add('btn-primary');
+                    } else {
+                        alert('保存失败：' + (result.error || ''));
+                    }
+                }).catch(function(err) {
+                    console.error('保存编辑错误:', err);
+                    alert('请求失败：' + err.message);
+                });
+                return;
+            }
+
+            // 进入编辑状态：把 td 内容替换为 input
+            var vals = [
+                tds[0].textContent.replace('❌ ', '').replace('💡 ', '').trim(),  // product_name
+                tds[1].textContent.trim(),       // specification
+                tds[2].textContent.trim(),       // quantity
+                tds[3].textContent.trim(),       // unit
+                tds[4].textContent.trim() === '-' ? '' : tds[4].textContent.trim()  // remark
+            ];
+            // 商品名称
+            tds[0].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:80px;" value="' + vals[0].replace(/"/g, '&quot;') + '">';
+            // 规格
+            tds[1].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + vals[1].replace(/"/g, '&quot;') + '">';
+            // 数量
+            tds[2].innerHTML = '<input type="number" class="form-control form-control-sm edit-input" style="width:100px;" value="' + vals[2] + '">';
+            // 单位（下拉框）
+            var unitOpts = ['支','kg','y','桶','张','件','箱','卷','块'];
+            var unitHtml = '<select class="form-control form-control-sm edit-input" style="width:70px;">';
+            unitOpts.forEach(function(u) {
+                unitHtml += '<option value="' + u + '"' + (u === vals[3] ? ' selected' : '') + '>' + u + '</option>';
+            });
+            unitHtml += '</select>';
+            tds[3].innerHTML = unitHtml;
+            // 备注
+            tds[4].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + vals[4].replace(/"/g, '&quot;') + '">';
+            // 按钮变为保存
+            btn.textContent = '💾';
+            btn.classList.remove('btn-primary');
+            btn.classList.add('btn-success');
+        });
+    });
+
+    // 切换入库订单锁定状态
+    function toggleInboundLock(orderId, lock) {
+        fetch('/api/v1/inbound-orders/' + orderId, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({is_locked: lock})
+        })
+            .then(function(r) {
+                if (!r.ok) throw new Error('请求失败');
+                return r.json();
+            })
+            .then(function(data) {
+                if (!data.success) { alert('操作失败'); return; }
+                var dg = document.querySelector('.date-group[data-order-id="' + orderId + '"]');
+                if (dg) {
+                    dg.setAttribute('data-locked', data.is_locked ? '1' : '0');
+                }
+            })
+            .catch(function(err) {
+                alert('操作失败：' + err.message);
+            });
+    }
+
+    // ── 创建入库单 (RESTful) ──
+    document.getElementById('createInboundForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const formData = new FormData(this);
+        const data = Object.fromEntries(formData.entries());
+        try {
+            const res = await fetch('/api/v1/inbound-orders', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            });
+            const result = await res.json();
+            if (result.success) {
+                location.reload();
+            } else {
+                alert('创建失败: ' + (result.error || '未知错误'));
+            }
+        } catch (err) {
+            alert('请求失败: ' + err.message);
+        }
+    });
+
+    // ── 删除入库订单 ──
+    function deleteInboundOrder(orderId) {
+        if (!confirm('确定要删除这个入库单及所有明细吗？')) return;
+        fetch('/api/v1/inbound-orders/' + orderId, {method: 'DELETE'})
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.success) {
+                    var section = document.querySelector('.date-group[data-order-id="' + orderId + '"]');
+                    if (section) section.remove();
+                } else {
+                    alert('删除失败: ' + (data.error || '未知错误'));
+                }
+            })
+            .catch(function(err) {
+                alert('请求失败: ' + err.message);
+            });
+    }
+
+    // ── 删除明细 ──
+    function deleteInboundRecord(recordId, btn) {
+        if (!confirm('确定要删除这个明细吗？')) return;
+        fetch('/api/v1/inbound-orders/records/' + recordId, {method: 'DELETE'})
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.success) {
+                    var tr = btn.closest('tr');
+                    var dateGroup = tr.closest('.date-group');
+                    if (tr) tr.remove();
+                    if (dateGroup) recalcInboundSummary(dateGroup);
+                } else {
+                    alert('删除失败: ' + (data.error || '未知错误'));
+                }
+            })
+            .catch(function(err) {
+                alert('请求失败: ' + err.message);
+            });
+    }
+
+    // ── 添加明细 (拦截所有 .add-item-form) ──
+    document.querySelectorAll('.add-item-form').forEach(function(form) {
+        form.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            var orderPk = this.getAttribute('data-order-pk');
+            var formData = new FormData(this);
+            var data = Object.fromEntries(formData.entries());
+            delete data.order_pk;
+            try {
+                const res = await fetch('/api/v1/inbound-orders/' + orderPk + '/records', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
+                const result = await res.json();
+                if (result.success) {
+                    // 使用服务端返回的完整记录构建行
+                    var dateGroup = document.querySelector('.date-group[data-order-id="' + orderPk + '"]');
+                    var tbody = dateGroup ? dateGroup.querySelector('.record-table tbody') : null;
+                    if (!tbody) { location.reload(); return; }
+                    var newTr = buildInboundRecordRow(result.record, orderPk);
+                    tbody.appendChild(newTr);
+                    recalcInboundSummary(dateGroup);
+                    this.reset();
+                    // 高亮新行
+                    newTr.style.backgroundColor = '#d4f5e9';
+                    setTimeout(function() { newTr.style.backgroundColor = ''; }, 1500);
+                } else {
+                    alert('添加失败: ' + (result.error || '未知错误'));
+                }
+            } catch (err) {
+                alert('请求失败: ' + err.message);
+            }
+        });
+    });
+
+    // ── 批量添加 ──
+    function submitBatchAdd() {
+        var orderPk = document.getElementById('batchOrderPk').value;
+        var text = document.getElementById('batchItemsText').value.trim();
+        if (!text) { alert('请输入商品数据'); return; }
+
+        var lines = text.split('\n');
+        var records = [];
+        for (var i = 0; i < lines.length; i++) {
+            var line = lines[i].trim();
+            if (!line) continue;
+            var parts;
+            if (line.indexOf('|') !== -1) {
+                parts = line.split('|');
+            } else {
+                parts = line.split(/\s+/);
+            }
+            records.push({
+                product_name: parts[0] ? parts[0].trim() : '',
+                specification: parts[1] ? parts[1].trim() : '',
+                unit: parts[2] ? parts[2].trim() : '支',
+                quantity: parts[3] ? parts[3].trim() : '',
+                remark: parts[4] ? parts[4].trim() : ''
+            });
+        }
+
+        if (records.length === 0) { alert('未解析到有效数据'); return; }
+
+        fetch('/api/v1/inbound-orders/' + orderPk + '/records/batch', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({records: records})
+        })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.success) {
+                    closeBatchModal();
+                    // 使用服务端返回的记录（含ID）构建行并插入
+                    var dateGroup = document.querySelector('.date-group[data-order-id="' + orderPk + '"]');
+                    if (!dateGroup) { location.reload(); return; }
+                    var tbody = dateGroup.querySelector('.record-table tbody');
+                    var firstNewTr = null;
+                    data.records.forEach(function(rec) {
+                        var tr = buildInboundRecordRow(rec, orderPk);
+                        tbody.appendChild(tr);
+                        if (!firstNewTr) firstNewTr = tr;
+                    });
+                    recalcInboundSummary(dateGroup);
+                    document.getElementById('batchItemsText').value = '';
+                    if (firstNewTr) firstNewTr.scrollIntoView({behavior: 'smooth', block: 'center'});
+                } else {
+                    alert('批量添加失败: ' + (data.error || '未知错误'));
+                }
+            })
+            .catch(function(err) {
+                alert('请求失败: ' + err.message);
+            });
+    }
+
+    // ── 构建入库明细行 ──
+    function buildInboundRecordRow(rec, orderPk) {
+        var tr = document.createElement('tr');
+        tr.setAttribute('data-record-id', rec.id);
+        var unitHint = getInboundUnitHint(rec.product_name, rec.specification || '', rec.quantity) || '—';
+        var mismatch = checkInboundMismatch(rec.remark || '', rec.quantity, rec.product_name, rec.specification || '');
+        if (mismatch) tr.classList.add(mismatch === 'warn' ? 'row-warn' : 'row-info');
+        var escapedName = rec.product_name.replace(/"/g, '&quot;');
+        tr.innerHTML =
+            '<td class="product-name" style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapedName + '">' + mismatchIcon(mismatch) + rec.product_name + '</td>' +
+            '<td class="spec">' + (rec.specification || '') + '</td>' +
+            '<td><span class="qty-badge">' + rec.quantity + '</span></td>' +
+            '<td><span class="unit-badge">' + rec.unit + '</span></td>' +
+            '<td class="remark-cell' + (rec.remark ? ' has-content' : '') + '">' + (rec.remark || '-') + '</td>' +
+            '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">' + unitHint + '</td>' +
+            '<td style="white-space:nowrap;">' +
+                '<button type="button" class="btn btn-sm move-up-btn lock-hide" data-id="' + rec.id + '" title="上移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.2rem 0.4rem;font-size:0.75rem;">▲</button> ' +
+                '<button type="button" class="btn btn-sm move-down-btn lock-hide" data-id="' + rec.id + '" title="下移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.2rem 0.4rem;font-size:0.75rem;">▼</button> ' +
+                '<button type="button" class="btn btn-primary btn-sm edit-inbound-btn lock-hide" data-id="' + rec.id + '">✏️</button> ' +
+                '<button type="button" class="btn btn-danger btn-sm lock-hide" onclick="deleteInboundRecord(' + rec.id + ', this)">删除</button>' +
+            '</td>';
+        // 绑定事件
+        bindInboundRowEvents(tr);
+        return tr;
+    }
+
+    // ── 绑定入库行事件（移动、编辑）──
+    function bindInboundRowEvents(tr) {
+        // 上移
+        tr.querySelector('.move-up-btn').addEventListener('click', function() {
+            var recordId = this.getAttribute('data-id');
+            fetch('/api/v1/inbound-orders/records/' + recordId + '/move', {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({direction: 'up'})
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.success) {
+                    var prev = tr.previousElementSibling;
+                    if (prev) tr.parentNode.insertBefore(tr, prev);
+                } else { alert(data.error || '操作失败'); }
+            });
+        });
+        // 下移
+        tr.querySelector('.move-down-btn').addEventListener('click', function() {
+            var recordId = this.getAttribute('data-id');
+            fetch('/api/v1/inbound-orders/records/' + recordId + '/move', {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({direction: 'down'})
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.success) {
+                    var nxt = tr.nextElementSibling;
+                    if (nxt) tr.parentNode.insertBefore(nxt, tr);
+                } else { alert(data.error || '操作失败'); }
+            });
+        });
+        // 编辑
+        tr.querySelector('.edit-inbound-btn').addEventListener('click', function() {
+            var btn = this;
+            var tds = tr.querySelectorAll('td');
+            if (btn.textContent.trim() === '💾') {
+                // 保存
+                var inputs = tr.querySelectorAll('.edit-input');
+                var d = {
+                    product_name: inputs[0].value,
+                    specification: inputs[1].value,
+                    quantity: inputs[2].value,
+                    unit: inputs[3].value,
+                    remark: inputs[4].value
+                };
+                fetch('/api/v1/inbound-orders/records/' + btn.getAttribute('data-id'), {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(d)
+                })
+                .then(function(res) { return res.json(); })
+                .then(function(result) {
+                    if (result.success) {
+                        var r = result.record;
+                        var newMismatch = checkInboundMismatch(r.remark || '', r.quantity, r.product_name, r.specification || '');
+                        tds[0].textContent = mismatchIcon(newMismatch) + r.product_name;
+                        tds[0].title = r.product_name;
+                        tds[1].textContent = r.specification || '';
+                        tds[2].innerHTML = '<span class="qty-badge">' + r.quantity + '</span>';
+                        tds[3].innerHTML = '<span class="unit-badge">' + r.unit + '</span>';
+                        tds[4].textContent = r.remark || '-';
+                        tds[4].className = 'remark-cell' + (r.remark ? ' has-content' : '');
+                        tds[5].textContent = getInboundUnitHint(r.product_name, r.specification || '', r.quantity) || '—';
+                        applyInboundMismatch(tr, newMismatch);
+                        tr.setAttribute('data-record-id', r.id);
+                        btn.textContent = '✏️';
+                        btn.classList.remove('btn-success');
+                        btn.classList.add('btn-primary');
+                        recalcInboundSummary(tr.closest('.date-group'));
+                    } else { alert('保存失败：' + (result.error || '')); }
+                });
+            } else {
+                // 进入编辑模式
+                var vals = [
+                    tds[0].textContent.replace('❌ ', '').replace('💡 ', '').trim(),
+                    tds[1].textContent.trim(),
+                    tds[2].textContent.trim(),
+                    tds[3].textContent.trim(),
+                    tds[4].textContent.trim() === '-' ? '' : tds[4].textContent.trim()
+                ];
+                tds[0].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:80px;" value="' + vals[0].replace(/"/g, '&quot;') + '">';
+                tds[1].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + vals[1].replace(/"/g, '&quot;') + '">';
+                tds[2].innerHTML = '<input type="number" class="form-control form-control-sm edit-input" style="width:100px;" value="' + vals[2] + '">';
+                var unitOpts = ['支','kg','y','桶','张','件','箱','卷','块'];
+                var unitHtml = '<select class="form-control form-control-sm edit-input" style="width:70px;">';
+                unitOpts.forEach(function(u) { unitHtml += '<option value="' + u + '"' + (u === vals[3] ? ' selected' : '') + '>' + u + '</option>'; });
+                unitHtml += '</select>';
+                tds[3].innerHTML = unitHtml;
+                tds[4].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + vals[4].replace(/"/g, '&quot;') + '">';
+                btn.textContent = '💾';
+                btn.classList.remove('btn-primary');
+                btn.classList.add('btn-success');
+            }
+        });
+    }
+
+    // ── 重新计算入库备注汇总 ──
+    function recalcInboundSummary(dateGroup) {
+        var tbody = dateGroup.querySelector('.record-table tbody');
+        var remarkCells = tbody.querySelectorAll('tr:not(.quick-add-row) .remark-cell');
+        var totalPieces = 0;
+        var totalLoosePieces = 0;
+        remarkCells.forEach(function(cell) {
+            var remark = cell.textContent.trim();
+            if (!remark || remark === '-') return;
+            var m = remark.match(/(\d+)支/);
+            if (m) totalPieces += parseInt(m[1]);
+            var looseMatches = remark.match(/\d+(?:\.\d+)?[yY码]/g);
+            if (looseMatches) totalLoosePieces += looseMatches.length;
+        });
+
+        // 移除旧汇总行（包括服务端渲染的 and JS 创建的）
+        var oldSummary = tbody.querySelector('.summary-row');
+        if (oldSummary) oldSummary.remove();
+
+        if (totalPieces === 0 && totalLoosePieces === 0) return;
+
+        var summaryText = totalPieces + '支';
+        if (totalLoosePieces > 0) summaryText += '+' + totalLoosePieces + '支散码';
+
+        var summaryRow = document.createElement('tr');
+        summaryRow.className = 'summary-row';
+        summaryRow.style.cssText = 'background:#f0fdf4;font-weight:600;border-top:2px solid #00b894;';
+        summaryRow.innerHTML =
+            '<td colspan="5" style="text-align:right;padding:0.6rem 0.75rem;color:#00b894;font-size:0.9rem;">📊 备注汇总：</td>' +
+            '<td style="padding:0.6rem 0.75rem;color:#2d3436;font-size:0.9rem;">' + summaryText + '</td>' +
+            '<td style="padding:0.6rem 0.75rem;"></td>' +
+            '<td style="padding:0.6rem 0.75rem;"></td>';
+        tbody.appendChild(summaryRow);
+    }
+</script>
+
+{% endblock %}

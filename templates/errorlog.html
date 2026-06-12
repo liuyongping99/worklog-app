@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+.error-page .card-title { color: #e74c3c; border-bottom-color: #fde8e8; }
+.error-page .error-badge { display:inline-flex; align-items:center; gap:0.3rem; background:#fff0f0; color:#e74c3c; padding:0.25rem 0.75rem; border-radius:20px; font-size:0.8rem; font-weight:700; margin: 0.35rem 0; }
+.error-page .error-badge::before { content:''; display:inline-block; width:8px; height:8px; background:#e74c3c; border-radius:50%; }
+.error-page .item.has-solution { border-left: 4px solid #26de81; }
+.error-page .item.no-solution { border-left: 4px solid #ffc107; }
+.error-page .solution-block { background:#f0fff4; border:1px solid #c8f0d8; border-radius:10px; padding:0.75rem 1rem; margin-top:0.5rem; font-size:0.9rem; color:#2d6a4f; }
+.error-page .solution-block .sol-label { font-weight:700; color:#26de81; margin-right:0.35rem; }
+.error-page .item-meta { margin-top:0.35rem; }
+.error-page .empty-state { text-align:center; padding:3rem 1rem; color:#bbb; }
+.error-page .empty-state .icon { font-size:3.5rem; margin-bottom:1rem; }
+</style>
+
+<!-- 添加错误经验表单 -->
+<div class="card error-page">
+    <h2 class="card-title">⚠️ 记录错误经验</h2>
+    <form action="/errorlog/add" method="POST">
+        <div class="form-group">
+            <label for="title">错误描述</label>
+            <input type="text" id="title" name="title" placeholder="描述遇到的错误，例如：数据库连接超时" required>
+        </div>
+        <div class="form-group">
+            <label for="error_type">错误类型 <span style="font-weight:400; color:#999;">（可选）</span></label>
+            <input type="text" id="error_type" name="error_type" placeholder="例如：NullPointerException、404、权限拒绝" style="font-size:0.95rem;">
+        </div>
+        <div class="form-group">
+            <label for="solution">解决方法 <span style="font-weight:400; color:#999;">（可选）</span></label>
+            <textarea id="solution" name="solution" rows="3" placeholder="记录解决方法和注意事项，避免下次再踩坑..."></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary">💾 保存经验</button>
+    </form>
+</div>
+
+<!-- 错误经验列表 -->
+<div class="card error-page">
+    <h2 class="card-title">📋 错误经验记录</h2>
+    {% if logs %}
+    <ul class="item-list">
+        {% for log in logs %}
+        <li class="item {% if log.solution %}has-solution{% else %}no-solution{% endif %}">
+            <div class="item-content">
+                <span class="seq-badge">{{ loop.index }}</span>
+                <div class="item-title">{{ log.title }}</div>
+                {% if log.error_type %}
+                <span class="error-badge">{{ log.error_type }}</span>
+                {% endif %}
+                {% if log.solution %}
+                <div class="solution-block">
+                    <span class="sol-label">💡 解决：</span>{{ log.solution }}
+                </div>
+                {% endif %}
+                <div class="item-meta">📅 {{ log.created_at }}</div>
+            </div>
+            <div class="item-actions">
+                <form action="/errorlog/delete/{{ log.id }}" method="POST" onsubmit="return confirm('确定要删除这条记录吗？');">
+                    <button type="submit" class="btn btn-danger btn-sm">🗑️ 删</button>
+                </form>
+            </div>
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <div class="empty-state">
+        <div class="icon">⚠️</div>
+        <p>暂无错误记录，继续保持！</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

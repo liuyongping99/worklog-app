@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% set page_title = "仓库布局" %}
+
+{% block content %}
+<style>
+  .warehouse-wrapper {
+    background: #f5f3f0;
+    margin: -2rem -1.5rem;
+    padding: 2rem 1.5rem;
+    min-height: calc(100vh - 120px);
+  }
+
+  .warehouse-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    text-align: center;
+  }
+
+  .warehouse-container h1 {
+    font-size: 32px;
+    font-weight: 700;
+    color: #1a1a2e;
+    margin-bottom: 24px;
+  }
+
+  .warehouse-image {
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  }
+
+  /* Override container for full-width */
+  .container {
+    max-width: 100% !important;
+    padding: 0 !important;
+  }
+</style>
+
+<div class="warehouse-wrapper">
+  <div class="warehouse-container">
+    <h1>🏭 仓库布局</h1>
+    <img src="{{ url_for('static', filename='warehouse.png') }}" alt="仓库布局" class="warehouse-image">
+  </div>
+</div>
+{% endblock %}

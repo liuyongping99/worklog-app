@@ -1,0 +1,569 @@
+{% extends "base.html" %}
+{% set page_title = "开单要点" %}
+
+{% block content %}
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700;900&family=DM+Sans:wght@400;500;700&display=swap');
+
+  :root {
+    --bg: #f5f3f0;
+    --bg-card: #ffffff;
+    --border: rgba(0,0,0,0.06);
+    --text-primary: #1a1a2e;
+    --text-secondary: #7c7e8a;
+    --accent: #667eea;
+    --accent-light: rgba(102, 126, 234, 0.07);
+    --accent-border: rgba(102, 126, 234, 0.18);
+    --orange: #d4522a;
+    --orange-bg: rgba(212, 82, 42, 0.07);
+    --orange-border: rgba(212, 82, 42, 0.15);
+    --green: #1a8a5c;
+    --green-bg: rgba(26, 138, 92, 0.06);
+    --green-border: rgba(26, 138, 92, 0.12);
+    --radius: 14px;
+    --shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.03);
+    --shadow-hover: 0 4px 12px rgba(0,0,0,0.07), 0 2px 4px rgba(0,0,0,0.04);
+  }
+
+  body {
+    font-family: 'Noto Sans SC', 'DM Sans', sans-serif;
+  }
+
+  .billing-wrapper {
+    background: var(--bg);
+    margin: -2rem -1.5rem;
+    padding: 2rem 1.5rem;
+    min-height: calc(100vh - 120px);
+  }
+
+  .bg-decoration {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+    z-index: 0;
+    overflow: hidden;
+  }
+
+  .bg-decoration .orb {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(100px);
+    opacity: 0.5;
+  }
+
+  .bg-decoration .orb-1 {
+    width: 500px; height: 500px;
+    background: radial-gradient(circle, rgba(102, 126, 234, 0.07), transparent 70%);
+    top: -150px; right: -50px;
+  }
+
+  .bg-decoration .orb-2 {
+    width: 400px; height: 400px;
+    background: radial-gradient(circle, rgba(212, 82, 42, 0.05), transparent 70%);
+    bottom: -100px; left: -50px;
+  }
+
+  .billing-container {
+    position: relative;
+    z-index: 1;
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 24px 0 60px;
+  }
+
+  /* ── Header ── */
+  .billing-header {
+    text-align: center;
+    margin-bottom: 40px;
+    animation: fadeInDown 0.7s ease-out;
+  }
+
+  .billing-header .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--accent-light);
+    border: 1px solid var(--accent-border);
+    color: var(--accent);
+    padding: 5px 16px;
+    border-radius: 100px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    margin-bottom: 20px;
+  }
+
+  .billing-header .badge .dot {
+    width: 6px; height: 6px;
+    background: var(--accent);
+    border-radius: 50%;
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  .billing-header h1 {
+    font-size: 44px;
+    font-weight: 900;
+    letter-spacing: -1px;
+    color: var(--text-primary);
+    line-height: 1.2;
+  }
+
+  .billing-header .subtitle {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: #fff;
+    padding: 8px 24px;
+    border-radius: 100px;
+    font-size: 15px;
+    font-weight: 700;
+    margin-top: 16px;
+    box-shadow: 0 4px 16px rgba(102, 126, 234, 0.3);
+  }
+
+  .billing-header .subtitle .dot {
+    width: 8px; height: 8px;
+    background: #ffd166;
+    border-radius: 50%;
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  .divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border), rgba(102, 126, 234, 0.2), var(--border), transparent);
+    margin: 0 0 44px;
+  }
+
+  /* ── Section ── */
+  .billing-section {
+    margin-bottom: 40px;
+    animation: fadeInUp 0.5s ease-out both;
+  }
+
+  .billing-section:nth-child(2) { animation-delay: 0.05s; }
+  .billing-section:nth-child(3) { animation-delay: 0.1s; }
+  .billing-section:nth-child(4) { animation-delay: 0.15s; }
+  .billing-section:nth-child(5) { animation-delay: 0.2s; }
+  .billing-section:nth-child(6) { animation-delay: 0.25s; }
+  .billing-section:nth-child(7) { animation-delay: 0.3s; }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 16px;
+    padding-left: 4px;
+  }
+
+  .section-icon {
+    width: 42px; height: 42px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 19px;
+    flex-shrink: 0;
+  }
+
+  .section-icon.tips  { background: var(--accent-light); border: 1px solid var(--accent-border); }
+  .section-icon.rule  { background: var(--orange-bg); border: 1px solid var(--orange-border); }
+
+  .section-title {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+    color: var(--text-primary);
+  }
+
+  .section-title-en {
+    font-size: 11px;
+    color: var(--text-secondary);
+    font-weight: 400;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-top: 1px;
+  }
+
+  /* ── Card list ── */
+  .billing-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .billing-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 20px;
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    transition: all 0.25s ease;
+    box-shadow: var(--shadow);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .billing-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0;
+    width: 3px; height: 100%;
+    opacity: 0;
+    transition: opacity 0.25s ease;
+  }
+
+  .billing-card:hover {
+    box-shadow: var(--shadow-hover);
+    transform: translateY(-2px);
+    border-color: rgba(0,0,0,0.08);
+  }
+
+  .billing-card:hover::before { opacity: 1; }
+
+  /* color per index */
+  .billing-section:nth-of-type(1) .billing-card::before { background: var(--accent); }
+  .billing-section:nth-of-type(2) .billing-card::before { background: var(--orange); }
+  .billing-section:nth-of-type(3) .billing-card::before { background: var(--green); }
+
+  .billing-number {
+    flex-shrink: 0;
+    width: 26px; height: 26px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 700;
+    font-family: 'DM Sans', sans-serif;
+    margin-top: 1px;
+  }
+
+  .billing-section:nth-of-type(1) .billing-number { background: var(--accent-light); color: var(--accent); }
+  .billing-section:nth-of-type(2) .billing-number { background: var(--orange-bg); color: var(--orange); }
+  .billing-section:nth-of-type(3) .billing-number { background: var(--green-bg); color: var(--green); }
+
+  .billing-content {
+    flex: 1;
+    font-size: 15px;
+    line-height: 1.8;
+    color: #3a3a4a;
+    font-weight: 400;
+  }
+
+  .billing-content strong {
+    color: var(--text-primary);
+    font-weight: 600;
+  }
+
+  .billing-highlight {
+    display: inline;
+    padding: 1px 8px;
+    background: var(--accent-light);
+    border: 1px solid var(--accent-border);
+    border-radius: 5px;
+    font-weight: 600;
+    color: var(--accent);
+  }
+
+  .billing-highlight-orange {
+    display: inline;
+    padding: 1px 8px;
+    background: var(--orange-bg);
+    border: 1px solid var(--orange-border);
+    border-radius: 5px;
+    font-weight: 600;
+    color: var(--orange);
+  }
+
+  .billing-highlight-green {
+    display: inline;
+    padding: 1px 8px;
+    background: var(--green-bg);
+    border: 1px solid var(--green-border);
+    border-radius: 5px;
+    font-weight: 600;
+    color: var(--green);
+  }
+
+  /* note box inside card */
+  .billing-note {
+    margin-top: 8px;
+    padding: 10px 14px;
+    background: #f8f9fa;
+    border-radius: 10px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.7;
+    border: 1px solid var(--border);
+  }
+
+  .billing-note strong {
+    color: var(--text-primary);
+  }
+
+  /* grid sub-items */
+  .billing-grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .billing-grid-item {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 13px;
+    border: 1px solid var(--border);
+  }
+
+  .billing-grid-item strong {
+    color: var(--text-primary);
+  }
+
+  .billing-tip-box {
+    margin-top: 10px;
+    padding: 10px 14px;
+    background: #f8f9fa;
+    border-radius: 10px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.7;
+    border: 1px solid var(--border);
+  }
+
+  .billing-tip-box p { margin-bottom: 4px; }
+  .billing-tip-box p:last-child { margin-bottom: 0; }
+
+  .billing-footer {
+    text-align: center;
+    margin-top: 40px;
+    padding-top: 28px;
+    border-top: 1px solid var(--border);
+    animation: fadeInUp 0.5s ease-out 0.4s both;
+  }
+
+  .billing-footer p {
+    color: var(--text-secondary);
+    font-size: 13px;
+    opacity: 0.5;
+    line-height: 1.8;
+    font-weight: 300;
+  }
+
+  @keyframes fadeInDown {
+    from { opacity: 0; transform: translateY(-16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  @media (max-width: 640px) {
+    .billing-container { padding: 16px 0 40px; }
+    .billing-header h1 { font-size: 30px; }
+    .section-title { font-size: 17px; }
+    .billing-card { padding: 14px 16px; }
+    .billing-content { font-size: 14px; }
+    .billing-grid-2 { grid-template-columns: 1fr; }
+  }
+</style>
+
+<div class="bg-decoration">
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+</div>
+
+<div class="billing-wrapper">
+  <div class="billing-container">
+
+    <header class="billing-header">
+      <div class="badge"><span class="dot"></span>内部培训</div>
+      <h1>📋 开单要点提醒</h1>
+      <div class="subtitle">
+        <span class="dot"></span>
+        慢 · 多问
+      </div>
+    </header>
+
+    <div class="divider"></div>
+
+    <!-- 开单要点 -->
+    <div class="billing-section">
+      <div class="section-header">
+        <div class="section-icon tips">✏️</div>
+        <div>
+          <div class="section-title">开单要点</div>
+          <div class="section-title-en">Billing Tips</div>
+        </div>
+      </div>
+      <div class="billing-list">
+
+        <div class="billing-card">
+          <div class="billing-number">1</div>
+          <div class="billing-content">
+            <strong>慢</strong>，核查商品名称、规格、颜色、计价规格、数量
+          </div>
+        </div>
+
+        <div class="billing-card">
+          <div class="billing-number">2</div>
+          <div class="billing-content">
+            <strong>换单时</strong>对于称重的产品，要检查是否已经输入数量
+          </div>
+        </div>
+
+        <div class="billing-card">
+          <div class="billing-number">3</div>
+          <div class="billing-content">
+            <strong>按码卖</strong>的商品码数高于1支必须在<span class="billing-highlight">备注栏</span>写入<span class="billing-highlight">支数 + 码数</span>
+          </div>
+        </div>
+
+        <div class="billing-card">
+          <div class="billing-number">4</div>
+          <div class="billing-content">
+            价格跟踪功能带出的价格如果与报价单不一致，<strong>多问</strong>
+          </div>
+        </div>
+
+        <div class="billing-card">
+          <div class="billing-number">5</div>
+          <div class="billing-content">
+            销售单的<span class="billing-highlight">附件说明</span>中填写 – 订单号（如有）
+          </div>
+        </div>
+
+        <div class="billing-card">
+          <div class="billing-number">6</div>
+          <div class="billing-content">
+            只有<span class="billing-highlight-orange">赠品</span>可以不填单价，在备注上注明<span class="billing-highlight-orange">「赠品」</span>即可
+          </div>
+        </div>
+
+        <div class="billing-card">
+          <div class="billing-number">7</div>
+          <div class="billing-content">
+            <strong>海绵、丝绵散剪</strong>损耗大，散剪价需加
+            <span class="billing-highlight-green">0.5 ~ 1 元</span>
+            <div class="billing-note">
+              💡 散剪费工、容易弄脏，客户不要时造成额外损耗，此类散剪价可酌情上浮 5 毛 ~ 1 元
+            </div>
+          </div>
+        </div>
+
+        <div class="billing-card">
+          <div class="billing-number">8</div>
+          <div class="billing-content">
+            客户下单时一个商品要求<strong>分开2个散码</strong>——<span class="billing-highlight">必须在备注栏注明</span>，免得被打码师傅将2个散码合在一起
+          </div>
+        </div>
+
+        <div class="billing-card">
+          <div class="billing-number">9</div>
+          <div class="billing-content">
+            <strong>纸板/灰板规格对照：</strong>
+            <div class="billing-grid-2">
+              <div class="billing-grid-item"><strong>华实灰板</strong> → 普通的</div>
+              <div class="billing-grid-item"><strong>金田 / 绿精灵</strong> → 好一点的</div>
+            </div>
+            <div class="billing-tip-box">
+              <p>📌 客户报的规格对应商品中的<span style="font-weight:600">「规格」栏目</span></p>
+              <p>📌 <strong style="color:#d97706">A打头</strong>的是<span style="font-weight:600">足的</span></p>
+              <p>📌 客户报的克数与系统中规格匹配，型号里的克数<span style="color:var(--text-secondary)">不会显示在打印单据上</span></p>
+              <p>📌 <strong style="color:var(--green)">绿精灵</strong>要加在<span style="font-weight:600">商品备注</span>中</p>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- 规定 -->
+    <div class="billing-section">
+      <div class="section-header">
+        <div class="section-icon rule">📌</div>
+        <div>
+          <div class="section-title">规定</div>
+          <div class="section-title-en">Rules</div>
+        </div>
+      </div>
+      <div class="billing-list">
+
+        <div class="billing-card">
+          <div class="billing-number">1</div>
+          <div class="billing-content">
+            所有车辆先用<span class="billing-highlight-orange">装车单</span>装货，然后换<span class="billing-highlight">销售单</span>点数后发车，点数后在<span class="billing-highlight">送货记录群</span>发消息
+          </div>
+        </div>
+
+        <div class="billing-card">
+          <div class="billing-number">2</div>
+          <div class="billing-content">
+            开草稿，<strong>只能存入草稿</strong>
+          </div>
+        </div>
+
+        <div class="billing-card">
+          <div class="billing-number">3</div>
+          <div class="billing-content">
+            特别注意 <span class="billing-highlight-green">环保</span> 还是 <span class="billing-highlight">不环保</span> 单
+          </div>
+        </div>
+
+        <div class="billing-card">
+          <div class="billing-number">4</div>
+          <div class="billing-content">
+            开单商品顺序与客户报单顺序<strong>一致</strong>
+          </div>
+        </div>
+
+        <div class="billing-card">
+          <div class="billing-number">5</div>
+          <div class="billing-content">
+            物流装车单和小票<span class="billing-highlight-orange">不能直接回收</span>，需要给<strong>财务</strong>或<strong>制单人</strong>
+          </div>
+        </div>
+
+        <div class="billing-card">
+          <div class="billing-number">6</div>
+          <div class="billing-content">
+            缺货商品移出销售单草稿，将缺货商品复制新的销售单，<strong>立即打印装车单</strong>
+          </div>
+        </div>
+
+        <div class="billing-card">
+          <div class="billing-number">7</div>
+          <div class="billing-content">
+            装车单<span class="billing-highlight-orange">红单子</span>是给<span class="billing-highlight">打码</span>用的
+          </div>
+        </div>
+
+        <div class="billing-card">
+          <div class="billing-number">8</div>
+          <div class="billing-content">
+            送所有客户的<span class="billing-highlight">加工厂、过胶店、冲皮店</span>之类的<span class="billing-highlight">不要留单</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="billing-footer">
+      <p>📌 每次开单前仔细核对，养成好习惯</p>
+    </div>
+
+  </div>
+</div>
+{% endblock %}

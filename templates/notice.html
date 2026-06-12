@@ -1,0 +1,417 @@
+{% extends "base.html" %}
+
+{% block content %}
+<!-- 公司通知页面 -->
+<div class="card">
+    <h2 class="card-title">📢 公司通知</h2>
+    <form id="addNoticeForm">
+        <div class="form-group">
+            <label for="category">通知分类</label>
+            <select id="category" name="category" required>
+                <option value="">请选择分类...</option>
+                <option value="送货">🚚 送货</option>
+                <option value="装货">📦 装货</option>
+                <option value="收货">📥 收货</option>
+                <option value="退货">↩️ 退货</option>
+                <option value="车辆">🚛 车辆</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="content">通知内容</label>
+            <textarea id="content" name="content" rows="4" placeholder="输入通知内容..." required></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary">📋 添加通知</button>
+    </form>
+</div>
+
+<!-- 按分类显示通知列表 -->
+{% set categories = ['送货', '装货', '收货', '退货', '车辆'] %}
+{% set category_icons = {'送货': '🚚', '装货': '📦', '收货': '📥', '退货': '↩️', '车辆': '🚛'} %}
+
+{% for cat in categories %}
+    {% set cat_notices = [] %}
+    {% for n in notices %}
+        {% if n.category == cat %}
+            {% set _ = cat_notices.append(n) %}
+        {% endif %}
+    {% endfor %}
+
+    <div class="card">
+        <h2 class="card-title">{{ category_icons.get(cat, '📋') }} {{ cat }}</h2>
+
+        {% if cat_notices %}
+        <ul class="item-list">
+            {% for notice in cat_notices %}
+            <li class="item">
+                <div class="item-content">
+                    <span class="seq-badge">{{ loop.index }}</span>
+                    <div class="item-text">{{ notice.content }}</div>
+                    <div class="item-meta">📢 {{ notice.created_at }}</div>
+                </div>
+                {% set n_imgs = notice_images.get(notice.id, []) %}
+                {% if n_imgs %}
+                <div class="notice-image-section" style="width:100%; margin-top:0.75rem; padding-top:0.5rem; border-top:1px solid #eef0f4;">
+                    <div style="display:flex; align-items:center; gap:0.4rem; margin-bottom:0.4rem;">
+                        <span style="font-size:0.78rem; color:#888;">每行：</span>
+                        <button class="img-col-btn {% if notice.img_cols == 1 %}active{% endif %}" onclick="setNoticeImgCols(this, 1, {{ notice.id }})" style="padding:0.15rem 0.5rem; border:1px solid #dfe6e9; background:{% if notice.img_cols == 1 %}#6c5ce7{% else %}#fff{% endif %}; color:{% if notice.img_cols == 1 %}#fff{% else %}#495057{% endif %}; border-radius:4px; cursor:pointer; font-size:0.75rem;">1</button>
+                        <button class="img-col-btn {% if notice.img_cols == 2 %}active{% endif %}" onclick="setNoticeImgCols(this, 2, {{ notice.id }})" style="padding:0.15rem 0.5rem; border:1px solid #dfe6e9; background:{% if notice.img_cols == 2 %}#6c5ce7{% else %}#fff{% endif %}; color:{% if notice.img_cols == 2 %}#fff{% else %}#495057{% endif %}; border-radius:4px; cursor:pointer; font-size:0.75rem;">2</button>
+                        <button class="img-col-btn {% if notice.img_cols == 3 %}active{% endif %}" onclick="setNoticeImgCols(this, 3, {{ notice.id }})" style="padding:0.15rem 0.5rem; border:1px solid #dfe6e9; background:{% if notice.img_cols == 3 %}#6c5ce7{% else %}#fff{% endif %}; color:{% if notice.img_cols == 3 %}#fff{% else %}#495057{% endif %}; border-radius:4px; cursor:pointer; font-size:0.75rem;">3</button>
+                        <button class="img-col-btn {% if notice.img_cols == 4 %}active{% endif %}" onclick="setNoticeImgCols(this, 4, {{ notice.id }})" style="padding:0.15rem 0.5rem; border:1px solid #dfe6e9; background:{% if notice.img_cols == 4 %}#6c5ce7{% else %}#fff{% endif %}; color:{% if notice.img_cols == 4 %}#fff{% else %}#495057{% endif %}; border-radius:4px; cursor:pointer; font-size:0.75rem;">4</button>
+                        <button class="img-col-btn {% if notice.img_cols == 5 %}active{% endif %}" onclick="setNoticeImgCols(this, 5, {{ notice.id }})" style="padding:0.15rem 0.5rem; border:1px solid #dfe6e9; background:{% if notice.img_cols == 5 %}#6c5ce7{% else %}#fff{% endif %}; color:{% if notice.img_cols == 5 %}#fff{% else %}#495057{% endif %}; border-radius:4px; cursor:pointer; font-size:0.75rem;">5</button>
+                    </div>
+                    <div class="notice-image-area cols-{{ notice.img_cols | default(5) }}" data-cols="{{ notice.img_cols | default(5) }}" data-notice-id="{{ notice.id }}" style="display:grid; gap:0.5rem; width:100%; box-sizing:border-box; grid-template-columns: repeat({{ notice.img_cols | default(5) }}, 1fr);">
+                        {% for img in n_imgs %}
+                        <div class="notice-img-item" style="position:relative; border-radius:6px; overflow:hidden; border:1px solid #dfe6e9; background:#f8f9fa; width:100%;">
+                            <img src="/static/notice/{{ img.file_name }}" alt="{{ img.original_name or '图片' }}" style="width:100%; height:300px; object-fit:contain; cursor:pointer; display:block;" onclick="previewNoticeImage('/static/notice/{{ img.file_name }}')">
+                            <button type="button" onclick="deleteNoticeImage({{ img.id }}, this)" style="position:absolute; top:2px; right:2px; background:rgba(220,53,69,0.85); color:white; border:none; border-radius:50%; width:22px; height:22px; cursor:pointer; font-size:0.7rem; line-height:1; padding:0;">×</button>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+                <div class="item-actions notice-sort-btns">
+                    <button type="button" class="btn btn-sm btn-sort btn-move-up" data-id="{{ notice.id }}" title="上移">⬆ 上</button>
+                    <button type="button" class="btn btn-sm btn-sort btn-move-down" data-id="{{ notice.id }}" title="下移">⬇ 下</button>
+                    <button type="button" class="btn btn-sm btn-sort btn-edit"
+                        data-id="{{ notice.id }}"
+                        data-category="{{ notice.category }}"
+                        data-content="{{ notice.content|e }}">
+                        ✏️ 改
+                    </button>
+                    <button type="button" class="btn btn-sm btn-sort btn-image"
+                        data-id="{{ notice.id }}"
+                        style="background:#6c5ce7; color:white; border:none; padding:0.3rem 0.6rem; border-radius:4px; font-size:0.78rem; cursor:pointer;"
+                        title="上传图片">
+                        🖼️ 图
+                    </button>
+                    <button type="button" class="btn btn-danger btn-sm btn-delete-notice" data-id="{{ notice.id }}">🗑️ 删</button>
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <div class="empty-state">
+            <div class="icon">{{ category_icons.get(cat, '📋') }}</div>
+            <p>暂无{{ cat }}通知</p>
+        </div>
+        {% endif %}
+    </div>
+{% endfor %}
+
+<!-- 修改通知弹框 -->
+<div id="editModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center;">
+    <div style="background:white; border-radius:12px; padding:2rem; width:90%; max-width:500px; box-shadow:0 8px 32px rgba(0,0,0,0.2);">
+        <h3 style="margin-bottom:1.5rem; color:#4a90e2;">✏️ 修改通知</h3>
+        <form id="editForm" method="POST">
+            <div class="form-group">
+                <label for="editCategory">通知分类</label>
+                <select id="editCategory" name="category" required>
+                    <option value="送货">🚚 送货</option>
+                    <option value="装货">📦 装货</option>
+                    <option value="收货">📥 收货</option>
+                    <option value="退货">↩️ 退货</option>
+                    <option value="车辆">🚛 车辆</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="editContent">通知内容</label>
+                <textarea id="editContent" name="content" rows="5" placeholder="输入通知内容..." required></textarea>
+            </div>
+            <div style="display:flex; gap:0.75rem; justify-content:flex-end; margin-top:1.5rem;">
+                <button type="button" class="btn btn-sm" onclick="closeEditModal()" style="padding:0.5rem 1rem; background:#e0e0e0; color:#333;">取消</button>
+                <button type="submit" class="btn btn-primary btn-sm">💾 保存修改</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 通知图片上传弹框 -->
+<div id="noticeImgModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:10000; align-items:center; justify-content:center;">
+    <div style="background:white; border-radius:12px; padding:1.5rem; width:90%; max-width:500px; box-shadow:0 10px 40px rgba(0,0,0,0.2);">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem;">
+            <h3 style="margin:0; color:#6c5ce7; font-size:1.05rem;">🖼️ 上传通知图片</h3>
+            <button type="button" onclick="closeNoticeImageModal()" style="background:none; border:none; font-size:1.3rem; cursor:pointer; color:#999;">&times;</button>
+        </div>
+        <div style="display:flex; gap:0.75rem; margin-bottom:1rem;">
+            <div onclick="document.getElementById('noticeImgFile').click()" style="flex:1; border:2px dashed #ccc; border-radius:8px; padding:1.25rem; text-align:center; cursor:pointer;">
+                <div style="font-size:1.5rem; margin-bottom:0.25rem;">📁</div>
+                <div style="font-size:0.85rem; color:#555;">选择文件</div>
+                <div style="font-size:0.72rem; color:#999; margin-top:0.25rem;">JPG/PNG/GIF/WEBP</div>
+            </div>
+            <div onclick="activateNoticePaste()" style="flex:1; border:2px dashed #ccc; border-radius:8px; padding:1.25rem; text-align:center; cursor:pointer;">
+                <div style="font-size:1.5rem; margin-bottom:0.25rem;">📋</div>
+                <div style="font-size:0.85rem; color:#555;">Ctrl+V 粘贴</div>
+                <div style="font-size:0.72rem; color:#999; margin-top:0.25rem;">截图后直接粘贴</div>
+            </div>
+        </div>
+        <input type="file" id="noticeImgFile" accept="image/*" style="display:none;" onchange="handleNoticeFileSelect(this)">
+        <textarea id="noticePasteArea" placeholder="点击此处后按 Ctrl+V 粘贴图片" style="width:100%; height:80px; border:2px dashed #dfe6e9; border-radius:6px; padding:0.5rem; font-size:0.85rem; resize:none; box-sizing:border-box; margin-bottom:0.75rem; outline:none;"></textarea>
+        <div id="noticeImgPreview" style="display:none; text-align:center; margin-bottom:0.75rem;"></div>
+        <div style="display:flex; gap:0.5rem; justify-content:flex-end;">
+            <button type="button" onclick="closeNoticeImageModal()" style="padding:0.5rem 1rem; background:#e0e0e0; color:#333; border:none; border-radius:6px; cursor:pointer;">取消</button>
+            <button type="button" onclick="confirmNoticeUpload()" style="padding:0.5rem 1rem; background:#6c5ce7; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600;">确认上传</button>
+        </div>
+    </div>
+</div>
+
+<script>
+function closeEditModal() {
+    document.getElementById('editModal').style.display = 'none';
+}
+
+// 绑定编辑按钮
+document.querySelectorAll('.btn-edit').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        var id = this.getAttribute('data-id');
+        var category = this.getAttribute('data-category');
+        var content = this.getAttribute('data-content');
+        document.getElementById('editCategory').value = category;
+        document.getElementById('editContent').value = content;
+        document.getElementById('editModal').style.display = 'flex';
+        document.getElementById('editModal').dataset.noticeId = id;
+    });
+});
+
+// 提交编辑（RESTful PUT）
+document.getElementById('editForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    var id = document.getElementById('editModal').dataset.noticeId;
+    var data = {
+        category: document.getElementById('editCategory').value,
+        content: document.getElementById('editContent').value
+    };
+    fetch('/api/v1/notices/' + id, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+        if (res.success) { location.reload(); }
+        else { alert('保存失败: ' + (res.error || '未知错误')); }
+    })
+    .catch(function(err) { alert('请求失败: ' + err.message); });
+});
+
+// 添加通知（RESTful POST）
+document.getElementById('addNoticeForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    var data = {
+        category: document.getElementById('category').value,
+        content: document.getElementById('content').value
+    };
+    if (!data.category || !data.content) { alert('请填写分类和内容'); return; }
+    fetch('/api/v1/notices', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+        if (res.success) { location.reload(); }
+        else { alert('添加失败: ' + (res.error || '未知错误')); }
+    })
+    .catch(function(err) { alert('请求失败: ' + err.message); });
+});
+
+// 上移 / 下移（RESTful PATCH）
+document.querySelectorAll('.btn-move-up').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        var id = this.dataset.id;
+        fetch('/api/v1/notices/' + id + '/move', {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({direction: 'up'})
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(res) { if (res.success) location.reload(); else alert(res.error); });
+    });
+});
+document.querySelectorAll('.btn-move-down').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        var id = this.dataset.id;
+        fetch('/api/v1/notices/' + id + '/move', {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({direction: 'down'})
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(res) { if (res.success) location.reload(); else alert(res.error); });
+    });
+});
+
+// 删除通知（RESTful DELETE）
+document.querySelectorAll('.btn-delete-notice').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        if (!confirm('确定要删除这条通知吗？相关图片也会被删除。')) return;
+        var id = this.dataset.id;
+        fetch('/api/v1/notices/' + id, {method: 'DELETE'})
+        .then(function(r) { return r.json(); })
+        .then(function(res) { if (res.success) location.reload(); else alert('删除失败: ' + (res.error || '未知错误')); })
+        .catch(function(err) { alert('请求失败: ' + err.message); });
+    });
+});
+
+// 点击遮罩层关闭
+document.getElementById('editModal').addEventListener('click', function(e) {
+    if (e.target === this) closeEditModal();
+});
+
+// ESC 键关闭
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        closeEditModal();
+        closeNoticeImageModal();
+    }
+});
+
+// ── 通知图片上传 ──
+var currentNoticePk = null;
+var pendingNoticeFile = null;
+
+function openNoticeImageModal(noticeId) {
+    currentNoticePk = noticeId;
+    pendingNoticeFile = null;
+    document.getElementById('noticeImgPreview').style.display = 'none';
+    document.getElementById('noticeImgPreview').innerHTML = '';
+    document.getElementById('noticeImgFile').value = '';
+    document.getElementById('noticePasteArea').value = '';
+    var modal = document.getElementById('noticeImgModal');
+    modal.style.display = 'flex';
+}
+
+function closeNoticeImageModal() {
+    document.getElementById('noticeImgModal').style.display = 'none';
+    currentNoticePk = null;
+    pendingNoticeFile = null;
+}
+
+function handleNoticeFileSelect(input) {
+    var file = input.files[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { alert('请选择图片文件！'); return; }
+    pendingNoticeFile = file;
+    showNoticePreview(file);
+}
+
+function showNoticePreview(file) {
+    var reader = new FileReader();
+    reader.onload = function(e) {
+        var p = document.getElementById('noticeImgPreview');
+        if (!p) return;
+        p.innerHTML = '<img src="' + e.target.result + '" style="max-width:100%; max-height:300px; border-radius:6px;">';
+        p.style.display = 'block';
+    };
+    reader.readAsDataURL(file);
+}
+
+function activateNoticePaste() {
+    var area = document.getElementById('noticePasteArea');
+    area.value = '';
+    area.focus();
+}
+
+function confirmNoticeUpload() {
+    if (!currentNoticePk) { alert('通知ID丢失'); return; }
+    if (!pendingNoticeFile) { alert('请先选择或粘贴图片'); return; }
+    var formData = new FormData();
+    formData.append('image', pendingNoticeFile);
+    fetch('/api/v1/notice/' + currentNoticePk + '/images', { method: 'POST', body: formData })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert('上传失败: ' + (data.error || '未知错误'));
+        }
+    })
+    .catch(function(err) { alert('请求失败: ' + err.message); });
+}
+
+function deleteNoticeImage(imageId, btn) {
+    if (!confirm('确定删除这张图片？')) return;
+    fetch('/api/v1/notice/images/' + imageId, { method: 'DELETE' })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.success) {
+            var item = btn.closest('.notice-img-item');
+            if (item) item.remove();
+        } else {
+            alert('删除失败: ' + (data.error || '未知错误'));
+        }
+    })
+    .catch(function(err) { alert('请求失败: ' + err.message); });
+}
+
+function previewNoticeImage(src) {
+    if (typeof showImgPreview === 'function') {
+        showImgPreview(src);
+    } else {
+        window.open(src, '_blank');
+    }
+}
+
+// 绑定图片按钮
+document.querySelectorAll('.btn-image').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        openNoticeImageModal(this.getAttribute('data-id'));
+    });
+});
+
+// 图片列数切换（每条通知独立记忆，持久化到数据库）
+window.setNoticeImgCols = function(btn, cols, noticeId) {
+    var area = btn.parentElement.nextElementSibling;
+    if (!area || !area.classList.contains('notice-image-area')) return;
+    // 更新按钮状态
+    btn.parentElement.querySelectorAll('.img-col-btn').forEach(function(b) {
+        b.classList.remove('active');
+        b.style.background = '#fff';
+        b.style.color = '#495057';
+    });
+    btn.classList.add('active');
+    btn.style.background = '#6c5ce7';
+    btn.style.color = '#fff';
+    // 更新 grid 列数
+    area.classList.remove('cols-1','cols-2','cols-3','cols-4','cols-5');
+    area.classList.add('cols-' + cols);
+    area.dataset.cols = cols;
+    area.style.gridTemplateColumns = 'repeat(' + cols + ', 1fr)';
+    // 持久化到后端
+    if (noticeId) {
+        fetch('/api/v1/notice/' + noticeId + '/img-cols', {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({img_cols: cols})
+        });
+    }
+};
+
+// 点击遮罩关闭
+document.getElementById('noticeImgModal').addEventListener('click', function(e) {
+    if (e.target === this) closeNoticeImageModal();
+});
+
+// Ctrl+V 粘贴（绑在 textarea 上）
+(function() {
+    var area = document.getElementById('noticePasteArea');
+    if (!area) return;
+    area.addEventListener('paste', function(e) {
+        var items = e.clipboardData && e.clipboardData.items;
+        if (!items) return;
+        for (var i = 0; i < items.length; i++) {
+            if (items[i].type && items[i].type.indexOf('image') !== -1) {
+                var file = items[i].getAsFile();
+                if (file) {
+                    pendingNoticeFile = file;
+                    showNoticePreview(file);
+                    e.preventDefault();
+                    setTimeout(function() { area.value = ''; }, 100);
+                }
+                break;
+            }
+        }
+    });
+})();
+</script>
+
+{% endblock %}

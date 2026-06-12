@@ -1,0 +1,642 @@
+{% extends "base.html" %}
+{% set page_title = "换单要点" %}
+
+{% block content %}
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700;900&family=Noto+Serif+SC:wght@400;600;700;900&family=DM+Sans:wght@400;500;700&display=swap');
+
+  :root {
+    --ink: #1a1208;
+    --paper: #f5f0e8;
+    --gold: #c8922a;
+    --gold-light: #e8b84b;
+    --red: #c0392b;
+    --green: #1a6b3c;
+    --brown: #6b4226;
+    --cream: #faf6ee;
+    --border: rgba(0,0,0,0.06);
+    --step0: #8b4513;
+    --step1: #c0392b;
+    --step2: #d35400;
+    --step3: #c8922a;
+    --step4: #1a6b3c;
+    --shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.03);
+    --shadow-hover: 0 4px 12px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.05);
+  }
+
+  .huandan-wrapper {
+    background: var(--paper);
+    margin: -2rem -1.5rem;
+    padding: 0 0 3rem;
+    min-height: calc(100vh - 120px);
+    position: relative;
+  }
+
+  /* 纸张纹理 */
+  .huandan-wrapper::before {
+    content: '';
+    position: fixed;
+    top: 0; left: 0;
+    right: 0; bottom: 0;
+    background-image: repeating-linear-gradient(
+      0deg, transparent, transparent 28px,
+      rgba(139,100,60,0.05) 28px, rgba(139,100,60,0.05) 29px
+    );
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* 顶部装饰条 */
+  .hd-topbar {
+    height: 5px;
+    background: linear-gradient(90deg, var(--red) 0%, var(--gold) 50%, var(--red) 100%);
+    position: relative;
+    z-index: 2;
+  }
+
+  /* 背景装饰球 */
+  .bg-decoration {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+    z-index: 0;
+    overflow: hidden;
+  }
+  .bg-decoration .orb {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(100px);
+    opacity: 0.4;
+  }
+  .bg-decoration .orb-1 {
+    width: 400px; height: 400px;
+    background: radial-gradient(circle, rgba(200,146,42,0.08), transparent 70%);
+    top: -100px; right: -50px;
+  }
+  .bg-decoration .orb-2 {
+    width: 300px; height: 300px;
+    background: radial-gradient(circle, rgba(192,57,43,0.05), transparent 70%);
+    bottom: 0; left: -50px;
+  }
+
+  .huandan-container {
+    position: relative;
+    z-index: 1;
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 0 1.5rem;
+  }
+
+  /* ── Header ── */
+  .hd-header {
+    text-align: center;
+    padding: 40px 0 32px;
+    border-bottom: 2px solid rgba(200,146,42,0.25);
+    background: linear-gradient(180deg, rgba(200,146,42,0.07) 0%, transparent 100%);
+    animation: fadeInDown 0.7s ease-out;
+  }
+
+  .hd-header .hd-badge {
+    display: inline-block;
+    background: var(--red);
+    color: #fff;
+    font-family: 'Noto Serif SC', serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    padding: 4px 16px;
+    border-radius: 2px;
+    margin-bottom: 18px;
+  }
+
+  .hd-header h1 {
+    font-family: 'Noto Serif SC', serif;
+    font-size: clamp(30px, 5vw, 48px);
+    font-weight: 900;
+    color: var(--ink);
+    letter-spacing: 4px;
+    margin-bottom: 10px;
+    line-height: 1.2;
+  }
+
+  .hd-header h1 span { color: var(--gold); }
+
+  .hd-header .hd-subtitle {
+    font-size: 13px;
+    color: var(--brown);
+    letter-spacing: 2px;
+    font-weight: 300;
+  }
+
+  .hd-divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(200,146,42,0.3), transparent);
+    margin: 32px 0;
+  }
+
+  /* ── Steps ── */
+  .hd-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .hd-step {
+    display: grid;
+    grid-template-columns: 72px 1fr;
+    gap: 0;
+    opacity: 0;
+    transform: translateX(-24px);
+    animation: slideIn 0.6s ease forwards;
+  }
+  .hd-step:nth-child(1) { animation-delay: 0.1s; }
+  .hd-step:nth-child(2) { animation-delay: 0.25s; }
+  .hd-step:nth-child(3) { animation-delay: 0.4s; }
+  .hd-step:nth-child(4) { animation-delay: 0.55s; }
+
+  @keyframes slideIn {
+    to { opacity: 1; transform: translateX(0); }
+  }
+
+  /* 左侧轴 */
+  .hd-axis {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-top: 24px;
+  }
+
+  .hd-num {
+    width: 48px; height: 48px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Noto Serif SC', serif;
+    font-size: 20px;
+    font-weight: 900;
+    color: #fff;
+    flex-shrink: 0;
+    box-shadow: 0 3px 12px rgba(0,0,0,0.15);
+  }
+
+  .hd-line {
+    width: 2px;
+    flex: 1;
+    min-height: 16px;
+    margin-top: 6px;
+    opacity: 0.25;
+  }
+
+  .hd-step:last-child .hd-line { display: none; }
+
+  /* 右侧内容 */
+  .hd-body { padding: 20px 0 28px 20px; }
+
+  .hd-tag {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    padding: 2px 10px;
+    border-radius: 2px;
+    margin-bottom: 10px;
+    color: #fff;
+    text-transform: uppercase;
+  }
+
+  .hd-step-title {
+    font-family: 'Noto Serif SC', serif;
+    font-size: clamp(16px, 3vw, 20px);
+    font-weight: 700;
+    line-height: 1.4;
+    margin-bottom: 12px;
+    color: var(--ink);
+  }
+
+  .hd-content {
+    background: var(--cream);
+    border-radius: 10px;
+    padding: 18px 22px;
+    border-left: 4px solid;
+    box-shadow: 0 2px 10px rgba(26,18,8,0.08);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .hd-content::before {
+    content: '';
+    position: absolute;
+    top: 0; right: 0;
+    width: 60px; height: 60px;
+    border-radius: 0 0 0 60px;
+    opacity: 0.05;
+  }
+
+  .hd-text {
+    font-size: 14px;
+    line-height: 1.9;
+    color: #3a2e1e;
+  }
+
+  .hd-text strong { font-weight: 700; color: var(--ink); }
+
+  .hd-text ul {
+    margin: 8px 0 10px 20px;
+    line-height: 2;
+  }
+
+  /* 颜色映射 per step */
+  .hd-step:nth-child(1) .hd-num { background: var(--step1); }
+  .hd-step:nth-child(1) .hd-line { background: var(--step1); }
+  .hd-step:nth-child(1) .hd-tag { background: var(--step1); }
+  .hd-step:nth-child(1) .hd-content { border-color: var(--step1); }
+  .hd-step:nth-child(1) .hd-content::before { background: var(--step1); }
+
+  .hd-step:nth-child(2) .hd-num { background: var(--step2); }
+  .hd-step:nth-child(2) .hd-line { background: var(--step2); }
+  .hd-step:nth-child(2) .hd-tag { background: var(--step2); }
+  .hd-step:nth-child(2) .hd-content { border-color: var(--step2); }
+  .hd-step:nth-child(2) .hd-content::before { background: var(--step2); }
+
+  .hd-step:nth-child(3) .hd-num { background: var(--step3); }
+  .hd-step:nth-child(3) .hd-line { background: var(--step3); }
+  .hd-step:nth-child(3) .hd-tag { background: var(--step3); }
+  .hd-step:nth-child(3) .hd-content { border-color: var(--step3); }
+  .hd-step:nth-child(3) .hd-content::before { background: var(--step3); }
+
+  .hd-step:nth-child(4) .hd-num { background: var(--step4); }
+  .hd-step:nth-child(4) .hd-line { background: var(--step4); }
+  .hd-step:nth-child(4) .hd-tag { background: var(--step4); }
+  .hd-step:nth-child(4) .hd-content { border-color: var(--step4); }
+  .hd-step:nth-child(4) .hd-content::before { background: var(--step4); }
+
+  /* 警告框 */
+  .hd-alert {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-top: 12px;
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    line-height: 1.7;
+  }
+  .hd-alert-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+  .hd-alert-warn {
+    background: rgba(192,57,43,0.07);
+    border: 1px solid rgba(192,57,43,0.18);
+    color: var(--red);
+  }
+  .hd-alert-tip {
+    background: rgba(26,107,60,0.07);
+    border: 1px solid rgba(26,107,60,0.18);
+    color: var(--green);
+  }
+  .hd-alert-info {
+    background: rgba(200,146,42,0.09);
+    border: 1px solid rgba(200,146,42,0.22);
+    color: #7a5a10;
+  }
+
+  /* 核查清单 */
+  .hd-checklist {
+    list-style: none;
+    margin-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .hd-checklist li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: #3a2e1e;
+    cursor: pointer;
+    padding: 6px 10px;
+    border-radius: 4px;
+    transition: background 0.2s;
+    user-select: none;
+  }
+  .hd-checklist li:hover { background: rgba(0,0,0,0.04); }
+  .hd-checklist li.checked { text-decoration: line-through; opacity: 0.45; }
+  .hd-check-box {
+    width: 18px; height: 18px;
+    border: 2px solid currentColor;
+    border-radius: 4px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    font-size: 12px;
+  }
+  .hd-checklist li.checked .hd-check-box { background: currentColor; }
+  .hd-checklist li.checked .hd-check-box::after { content: '✓'; color: #fff; font-weight: 700; }
+
+  .hd-reset-btn {
+    display: inline-block;
+    margin-top: 8px;
+    font-size: 11px;
+    color: var(--brown);
+    background: none;
+    border: 1px dashed var(--brown);
+    padding: 2px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+  }
+  .hd-reset-btn:hover { opacity: 1; }
+
+  /* 异常项 */
+  .hd-exception {
+    background: rgba(0,0,0,0.03);
+    border-radius: 6px;
+    padding: 12px 14px;
+    margin-top: 14px;
+    border-left: 3px solid var(--step4);
+  }
+  .hd-ex-title {
+    font-weight: 700;
+    color: var(--ink);
+    font-size: 13px;
+    margin-bottom: 6px;
+  }
+  .hd-ex-desc {
+    font-size: 13px;
+    line-height: 1.7;
+    color: #4a3a2a;
+  }
+
+  /* 浮动提示 */
+  .hd-float-tip {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: var(--ink);
+    color: var(--paper);
+    padding: 10px 18px;
+    border-radius: 24px;
+    font-size: 13px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+    opacity: 0;
+    transform: translateY(10px);
+    transition: all 0.3s;
+    pointer-events: none;
+    z-index: 50;
+  }
+  .hd-float-tip.show { opacity: 1; transform: translateY(0); }
+
+  /* 总结 */
+  .hd-summary {
+    margin-top: 40px;
+    padding: 28px 32px;
+    background: linear-gradient(135deg, var(--ink) 0%, #2d1f0a 100%);
+    border-radius: 12px;
+    color: var(--paper);
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 6px 28px rgba(26,18,8,0.25);
+    animation: fadeUp 0.8s ease 0.8s both;
+  }
+  .hd-summary::before {
+    content: '✓';
+    position: absolute;
+    right: 24px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 100px;
+    color: rgba(200,146,42,0.08);
+    font-family: 'Noto Serif SC', serif;
+    font-weight: 900;
+    line-height: 1;
+  }
+  .hd-summary-title {
+    font-family: 'Noto Serif SC', serif;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--gold-light);
+    margin-bottom: 10px;
+    letter-spacing: 2px;
+  }
+  .hd-summary-text {
+    font-size: 13px;
+    line-height: 2;
+    color: rgba(245,240,232,0.85);
+    max-width: 580px;
+  }
+
+  @keyframes fadeInDown {
+    from { opacity: 0; transform: translateY(-16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @media (max-width: 640px) {
+    .hd-step { grid-template-columns: 54px 1fr; }
+    .hd-num { width: 40px; height: 40px; font-size: 16px; }
+    .hd-body { padding: 14px 0 22px 14px; }
+    .hd-content { padding: 14px 16px; }
+    .hd-summary { padding: 20px; }
+  }
+</style>
+
+<div class="bg-decoration">
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+</div>
+
+<div class="huandan-wrapper">
+  <div class="hd-topbar"></div>
+
+  <div class="huandan-container">
+
+    <header class="hd-header">
+      <div class="hd-badge">操作规范 · 狮岭皮具辅料</div>
+      <h1>换单<span></span>要点</h1>
+      <p class="hd-subtitle">七步核查流程 · 零差错出货标准</p>
+    </header>
+
+    <div class="hd-divider"></div>
+
+    <div class="hd-steps">
+
+      <!-- 步骤一：收单 -->
+      <div class="hd-step">
+        <div class="hd-axis">
+          <div class="hd-num">一</div>
+          <div class="hd-line"></div>
+        </div>
+        <div class="hd-body">
+          <span class="hd-tag">收单</span>
+          <h2 class="hd-step-title">装车单来了先看是否精诺的单，整支出货需处理多出数量，同厂家销售单连续打印</h2>
+          <div class="hd-content">
+            <p class="hd-text">
+              收到装车单后，<strong>首先检查是否精诺的单</strong>。精诺一般按整支出货，相较原始订单会有多出数量，换单时务必把多出数量的那张单也打出来。
+              <br><br>
+              需要<strong>复制单据补上每种商品多余的码数</strong>。例如：100g按支无纺布是175码一支，原始订单只有100码，但按整支送会多出75码，签单时100码和75码两张单都要拿过去签。
+              <br><br>
+              <strong>注意</strong>：第一张销售单才打印装车单，换单产生的第2张销售单不用打印装车单。
+              <br><br>
+              然后按<strong>生产厂家</strong>把所有相关的销售单筛选出来，<strong>连续打印在一起</strong>。同厂家的单据打在一起，拿在手里一目了然，方便后续合计总支数和散码数量。
+            </p>
+            <div class="hd-alert hd-alert-info">
+              <span class="hd-alert-icon">📋</span>
+              <span><strong>精诺客户特殊处理</strong>：精诺按整支出货，原始订单数量不足一支时会产生余码，必须同时打印原始数量单和余码单两张单据。第1张销售单打印装车单用于出货，换单产生的第2张销售单（余码单）不打印装车单，但两张单都要拿给客户签收。</span>
+            </div>
+            <ul class="hd-checklist" id="list1">
+              <li onclick="toggleCheck(this)"><span class="hd-check-box"></span>检查是否精诺的单，整支出货需处理多出数量</li>
+              <li onclick="toggleCheck(this)"><span class="hd-check-box"></span>复制单据，补上每种商品多余的码数</li>
+              <li onclick="toggleCheck(this)"><span class="hd-check-box"></span>第一张销售单打印装车单，第2张销售单不打印</li>
+              <li onclick="toggleCheck(this)"><span class="hd-check-box"></span>按厂家筛选销售单，同厂家连续打印</li>
+              <li onclick="toggleCheck(this)"><span class="hd-check-box"></span>打印后联单不撕开，用夹子夹住便于合计</li>
+            </ul>
+            <button class="hd-reset-btn" onclick="resetList('list1')">↺ 重置</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 步骤二：换单前 -->
+      <div class="hd-step">
+        <div class="hd-axis">
+          <div class="hd-num">二</div>
+          <div class="hd-line"></div>
+        </div>
+        <div class="hd-body">
+          <span class="hd-tag">换单前</span>
+          <h2 class="hd-step-title">检查表格中数量为零或价格未填的商品项目</h2>
+          <div class="hd-content">
+            <p class="hd-text">
+              换单操作<strong>开始之前</strong>，先看装车单中<strong>手工填写的数量</strong>，填入销售草稿。
+              <br><br>
+              然后打开销售表格，逐行扫描每个商品项目的数量字段和价格字段。
+            </p>
+            <ul>
+              <li><strong>数量栏</strong>为 <strong>「0」「空白」「—」</strong> 的行</li>
+              <li><strong>价格栏</strong>为 <strong>「空白」「0」「未填」</strong> 的行</li>
+            </ul>
+            <p class="hd-text">这两类项目极易在打印后造成混乱，必须在换单前确认处理方式。</p>
+            <div class="hd-alert hd-alert-warn">
+              <span class="hd-alert-icon">⚠️</span>
+              <span>数量为零或价格未填的项目若不处理，打印后容易被误认为有效商品，导致点数或结算时出现差异。换单前必须逐一核实并删除或备注。</span>
+            </div>
+            <ul class="hd-checklist" id="list2">
+              <li onclick="toggleCheck(this)"><span class="hd-check-box"></span>打开销售表格，滚动至全部商品行</li>
+              <li onclick="toggleCheck(this)"><span class="hd-check-box"></span>检查数量列：标记为 0、空白、— 的项目</li>
+              <li onclick="toggleCheck(this)"><span class="hd-check-box"></span>检查价格列：标记为空白、0、未填的项目</li>
+              <li onclick="toggleCheck(this)"><span class="hd-check-box"></span>与客户或业务确认：删除 / 保留 / 备注</li>
+            </ul>
+            <div class="hd-alert hd-alert-tip">
+              <span class="hd-alert-icon">⚖️</span>
+              <span><strong>计量单位注意</strong>：卷材和硬片按「斤」计重，地磅称重单位是 <strong>kg</strong>，填入表格时需<strong>乘2</strong>（如地磅显示 50kg → 填入 100斤）。无纺布按重量计，直接填写 kg 数即可（如 1.6kg → 填入 1.6）。</span>
+            </div>
+            <button class="hd-reset-btn" onclick="resetList('list2')">↺ 重置</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 步骤三：打印后 -->
+      <div class="hd-step">
+        <div class="hd-axis">
+          <div class="hd-num">三</div>
+          <div class="hd-line"></div>
+        </div>
+        <div class="hd-body">
+          <span class="hd-tag">打印后</span>
+          <h2 class="hd-step-title">打印销售单后再次核查零数量项目</h2>
+          <div class="hd-content">
+            <p class="hd-text">
+              销售单打印出来后，<strong>不要急着装车</strong>，先拿着纸质单据做第二轮检查。
+              <br><br>
+              打印过程中可能因格式问题导致数量显示异常，或者之前漏掉的零数量项目出现在单据上。
+            </p>
+            <div class="hd-alert hd-alert-tip">
+              <span class="hd-alert-icon">✅</span>
+              <span>建议用红笔在纸质单据上划掉数量为零的行，并在旁边注明「已确认」，避免后续点数时产生疑惑。</span>
+            </div>
+            <ul class="hd-checklist" id="list3">
+              <li onclick="toggleCheck(this)"><span class="hd-check-box"></span>拿到打印单据，逐行检查数量列</li>
+              <li onclick="toggleCheck(this)"><span class="hd-check-box"></span>用红笔标注或划掉数量为零的项目</li>
+              <li onclick="toggleCheck(this)"><span class="hd-check-box"></span>确认单据与系统数据一致后再继续</li>
+            </ul>
+            <button class="hd-reset-btn" onclick="resetList('list3')">↺ 重置</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 步骤四：异常处理 -->
+      <div class="hd-step">
+        <div class="hd-axis">
+          <div class="hd-num">四</div>
+          <div class="hd-line"></div>
+        </div>
+        <div class="hd-body">
+          <span class="hd-tag">异常处理</span>
+          <h2 class="hd-step-title">常见异常情况处理方法</h2>
+          <div class="hd-content">
+            <p class="hd-text">换单过程中遇到特殊情况，按照以下方式处理，避免遗漏或出错：</p>
+
+            <div class="hd-exception">
+              <div class="hd-ex-title">① 缺货商品处理</div>
+              <p class="hd-ex-desc">换单中发现某商品缺货时，<strong>复制原单据保留缺货商品</strong>，打印新的装车单。缺货商品需要在系统中单独开销售单时，<strong>务必把原销售单抬头的备注信息完整粘贴过去</strong>，确保信息可追溯。</p>
+              <ul class="hd-checklist" id="list4a">
+                <li onclick="toggleCheck(this)"><span class="hd-check-box"></span>复制原单据，保留缺货商品行</li>
+                <li onclick="toggleCheck(this)"><span class="hd-check-box"></span>新开销售单时粘贴原单备注信息</li>
+              </ul>
+            </div>
+
+            <div class="hd-exception">
+              <div class="hd-ex-title">② 赠品可以不用打单</div>
+            </div>
+
+            <div class="hd-exception">
+              <div class="hd-ex-title">③ 物流可以不用打单，但是要回收物流小票</div>
+            </div>
+
+            <button class="hd-reset-btn" onclick="resetList('list4a')">↺ 重置</button>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /hd-steps -->
+
+    <!-- 总结 -->
+    <div class="hd-summary">
+      <div class="hd-summary-title">🎯 核心原则：双重核查，零差错出货</div>
+      <p class="hd-summary-text">
+        换单操作的关键在于<strong style="color:var(--gold-light)">「合并打印 + 两次检查零数量」</strong>（换单前 + 打印后）。同厂家销售单合并打印便于合计，换单前排查数量为零或价格未填的项目，打印后再次核查纸质单据。缺货商品复制单据保留信息，赠品和物流可不打单但需回收小票。
+      </p>
+    </div>
+
+  </div>
+</div>
+
+<div class="hd-float-tip" id="floatTip">✓ 已完成</div>
+
+<script>
+  function toggleCheck(li) {
+    li.classList.toggle('checked');
+    showTip();
+  }
+  function resetList(id) {
+    document.querySelectorAll('#' + id + ' li').forEach(li => li.classList.remove('checked'));
+  }
+  let tipTimer;
+  function showTip() {
+    const tip = document.getElementById('floatTip');
+    if (!tip) return;
+    const done = document.querySelectorAll('.hd-checklist li.checked').length;
+    const total = document.querySelectorAll('.hd-checklist li').length;
+    tip.textContent = `✓ 已完成 ${done} / ${total} 项`;
+    tip.classList.add('show');
+    clearTimeout(tipTimer);
+    tipTimer = setTimeout(() => tip.classList.remove('show'), 2000);
+  }
+</script>
+{% endblock %}

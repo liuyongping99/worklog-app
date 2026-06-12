@@ -1,0 +1,1318 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+.loading-page .card-title { color: #00b894; border-bottom-color: #dfe6e9; }
+.loading-page .date-group { margin-bottom: 2rem; border: 1px solid #dfe6e9; border-radius: 12px; overflow: hidden; }
+.loading-page .group-header {
+    display: flex; align-items: center; gap: 0.75rem;
+    padding: 0.75rem 1rem; background: linear-gradient(135deg, #f8f9fa 0%, #d4f5e9 100%);
+    border-left: 4px solid #00b894;
+}
+.loading-page .group-date {
+    font-size: 1rem; font-weight: 700; color: #2d3436;
+}
+.loading-page .group-customer {
+    font-size: 0.9rem; color: #00b894; font-weight: 600;
+    padding: 0.2rem 0.6rem; background: #d4f5e9; border-radius: 12px;
+}
+.loading-page .order-num {
+    font-size: 0.8rem; color: #636e72; font-weight: 600;
+}
+.locked-tag { background: #d63031; color: white; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; }
+.lock-btn { background: #74b9ff; color: white; border: none; border-radius: 6px; padding: 0.3rem 0.6rem; font-size: 0.78rem; cursor: pointer; }
+.unlock-btn { background: #00b894; color: white; border: none; border-radius: 6px; padding: 0.3rem 0.6rem; font-size: 0.78rem; cursor: pointer; }
+.del-btn { background: #d63031; color: white; border: none; border-radius: 6px; padding: 0.3rem 0.6rem; font-size: 0.78rem; cursor: pointer; }
+.upload-btn-sm { background: #6c5ce7; color: white; border: none; border-radius: 6px; padding: 0.3rem 0.6rem; font-size: 0.78rem; cursor: pointer; }
+.upload-btn-sm:hover { background: #5b4bc4; }
+.lock-hide { display: inline-block; }
+.lock-show { display: none; }
+.date-group[data-locked="1"] .lock-hide { display: none !important; }
+.date-group[data-locked="1"] .lock-show { display: inline-block !important; }
+.img-count-badge { background: #00b894; color: white; padding: 0.15rem 0.4rem; border-radius: 8px; font-size: 0.7rem; }
+.qty-badge { background: #00b894; color: white; padding: 0.15rem 0.4rem; border-radius: 8px; font-size: 0.8rem; }
+.unit-badge { background: #636e72; color: white; padding: 0.15rem 0.4rem; border-radius: 8px; font-size: 0.75rem; }
+.remark-cell.has-content { color: #00b894; font-weight: 500; }
+.record-table { width: 100%; border-collapse: collapse; }
+.record-table th { background: #f8f9fa; padding: 0.65rem; font-size: 1.05rem; color: #636e72; text-align: left; border-bottom: 2px solid #dfe6e9; }
+.record-table td { padding: 0.65rem; border-bottom: 1px solid #f1f3f5; font-size: 1.1rem; }
+.loading-page .record-table tr.row-warn td { background: #ffdddd; }
+.loading-page .record-table tr.row-warn td:first-child { border-left: 4px solid #e74c3c; }
+.loading-page .record-table tr.row-warn:hover td { background: #ffcccc; }
+.loading-page .record-table tr.row-info td { background: #ffebee; }
+.loading-page .record-table tr.row-info td:first-child { border-left: 4px solid #ef9a9a; }
+.loading-page .record-table tr.row-info:hover td { background: #ffcdd2; }
+.quick-add { display: flex; gap: 0.5rem; padding: 0.5rem; background: #fafafa; flex-wrap: nowrap; align-items: center; width: 100%; box-sizing: border-box; }
+.quick-add input, .quick-add select { padding: 0.3rem 0.5rem; border: 1px solid #dfe6e9; border-radius: 4px; font-size: 0.85rem; flex: 1; min-width: 0; box-sizing: border-box; }
+.quick-add input[name="product_name"] { flex: 2; }
+.quick-add input[name="specification"] { flex: 1.5; }
+.quick-add input[name="quantity"] { flex: 1; min-width: 60px; }
+.quick-add select { flex: 1; min-width: 60px; }
+.quick-add input[name="remark"] { flex: 1.5; }
+.quick-add button { flex: 0 0 auto; padding: 0.3rem 1rem; font-size: 0.85rem; white-space: nowrap; }
+
+.loading-page .img-area .img-item { position: relative; overflow: hidden; border-radius: 8px; }
+.loading-page .img-area .img-item:hover .del-img-btn { opacity: 1; }
+.loading-page .del-img-btn { position: absolute; top: 8px; right: 8px; background: rgba(200,30,30,0.85); color: white; border: none; border-radius: 6px; padding: 0.35rem 0.75rem; font-size: 0.8rem; cursor: pointer; font-weight: 600; opacity: 0; transition: opacity 0.2s; z-index: 5; }
+.loading-page .img-area { display: grid; margin: 0.5rem 0; gap: 0.5rem; }
+.loading-page .img-area.cols-1 { grid-template-columns: 1fr; }
+.loading-page .img-area.cols-2 { grid-template-columns: repeat(2, 1fr); }
+.loading-page .img-area.cols-3 { grid-template-columns: repeat(3, 1fr); }
+.loading-page .img-area.cols-4 { grid-template-columns: repeat(4, 1fr); }
+.loading-page .img-area.cols-5 { grid-template-columns: repeat(5, 1fr); }
+.img-item { position: relative; border-radius: 8px; overflow: hidden; }
+.img-item img { width: 100%; height: 360px; object-fit: cover; cursor: pointer; }
+.img-col-btn { padding: 0.2rem 0.5rem; border: 1px solid #dfe6e9; background: white; border-radius: 4px; cursor: pointer; font-size: 0.75rem; }
+.img-col-btn.active { background: #00b894; color: white; border-color: #00b894; }
+.empty-state { text-align: center; padding: 3rem; color: #636e72; }
+.empty-state .icon { font-size: 3rem; margin-bottom: 1rem; }
+.btn-sm { padding: 0.25rem 0.6rem; font-size: 0.78rem; }
+
+/* 日期筛选弹框 */
+.date-range-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center; }
+.date-range-modal.show { display: flex; }
+.date-range-content { background: white; padding: 1.5rem; border-radius: 12px; min-width: 320px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+.date-range-content h3 { margin: 0 0 1rem 0; color: #2d3436; }
+.date-range-content label { display: block; font-size: 0.85rem; color: #636e72; margin-bottom: 0.3rem; }
+.date-range-content input[type="date"] { width: 100%; padding: 0.5rem; border: 1px solid #dfe6e9; border-radius: 6px; margin-bottom: 1rem; }
+.date-range-actions { display: flex; gap: 0.5rem; justify-content: flex-end; }
+.date-range-error { color: #d63031; font-size: 0.8rem; margin-bottom: 0.5rem; display: none; }
+
+/* 智能添加弹框 */
+.smart-add-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1010; justify-content: center; align-items: center; }
+.smart-add-modal.show { display: flex; }
+.smart-add-content { background: white; padding: 1.5rem; border-radius: 12px; min-width: 500px; max-width: 600px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+.smart-add-content h3 { margin: 0 0 1rem 0; color: #2d3436; }
+.smart-add-content textarea { width: 100%; min-height: 200px; padding: 0.5rem; border: 1px solid #dfe6e9; border-radius: 6px; font-family: monospace; font-size: 0.85rem; resize: vertical; }
+.smart-add-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem; }
+
+/* 图片上传弹框 */
+.loading-image-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1020; justify-content: center; align-items: center; }
+.loading-image-modal.show { display: flex; }
+.loading-image-modal .modal-content { background: white; padding: 1.5rem; border-radius: 12px; min-width: 400px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+/* 订单备注弹框 */
+.note-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1020; justify-content: center; align-items: center; }
+.note-modal.show { display: flex; }
+.note-modal .note-dialog { background: white; padding: 1.5rem; border-radius: 12px; min-width: 420px; max-width: 600px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+.note-modal .note-dialog h3 { margin: 0 0 0.5rem; color: #2d3436; font-size: 1.1rem; }
+.note-modal .note-dialog .order-info { color: #6c5ce7; font-size: 0.85rem; margin-bottom: 0.75rem; }
+.note-modal .note-dialog textarea { width: 100%; min-height: 120px; padding: 0.6rem; border: 1px solid #dfe6e9; border-radius: 6px; font-size: 0.9rem; font-family: inherit; box-sizing: border-box; resize: vertical; }
+.note-modal .note-dialog textarea:focus { outline: none; border-color: #6c5ce7; }
+.note-modal .note-dialog .actions { display: flex; gap: 0.75rem; justify-content: flex-end; margin-top: 1rem; }
+.upload-options { display: flex; gap: 1rem; margin: 1rem 0; }
+.upload-box { flex: 1; text-align: center; padding: 1.5rem; border: 2px dashed #dfe6e9; border-radius: 8px; cursor: pointer; transition: all 0.2s; }
+.upload-box:hover { border-color: #00b894; background: #d4f5e9; }
+.upload-box .icon { font-size: 2rem; margin-bottom: 0.5rem; }
+.upload-box .text { font-weight: 600; color: #2d3436; margin-bottom: 0.25rem; }
+.upload-box .hint { font-size: 0.75rem; color: #636e72; }
+.modal-img-preview { text-align: center; margin: 1rem 0; }
+.modal-img-preview img { max-width: 100%; max-height: 300px; border-radius: 6px; }
+.preview-actions { display: flex; gap: 0.5rem; justify-content: center; }
+
+/* 图片预览弹框 */
+.image-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 1030; justify-content: center; align-items: center; cursor: pointer; }
+.image-modal.show { display: flex; }
+.image-modal img { max-width: 90vw; max-height: 90vh; border-radius: 8px; }
+</style>
+
+<div class="loading-page">
+    <div class="page-header">
+        <h2 class="card-title">📦 新建装柜记录</h2>
+        <div style="margin-left: auto; display: flex; gap: 0.5rem;">
+
+        </div>
+    </div>
+
+    <!-- 日期筛选弹框 -->
+    <div class="date-range-modal" id="dateRangeModal">
+        <div class="date-range-content">
+            <h3>选择日期范围</h3>
+            <label>开始日期（当月1日）</label>
+            <input type="date" id="startDate" required>
+            <label>结束日期（当月最后一天）</label>
+            <input type="date" id="endDate" required>
+            <div class="date-range-error" id="dateError"></div>
+            <div class="date-range-actions">
+                <button class="btn btn-cancel" id="dateRangeCancel">取消</button>
+                <button class="btn btn-sm" id="dateRangeReset" style="background: #f1f3f5; color: #333;">重置为近10天</button>
+                <button class="btn btn-primary" id="dateRangeConfirm">确认</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 新建装柜单 -->
+    <div style="background: #f8f9fa; padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem;">
+        <form id="addOrderForm" style="display: flex; gap: 1rem; align-items: flex-end;">
+            <div>
+                <label style="display: block; font-weight: 600; font-size: 0.85rem; margin-bottom: 0.25rem;">日期</label>
+                <input type="date" name="date" value="{{ today }}" required style="padding: 0.4rem 0.6rem; border: 1px solid #dfe6e9; border-radius: 6px; font-size: 0.9rem;">
+            </div>
+            <div>
+                <label style="display: block; font-weight: 600; font-size: 0.85rem; margin-bottom: 0.25rem;">客户名称</label>
+                <input type="text" name="customer" value="央士" placeholder="客户名称（可选）" style="padding: 0.4rem 0.6rem; border: 1px solid #dfe6e9; border-radius: 6px; font-size: 0.9rem; width: 240px;">
+            </div>
+            <div style="display: flex; align-items: flex-end;">
+                <button type="submit" class="btn btn-primary">创建订单</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- 订单列表 -->
+    <!-- 装柜明细全局标题 -->
+    <div style="display:flex; align-items:center; justify-content:space-between; padding:0.4rem 1rem; background:#f8f9fa; border-bottom:1px solid #dfe6e9; margin-bottom:0.5rem;">
+        <span style="font-size:1.5rem; font-weight:600; color:#00b894;">📋 装柜明细</span>
+        <div style="display:flex; align-items:center; gap:0.5rem;">
+            <input type="text" id="searchInput" placeholder="🔍 搜索客户/商品" style="padding:0.3rem 0.6rem; border:1px solid #dfe6e9; border-radius:6px; font-size:0.82rem; width:150px;">
+            <span style="font-size:0.8rem; color:#636e72;">{{ start_date }} ~ {{ end_date }}</span>
+            <button id="dateRangeBtn" class="btn btn-sm lock-hide" style="background:#f1f3f5; color:#333;" onclick="openDateRangeModal()">⚙️</button>
+        </div>
+    </div>
+
+    <script>
+    document.getElementById('searchInput').addEventListener('input', function() {
+        var kw = this.value.trim().toLowerCase();
+        document.querySelectorAll('.loading-page .date-group').forEach(function(g) {
+            var customer = (g.querySelector('.group-customer') || {}).textContent || '';
+            var productNames = Array.from(g.querySelectorAll('.record-table td:nth-child(2)')).map(function(td) { return td.textContent; }).join(' ');
+            var specs = Array.from(g.querySelectorAll('.record-table td:nth-child(3)')).map(function(td) { return td.textContent; }).join(' ');
+            var match = !kw || customer.toLowerCase().includes(kw) || productNames.toLowerCase().includes(kw) || specs.toLowerCase().includes(kw);
+            g.style.display = match ? '' : 'none';
+        });
+    });
+    </script>
+    {% if groups %}
+        {% for group in groups %}
+        <div class="date-group" data-order-pk="{{ group.order_pk }}" data-locked="{{ '1' if group.is_locked else '0' }}">
+            <div class="group-header" style="display:flex; align-items:center; justify-content:space-between; gap:0.5rem;">
+                <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
+                    <span class="group-date">{{ group.date }}</span>
+                    {% if group.customer %}
+                    <span class="group-customer">{{ group.customer }}</span>
+                    {% endif %}
+                    <span class="order-num">订单 #{{ group.order_num }}</span>
+                    {% set img_count = order_images.get(group.order_pk, []) | length %}
+                    {% if img_count > 0 %}
+                    <span class="img-count-badge">{{ img_count }}张图片</span>
+                    {% endif %}
+                    <button type="button" class="smart-add-btn lock-hide" style="background:#ffeaa7; color:#2d3436; border:none; border-radius:4px; padding:0.3rem 0.6rem; font-size:0.78rem; cursor:pointer;" data-pk="{{ group.order_pk }}" data-date="{{ group.date }}" data-customer="{{ group.customer or '' }}">🧠 智能添加</button>
+                    <button type="button" class="note-btn lock-hide" style="background:#a29bfe; color:#fff; border:none; border-radius:4px; padding:0.3rem 0.6rem; font-size:0.78rem; cursor:pointer;{% if group.order_note %} box-shadow: 0 0 0 2px #6c5ce7;{% endif %}" data-pk="{{ group.order_pk }}" data-note="{{ group.order_note|e }}" title="{% if group.order_note %}修改备注{% else %}添加备注{% endif %}">📝 备注</button>
+                    <button type="button" class="upload-btn-sm lock-hide" onclick="openImageModal({{ group.order_pk }})">📷 图片</button>
+                </div>
+                <div style="display:flex; align-items:center; gap:0.5rem; margin-left:auto;">
+                    <button type="button" class="lock-btn lock-hide" onclick="toggleLock({{ group.order_pk }})">🔒 锁定</button>
+                    <button type="button" class="unlock-btn lock-show" onclick="toggleLock({{ group.order_pk }})">🔓 解锁</button>
+                    <span class="locked-tag lock-show">已锁定</span>
+                    <button type="button" class="del-btn lock-hide" onclick="deleteOrder({{ group.order_pk }})">删除</button>
+                </div>
+            </div>
+
+            {% if group.order_note %}
+            <div class="order-note-row" id="orderNote{{ group.order_pk }}" style="background:linear-gradient(90deg, #fff5e1 0%, #ffeaa7 100%); border-left:4px solid #fdcb6e; padding:0.5rem 0.75rem; margin:0.25rem 0; border-radius:6px; font-size:0.9rem; color:#2d3436; display:flex; align-items:flex-start; gap:0.5rem;">
+                <span style="font-weight:600; flex-shrink:0;">📝 备注：</span>
+                <span class="note-text" style="flex:1; white-space:pre-wrap; word-break:break-word;">{{ group.order_note }}</span>
+            </div>
+            {% endif %}
+
+            <table class="record-table" style="table-layout:fixed; width:100%;">
+                <colgroup>
+                    <col style="width:40px;">
+                    <col style="width:20%;">
+                    <col style="width:14%;">
+                    <col style="width:12%;">
+                    <col style="width:7%;">
+                    <col style="width:14%;">
+                    <col style="width:13%;">
+                    <col style="width:85px;">
+                </colgroup>
+                <thead>
+                    <tr>
+                        <th style="text-align:center;">序</th>
+                        <th>品名</th>
+                        <th>规格</th>
+                        <th>数量</th>
+                        <th>单位</th>
+                        <th>备注</th>
+                        <th>辅助单位提示</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for record in group.records %}
+                    <tr class="{% if record.mismatch == 'warn' %}row-warn{% elif record.mismatch == 'info' %}row-info{% endif %}">
+                        <td style="width:40px; text-align:center; color:#868e96; font-size:0.85rem;">{% if record.mismatch == 'warn' %}❌ {% elif record.mismatch == 'info' %}💡 {% endif %}{{ loop.index }}</td>
+                        <td>{{ record.product_name }}</td>
+                        <td>{{ record.specification or '-' }}</td>
+                        <td><span class="qty-badge">{{ record.quantity }}</span></td>
+                        <td><span class="unit-badge">{{ record.unit }}</span></td>
+                        <td class="remark-cell {{ 'has-content' if record.remark }}">
+                            {{ record.remark or '-' }}
+                        </td>
+                        <td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">{{ record.unit_hint or '—' }}</td>
+                        <td style="white-space: nowrap;">
+                            <button type="button" class="move-up-btn lock-hide" data-id="{{ record.id }}" onclick="moveRecord({{ record.id }}, 'up', this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;" title="上移">▲</button>
+                            <button type="button" class="move-down-btn lock-hide" data-id="{{ record.id }}" onclick="moveRecord({{ record.id }}, 'down', this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;margin-right:0.3rem;" title="下移">▼</button>
+                            <button type="button" class="edit-record-btn lock-hide" data-id="{{ record.id }}" onclick="editRecord({{ record.id }}, this)" style="background: none; border: none; color: #00b894; cursor: pointer; font-size: 0.85rem; margin-right: 0.4rem;" title="修改">✏️</button>
+                            <button type="button" class="del-record-btn lock-hide" data-id="{{ record.id }}" onclick="deleteRecord({{ record.id }}, this)" style="background: none; border: none; color: #ff7675; cursor: pointer; font-size: 0.85rem;" title="删除">🗑️</button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% if group.summary_pieces > 0 or group.summary_loose_pieces > 0 %}
+                    <tr class="summary-row" style="background:#f0fdf4; font-weight:600; border-top:2px solid #00b894;">
+                        <td colspan="6" style="text-align:right; padding:0.6rem 0.75rem; color:#00b894; font-size:0.9rem;">📊 备注汇总：</td>
+                        <td style="padding:0.6rem 0.75rem; color:#2d3436; font-size:0.9rem;">
+                            {{ group.summary_pieces }}支
+                            {% if group.summary_loose_pieces > 0 %}
+                            +{{ group.summary_loose_pieces }}支散码
+                            {% endif %}
+                        </td>
+                        <td style="padding:0.6rem 0.75rem;"></td>
+                    </tr>
+                    {% endif %}
+                    <tr class="quick-add-row lock-hide">
+                        <td colspan="8" style="padding: 0; background: #fafafa;">
+                            <form class="quick-add" data-order-pk="{{ group.order_pk }}">
+                                <input type="text" name="product_name" placeholder="品名" required>
+                                <input type="text" name="specification" placeholder="规格">
+                                <input type="text" name="quantity" placeholder="数量" required>
+                                <select name="unit">
+                                    <option value="支">支</option>
+                                    <option value="kg">kg</option>
+                                    <option value="y">y</option>
+                                    <option value="桶">桶</option>
+                                    <option value="张">张</option>
+                                    <option value="件">件</option>
+                                    <option value="块">块</option>
+                                </select>
+                                <input type="text" name="remark" placeholder="备注">
+                                <button type="submit" class="btn btn-primary btn-sm">添加</button>
+                            </form>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            
+            <!-- 图片区域 -->
+            {% set imgs = order_images.get(group.order_pk, []) %}
+            {% if imgs %}
+            <div class="img-area cols-{{ current_img_cols | default('3') }}" id="imgArea{{ group.order_pk }}">
+                <div style="display: flex; gap: 0.25rem; margin-bottom: 0.5rem; grid-column: 1 / -1;">
+                    <button class="img-col-btn {% if current_img_cols == '1' %}active{% endif %}" onclick="setImgCols(this, 1)">1</button>
+                    <button class="img-col-btn {% if current_img_cols == '2' %}active{% endif %}" onclick="setImgCols(this, 2)">2</button>
+                    <button class="img-col-btn {% if current_img_cols == '3' %}active{% endif %}" onclick="setImgCols(this, 3)">3</button>
+                    <button class="img-col-btn {% if current_img_cols == '4' %}active{% endif %}" onclick="setImgCols(this, 4)">4</button>
+                    <button class="img-col-btn {% if current_img_cols == '5' %}active{% endif %}" onclick="setImgCols(this, 5)">5</button>
+                </div>
+                {% for img in imgs %}
+                <div class="img-item">
+                    <img src="/upload/{{ img.relative_path }}" alt="{{ img.original_name or '图片' }}" onclick="showImgPreview('/upload/{{ img.relative_path }}')">
+                    {% if not group.is_locked %}
+                    <button class="del-img-btn" onclick="deleteImage({{ img.id }}, this)">删除</button>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="empty-state">
+            <div class="icon">📦</div>
+            <p>暂无装柜记录</p>
+        </div>
+    {% endif %}
+</div>
+
+<!-- 智能添加弹框 -->
+<div class="smart-add-modal" id="smartAddModal">
+    <div class="smart-add-content">
+        <h3>🧠 智能添加商品</h3>
+        <div id="smartAddOrderInfo" style="font-size: 0.9rem; color: #636e72; margin-bottom: 0.5rem;"></div>
+        <textarea id="smartAddText" placeholder="每行一个商品，格式：品名 规格 单位 数量 备注（空格/逗号/分号分隔）&#10;示例：&#10;产品A 规格1 支 100 备注1&#10;产品B 规格2 kg 200 备注2"></textarea>
+        <div class="smart-add-actions">
+            <button class="btn btn-cancel" onclick="closeSmartAdd()">取消</button>
+            <button class="btn btn-primary" onclick="submitSmartAdd()">确认添加</button>
+        </div>
+    </div>
+</div>
+
+<!-- 备注弹框 -->
+<div class="note-modal" id="noteModal">
+    <div class="note-dialog">
+        <h3 id="noteModalTitle">📝 订单备注</h3>
+        <p id="noteModalOrderInfo" class="order-info"></p>
+        <div style="margin-bottom:0.6rem;">
+            <label style="display:block; font-size:0.85rem; color:#636e72; margin-bottom:0.25rem; font-weight:600;">客户名称</label>
+            <input type="text" id="noteCustomerInput" placeholder="客户名称" style="width:100%; padding:0.5rem; border:1px solid #dfe6e9; border-radius:6px; font-size:0.9rem; box-sizing:border-box;">
+        </div>
+        <div>
+            <label style="display:block; font-size:0.85rem; color:#636e72; margin-bottom:0.25rem; font-weight:600;">订单备注</label>
+            <textarea id="noteTextarea" placeholder="请输入备注信息（可记录特殊情况、注意事项等）"></textarea>
+        </div>
+        <div class="actions">
+            <button type="button" class="btn" onclick="closeNoteModal()" style="background:#868e96;color:#fff;">取消</button>
+            <button type="button" class="btn" onclick="clearNote()" style="background:#fab1a0;color:#fff;">清空备注</button>
+            <button type="button" class="btn" onclick="saveNote()" style="background:#6c5ce7;color:#fff;">保存</button>
+        </div>
+    </div>
+</div>
+
+<!-- 图片上传弹框 -->
+<div class="loading-image-modal" id="imageModal">
+    <div class="modal-content">
+        <button class="modal-close" onclick="closeImageModal()">&times;</button>
+        <div class="modal-title">上传图片</div>
+        <div class="upload-options">
+            <div class="upload-box" id="pasteBox" onclick="activatePaste()">
+                <div class="icon">📋</div>
+                <div class="text">粘贴图片</div>
+                <div class="hint">Ctrl+V 粘贴</div>
+            </div>
+            <div class="upload-box" onclick="document.getElementById('fileInput').click()">
+                <div class="icon">📁</div>
+                <div class="text">选择文件</div>
+                <div class="hint">支持 jpg/png</div>
+            </div>
+        </div>
+        <input type="file" id="fileInput" accept="image/*" style="display: none;" onchange="handleFileSelect(this)">
+        <div id="modalImgPreview" class="modal-img-preview"></div>
+        <div style="text-align:center;">
+            <button type="button" id="rotateUploadBtn" onclick="rotateUploadImage();" style="display:none; padding:0.5rem 1rem; background:#f1f3f5; color:#333; border:1px solid #dfe6e9; border-radius:6px; cursor:pointer; font-size:0.85rem; font-weight:600;">🔄 旋转90°</button>
+        </div>
+        <div class="preview-actions" id="previewActions" style="display: none;">
+            <button class="btn btn-cancel" onclick="clearPreview()">取消</button>
+            <button class="btn btn-confirm" onclick="confirmUpload()">确认上传</button>
+        </div>
+    </div>
+</div>
+
+<script>
+var LOADING_UNIT_LIST = {{ unit_list | default([]) | tojson }};
+
+function findLoadingUnit(productName, spec) {
+    if (spec) {
+        for (var i = 0; i < LOADING_UNIT_LIST.length; i++) {
+            var u = LOADING_UNIT_LIST[i];
+            if (u.product_name === productName && u.spec_keyword && spec.indexOf(u.spec_keyword) !== -1) {
+                return u;
+            }
+        }
+    }
+    for (var i = 0; i < LOADING_UNIT_LIST.length; i++) {
+        var u = LOADING_UNIT_LIST[i];
+        if (u.product_name === productName && !u.spec_keyword) {
+            return u;
+        }
+    }
+    return null;
+}
+
+function getLoadingUnitHint(productName, spec, quantity) {
+    var u = findLoadingUnit(productName, spec);
+    if (!u || !u.is_usingyardforcounting || u.yards_per_piece <= 0) return '';
+    var qty = parseFloat(quantity);
+    if (isNaN(qty)) return '';
+    var ypp = u.yards_per_piece;
+    var pieces = Math.floor(qty / ypp);
+    var remainder = qty - (pieces * ypp);
+    if (remainder < 0.01) return pieces + '支';
+    return pieces + '支+' + Math.round(remainder * 100) / 100 + '码';
+}
+
+function checkLoadingMismatch(remark, quantity, productName, spec) {
+    var u = findLoadingUnit(productName, spec);
+    if (!u || !u.is_usingyardforcounting || u.yards_per_piece <= 0) return '';
+    if (!remark) return '';
+    var m = remark.match(/(\d+)支/);
+    if (!m) return '';
+    var pieces = parseInt(m[1]);
+    var ypp = u.yards_per_piece;
+
+    // 解析每支码数（* 形式 → 乘法语义，期望 = pieces × ypp，不加 ypp 后的数字）
+    // 例如 "3支*48.5y" → 每支 48.5 码，期望 = 3 × ypp（ypp 应等于 48.5）
+    var perPieceYards = null;
+    var perPieceMatch = remark.match(/(\d+(?:\.\d+)?)\s*[yY码]\s*\*\s*(\d+)支/);
+    if (!perPieceMatch) {
+        perPieceMatch = remark.match(/(\d+)支\s*\*\s*(\d+(?:\.\d+)?)\s*[yY码]/);
+        if (perPieceMatch) perPieceYards = parseFloat(perPieceMatch[2]);
+    } else {
+        perPieceYards = parseFloat(perPieceMatch[1]);
+    }
+
+    // 散码累加：排除掉 * 形式里那两个数字，只算独立的 +Yy 或裸 Yy
+    var loose = 0;
+    // 先把 * 形式整段从备注里抠掉，剩下的码数才是真正的"散码"
+    var remarkWithoutMul = remark
+        .replace(/(\d+(?:\.\d+)?)\s*[yY码]\s*\*\s*(\d+)支/g, '')
+        .replace(/(\d+)支\s*\*\s*(\d+(?:\.\d+)?)\s*[yY码]/g, '');
+    var yardRe = /(\d+(?:\.\d+)?)\s*[yY码]/g;
+    var ym;
+    while ((ym = yardRe.exec(remarkWithoutMul)) !== null) {
+        loose += parseFloat(ym[1]);
+    }
+
+    // 期望 = pieces × 每支码数（来自 * 或来自 product_units 的 ypp）+ 散码
+    var yardsPerPiece = perPieceYards != null ? perPieceYards : ypp;
+    var expected = pieces * yardsPerPiece + loose;
+    var actual = parseFloat(quantity);
+    if (isNaN(actual)) return '';
+    if (Math.abs(expected - actual) <= 0.01) return '';
+    return pieces === 1 ? 'info' : 'warn';
+}
+
+function loadingMismatchIcon(level) {
+    if (level === 'warn') return '❌ ';
+    if (level === 'info') return '💡 ';
+    return '';
+}
+
+function applyLoadingMismatch(tr, level) {
+    tr.classList.remove('row-warn', 'row-info');
+    if (level) tr.classList.add(level === 'warn' ? 'row-warn' : 'row-info');
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    // === 全局变量 ===
+    var currentSmartOrderPk = null;
+    var currentOrderPk = null;
+    var pendingFile = null;
+    var uploadImageRotation = 0;
+
+    // === 公共错误处理函数 ===
+    function handleApiError(err, context) {
+        console.error(context + ' error:', err);
+        alert(context + '失败：' + err.message);
+    }
+
+    function checkResponse(r) {
+        if (!r.ok) {
+            return r.json().then(function(body) {
+                throw new Error(body.error || ('请求失败: HTTP ' + r.status));
+            }, function() {
+                throw new Error('请求失败: HTTP ' + r.status);
+            });
+        }
+        return r.json();
+    }
+
+    // === 日期筛选弹框 ===
+    var dateRangeModal = document.getElementById('dateRangeModal');
+    var dateRangeBtn = document.getElementById('dateRangeBtn');
+    var dateRangeCancelBtn = document.getElementById('dateRangeCancel');
+    var dateRangeConfirmBtn = document.getElementById('dateRangeConfirm');
+    var dateRangeResetBtn = document.getElementById('dateRangeReset');
+    var startDateEl = document.getElementById('startDate');
+    var endDateEl = document.getElementById('endDate');
+    var dateErrorEl = document.getElementById('dateError');
+
+    var currentStart = '{{ start_date }}';
+    var currentEnd = '{{ end_date }}';
+
+    // 初始化：localStorage 记忆
+    var savedStart = localStorage.getItem('loading_start_date');
+    var savedEnd = localStorage.getItem('loading_end_date');
+    if (savedStart && savedEnd && (savedStart !== currentStart || savedEnd !== currentEnd)) {
+        window.location.href = '/loading-orders?start_date=' + savedStart + '&end_date=' + savedEnd;
+        return;
+    }
+
+    function openDateRangeModal() {
+        startDateEl.value = currentStart;
+        endDateEl.value = currentEnd;
+        dateErrorEl.style.display = 'none';
+        dateRangeModal.classList.add('show');
+    }
+    function closeDateRangeModal() {
+        dateRangeModal.classList.remove('show');
+    }
+    function showDateError(msg) {
+        dateErrorEl.textContent = msg;
+        dateErrorEl.style.display = 'block';
+    }
+
+    window.openDateRangeModal = openDateRangeModal;
+    dateRangeBtn.addEventListener('click', openDateRangeModal);
+    dateRangeCancelBtn.addEventListener('click', closeDateRangeModal);
+    dateRangeModal.addEventListener('click', function(e) { if (e.target === dateRangeModal) closeDateRangeModal(); });
+
+    dateRangeResetBtn.addEventListener('click', function() {
+        var end = new Date();
+        var start = new Date();
+        start.setDate(start.getDate() - 9);
+        startDateEl.value = start.toISOString().split('T')[0];
+        endDateEl.value = end.toISOString().split('T')[0];
+        dateErrorEl.style.display = 'none';
+    });
+
+    // 联动：开始日期改变时，结束日期限制同月
+    startDateEl.addEventListener('change', function() {
+        var s = startDateEl.value;
+        if (s) {
+            var ym = s.substring(0, 7);
+            var parts = ym.split('-');
+            var y = parseInt(parts[0]), m = parseInt(parts[1]);
+            var lastDay = new Date(y, m, 0).getDate();
+            endDateEl.min = ym + '-01';
+            endDateEl.max = ym + '-' + String(lastDay).padStart(2, '0');
+        }
+    });
+
+    dateRangeConfirmBtn.addEventListener('click', function() {
+        dateErrorEl.style.display = 'none';
+        var s = startDateEl.value;
+        var e = endDateEl.value;
+        if (!s || !e) { showDateError('请选择起止日期'); return; }
+        if (s > e) { showDateError('开始日期不能晚于结束日期'); return; }
+        var sMonth = s.substring(0, 7);
+        var eMonth = e.substring(0, 7);
+        if (sMonth !== eMonth) { showDateError('不能跨月选择'); return; }
+        // 保存到 localStorage
+        localStorage.setItem('loading_start_date', s);
+        localStorage.setItem('loading_end_date', e);
+        window.location.href = '/loading-orders?start_date=' + s + '&end_date=' + e;
+    });
+
+    // === 创建订单表单 ===
+    var addOrderForm = document.getElementById('addOrderForm');
+    if (addOrderForm) {
+        addOrderForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            var form = e.target;
+            var data = {
+                date: form.date.value,
+                customer: form.customer.value
+            };
+            console.log('提交创建订单:', data);
+            try {
+                var res = await fetch('/api/v1/loading-orders', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
+                console.log('响应状态:', res.status);
+                var result = await res.json();
+                console.log('响应结果:', result);
+                if (result.success) {
+                    console.log('订单创建成功, ID:', result.id);
+                    location.reload();
+                } else {
+                    alert('添加失败: ' + (result.error || '未知错误'));
+                }
+            } catch (err) {
+                console.error('请求失败:', err);
+                alert('请求失败: ' + err.message);
+            }
+        });
+    }
+
+    // === 智能添加功能 ===
+    document.querySelectorAll('.smart-add-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var pk = this.getAttribute('data-pk');
+            var date = this.getAttribute('data-date');
+            var customer = this.getAttribute('data-customer');
+            openSmartAdd(pk, date, customer);
+        });
+    });
+
+    window.openSmartAdd = function(orderPk, orderDate, orderCustomer) {
+        currentSmartOrderPk = orderPk;
+        var modal = document.getElementById('smartAddModal');
+        if (modal) modal.classList.add('show');
+        var textarea = document.getElementById('smartAddText');
+        if (textarea) textarea.value = '';
+        var info = document.getElementById('smartAddOrderInfo');
+        if (info) info.textContent = '📦 ' + orderDate + ' ' + orderCustomer;
+        if (textarea) textarea.focus();
+    };
+
+    window.closeSmartAdd = function() {
+        var modal = document.getElementById('smartAddModal');
+        if (modal) modal.classList.remove('show');
+        var textarea = document.getElementById('smartAddText');
+        if (textarea) textarea.value = '';
+        currentSmartOrderPk = null;
+    };
+
+    document.getElementById('smartAddModal').addEventListener('click', function(e) {
+        if (e.target === this) window.closeSmartAdd();
+    });
+
+    // 统一处理 Escape 键关闭弹框
+    document.addEventListener('keydown', function(e) {
+        if (e.key !== 'Escape') return;
+        if (document.getElementById('smartAddModal').classList.contains('show')) {
+            window.closeSmartAdd();
+        } else if (dateRangeModal.classList.contains('show')) {
+            closeDateRangeModal();
+        }
+    });
+
+    window.submitSmartAdd = function() {
+        var text = document.getElementById('smartAddText').value.trim();
+        if (!text) { alert('请输入要添加的商品信息'); return; }
+        var lines = text.split('\n').filter(function(l) { return l.trim(); });
+        var items = [];
+        for (var i = 0; i < lines.length; i++) {
+            var parts = lines[i].trim().split(/[\s,;\t]+/).filter(function(p) { return p; });
+            if (parts.length >= 4) {
+                var unit = parts[2];
+                if (unit === '码') unit = 'y';
+                items.push({
+                    product_name: parts[0],
+                    specification: parts[1],
+                    quantity: parts[3],
+                    unit: unit,
+                    remark: parts.slice(4).join(' ')
+                });
+            }
+        }
+        if (items.length === 0) { alert('未识别到有效数据'); return; }
+        fetch('/api/v1/loading-orders/' + currentSmartOrderPk + '/records/batch', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({records: items})
+        }).then(checkResponse)
+        .then(function(data) {
+            if (data.success) {
+                // 插入所有新行（不先关闭弹框，避免变量被清空）
+                var dateGroup = document.querySelector('.date-group[data-order-pk="' + currentSmartOrderPk + '"]');
+                if (!dateGroup) {
+                    alert('未找到订单区域，请刷新页面。');
+                    window.closeSmartAdd();
+                    return;
+                }
+                var tbody = dateGroup.querySelector('.record-table tbody');
+                if (!tbody) {
+                    alert('未找到明细表，请刷新页面。');
+                    window.closeSmartAdd();
+                    return;
+                }
+                var quickAddRow = tbody.querySelector('.quick-add-row');
+                var firstNewTr = null;
+                data.records.forEach(function(rec) {
+                    var tr = buildLoadingRecordRow(rec, tbody);
+                    tbody.insertBefore(tr, quickAddRow);
+                    if (!firstNewTr) firstNewTr = tr;
+                });
+                recalcLoadingSummary(dateGroup);
+                window.closeSmartAdd();
+                if (firstNewTr) firstNewTr.scrollIntoView({behavior: 'smooth', block: 'center'});
+            } else {
+                alert('添加失败：' + (data.error || '未知错误'));
+            }
+        }).catch(function(err) { handleApiError(err, '智能添加'); });
+    };
+
+    // === 图片上传功能 ===
+    window.openImageModal = function(orderPk) {
+        currentOrderPk = orderPk;
+        document.getElementById('imageModal').classList.add('show');
+        clearPreview();
+    };
+
+    window.closeImageModal = function() {
+        document.getElementById('imageModal').classList.remove('show');
+        currentOrderPk = null;
+        pendingFile = null;
+        uploadImageRotation = 0;
+        clearPreview();
+    };
+
+    window.activatePaste = function() {
+        document.getElementById('pasteBox').classList.add('active');
+        document.addEventListener('paste', handlePaste);
+        setTimeout(function() {
+            document.getElementById('pasteBox').classList.remove('active');
+            document.removeEventListener('paste', handlePaste);
+        }, 30000);
+    };
+
+    function handlePaste(e) {
+        var items = e.clipboardData.items;
+        for (var i = 0; i < items.length; i++) {
+            if (items[i].type.startsWith('image/')) {
+                var file = items[i].getAsFile();
+                showPreview(file);
+                break;
+            }
+        }
+    }
+
+    window.handleFileSelect = function(input) {
+        if (input.files && input.files[0]) {
+            showPreview(input.files[0]);
+        }
+    };
+
+    function showPreview(file) {
+        pendingFile = file;
+        uploadImageRotation = 0;
+        var reader = new FileReader();
+        reader.onload = function(e) {
+            var preview = document.getElementById('modalImgPreview');
+            preview.innerHTML = '<img src="' + e.target.result + '" style="max-width:100%; max-height:300px; border-radius:6px;">';
+            document.getElementById('previewActions').style.display = 'block';
+            document.getElementById('rotateUploadBtn').style.display = 'inline-block';
+        };
+        reader.readAsDataURL(file);
+    }
+
+    window.clearPreview = function() {
+        pendingFile = null;
+        uploadImageRotation = 0;
+        document.getElementById('modalImgPreview').innerHTML = '';
+        document.getElementById('previewActions').style.display = 'none';
+        document.getElementById('rotateUploadBtn').style.display = 'none';
+        document.getElementById('fileInput').value = '';
+    };
+
+    window.rotateUploadImage = function() {
+        if (!pendingFile) return;
+        uploadImageRotation = (uploadImageRotation + 90) % 360;
+        var img = document.getElementById('modalImgPreview').querySelector('img');
+        if (img) img.style.transform = 'rotate(' + uploadImageRotation + 'deg)';
+    };
+
+    window.confirmUpload = function() {
+        if (!pendingFile || !currentOrderPk) { alert('未选择图片或订单'); return; }
+
+        var canvas = document.createElement('canvas');
+        var ctx = canvas.getContext('2d');
+        var img = new Image();
+        var objectUrl = URL.createObjectURL(pendingFile);
+        img.onload = function() {
+            // 释放 object URL，避免内存泄漏
+            URL.revokeObjectURL(objectUrl);
+
+            if (uploadImageRotation % 180 === 90) {
+                canvas.width = img.height;
+                canvas.height = img.width;
+            } else {
+                canvas.width = img.width;
+                canvas.height = img.height;
+            }
+            ctx.save();
+            ctx.translate(canvas.width/2, canvas.height/2);
+            ctx.rotate(uploadImageRotation * Math.PI / 180);
+            ctx.drawImage(img, -img.width/2, -img.height/2);
+            ctx.restore();
+
+            canvas.toBlob(function(blob) {
+                var formData = new FormData();
+                formData.append('image', blob, pendingFile.name || 'image.png');
+                formData.append('order_pk', currentOrderPk);
+
+                fetch('/api/v1/loading-orders/' + currentOrderPk + '/images', {
+                    method: 'POST',
+                    body: formData
+                }).then(checkResponse)
+                .then(function(data) {
+                    if (data.success) {
+                        var orderPkSaved = currentOrderPk;
+                        closeImageModal();
+                        // 追加图片到 DOM
+                        var dateGroup = document.querySelector('.date-group[data-order-pk="' + orderPkSaved + '"]');
+                        var imgArea = dateGroup ? dateGroup.querySelector('.img-area') : null;
+                        if (!imgArea) {
+                            // 创建图片区域
+                            imgArea = document.createElement('div');
+                            imgArea.className = 'img-area cols-3';
+                            imgArea.id = 'imgArea' + orderPkSaved;
+                            var savedCols = localStorage.getItem('loading-img-cols') || '5';
+                            imgArea.className = 'img-area cols-' + savedCols;
+                            imgArea.dataset.cols = savedCols;
+                            imgArea.innerHTML = '<div style="display:flex;gap:0.25rem;margin-bottom:0.5rem;grid-column:1/-1;">' +
+                                '<button class="img-col-btn' + (savedCols === '1' ? ' active' : '') + '" onclick="setImgCols(this,1)">1</button>' +
+                                '<button class="img-col-btn' + (savedCols === '2' ? ' active' : '') + '" onclick="setImgCols(this,2)">2</button>' +
+                                '<button class="img-col-btn' + (savedCols === '3' ? ' active' : '') + '" onclick="setImgCols(this,3)">3</button>' +
+                                '<button class="img-col-btn' + (savedCols === '4' ? ' active' : '') + '" onclick="setImgCols(this,4)">4</button>' +
+                                '<button class="img-col-btn' + (savedCols === '5' ? ' active' : '') + '" onclick="setImgCols(this,5)">5</button></div>';
+                            dateGroup.appendChild(imgArea);
+                        }
+                        var imgItem = document.createElement('div');
+                        imgItem.className = 'img-item';
+                        imgItem.innerHTML = '<img src="/upload/' + data.image + '" alt="图片" onclick="showImgPreview(\'/upload/' + data.image + '\')">' +
+                            '<button class="del-img-btn" onclick="deleteImage(' + data.image_id + ', this)">删除</button>';
+                        imgArea.appendChild(imgItem);
+                    } else {
+                        alert('上传失败：' + (data.error || '未知错误'));
+                    }
+                }).catch(function(err) { handleApiError(err, '图片上传'); });
+            }, 'image/png');
+        };
+        img.onerror = function() {
+            URL.revokeObjectURL(objectUrl);
+            alert('图片加载失败');
+        };
+        img.src = objectUrl;
+    };
+
+    window.deleteImage = function(imageId, btn) {
+        if (!confirm('确定删除这张图片？')) return;
+        fetch('/api/v1/loading-orders/images/' + imageId, {
+            method: 'DELETE'
+        }).then(checkResponse)
+        .then(function(data) {
+            if (data.success) {
+                // 从 DOM 中移除图片元素
+                var imgItem = btn.closest('.img-item');
+                if (imgItem) {
+                    var imgArea = imgItem.closest('.img-area');
+                    imgItem.remove();
+                    // 如果区域中没有图片了，移除整个区域
+                    if (imgArea && imgArea.querySelectorAll('.img-item').length === 0) {
+                        imgArea.remove();
+                    }
+                }
+            } else {
+                alert('删除失败：' + (data.error || '未知错误'));
+            }
+        }).catch(function(err) { handleApiError(err, '删除图片'); });
+    };
+
+    // === 其他功能 ===
+    window.toggleLock = function(orderPk) {
+        var group = document.querySelector('.date-group[data-order-pk="' + orderPk + '"]');
+        var currentlyLocked = group ? group.getAttribute('data-locked') === '1' : false;
+        fetch('/api/v1/loading-orders/' + orderPk, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({is_locked: !currentlyLocked})
+        }).then(checkResponse)
+        .then(function(data) {
+            if (data.success) {
+                if (group) {
+                    group.setAttribute('data-locked', data.is_locked ? '1' : '0');
+                }
+            } else {
+                alert('操作失败：' + (data.error || '未知错误'));
+            }
+        }).catch(function(err) { handleApiError(err, '锁定操作'); });
+    };
+
+    window.deleteOrder = function(orderPk) {
+        if (!confirm('确定删除这个订单及其所有记录？')) return;
+        fetch('/api/v1/loading-orders/' + orderPk, {
+            method: 'DELETE'
+        }).then(checkResponse)
+        .then(function(data) {
+            if (data.success) {
+                var section = document.querySelector('.date-group[data-order-pk="' + orderPk + '"]');
+                if (section) section.remove();
+            } else {
+                alert('删除失败：' + (data.error || '未知错误'));
+            }
+        }).catch(function(err) { handleApiError(err, '删除订单'); });
+    };
+
+    window.editRecord = function(recordId, btn) {
+        var tr = btn.closest('tr');
+        var tds = tr.querySelectorAll('td');
+        var seq = tds[0].textContent.trim();
+        var name = tds[1].textContent.trim();
+        var spec = tds[2].textContent.trim();
+        var qty = tds[3].textContent.trim();
+        var unit = tds[4].textContent.trim();
+        var remark = tds[5].textContent.trim();
+
+        // 保存原始行内容用于取消
+        tr.dataset.orig = JSON.stringify({name: name, spec: spec, qty: qty, unit: unit, remark: remark});
+        tr.dataset.seq = seq;
+        tr.dataset.editId = recordId;
+
+        var units = ['支','kg','y','桶','张','件','块'];
+        var unitOptions = units.map(function(u) {
+            return u === unit ? "<option value='"+u+"' selected>"+u+"</option>" : "<option value='"+u+"'>"+u+"</option>";
+        }).join('');
+
+        // 编辑模式下的辅助单位提示：根据当前输入值实时计算
+        var editingHint = getLoadingUnitHint(name, spec, qty) || '—';
+
+        tr.innerHTML = '<td style="width:36px; text-align:center; color:#868e96; font-size:0.85rem;">'+seq+'</td>' +
+            '<td><input type="text" name="name" value="'+name+'" style="width:100%;padding:0.65rem;border:1px solid #dfe6e9;border-radius:4px;font-size:1.1rem;box-sizing:border-box;"></td>' +
+            '<td><input type="text" name="spec" value="'+spec+'" style="width:100%;padding:0.65rem;border:1px solid #dfe6e9;border-radius:4px;font-size:1.1rem;box-sizing:border-box;"></td>' +
+            '<td><input type="number" name="qty" value="'+qty+'" style="width:100%;padding:0.65rem;border:1px solid #dfe6e9;border-radius:4px;font-size:1.1rem;box-sizing:border-box;"></td>' +
+            '<td><select name="unit" style="padding:0.65rem;border:1px solid #dfe6e9;border-radius:4px;font-size:1.1rem;box-sizing:border-box;">'+unitOptions+'</select></td>' +
+            '<td><input type="text" name="remark" value="'+remark+'" style="width:100%;padding:0.65rem;border:1px solid #dfe6e9;border-radius:4px;font-size:1.1rem;box-sizing:border-box;"></td>' +
+            '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">'+editingHint+'</td>' +
+            '<td style="white-space:nowrap;">' +
+                "<button type='button' onclick='saveEdit(this)' style='background:#00b894;color:white;border:none;border-radius:4px;padding:0.2rem 0.5rem;font-size:0.75rem;cursor:pointer;margin-right:0.25rem;'>保存</button>" +
+                "<button type='button' onclick='cancelEdit(this)' style='background:#b2bec3;color:white;border:none;border-radius:4px;padding:0.2rem 0.5rem;font-size:0.75rem;cursor:pointer;'>取消</button></td>";
+    };
+
+    window.saveEdit = function(btn) {
+        var tr = btn.closest('tr');
+        var recordId = tr.dataset.editId;
+        var seq = tr.dataset.seq;
+        var data = {
+            product_name: tr.querySelector('input[name=name]').value,
+            specification: tr.querySelector('input[name=spec]').value,
+            quantity: tr.querySelector('input[name=qty]').value,
+            unit: tr.querySelector('select[name=unit]').value,
+            remark: tr.querySelector('input[name=remark]').value
+        };
+        fetch('/api/v1/loading-orders/records/' + recordId, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        }).then(checkResponse)
+        .then(function(res) {
+            if (res.success && res.record) {
+                var r = res.record;
+                var remarkClass = r.remark ? 'remark-cell has-content' : 'remark-cell';
+                var unitHint = getLoadingUnitHint(r.product_name, r.specification || '', r.quantity) || '—';
+                var mismatch = checkLoadingMismatch(r.remark || '', r.quantity, r.product_name, r.specification || '');
+                tr.innerHTML = '<td style="width:36px; text-align:center; color:#868e96; font-size:0.85rem;">' + loadingMismatchIcon(mismatch) + seq + '</td>' +
+                    '<td>' + r.product_name + '</td>' +
+                    '<td>' + (r.specification || '-') + '</td>' +
+                    '<td><span class="qty-badge">' + r.quantity + '</span></td>' +
+                    '<td><span class="unit-badge">' + r.unit + '</span></td>' +
+                    '<td class="' + remarkClass + '">' + (r.remark || '-') + '</td>' +
+                    '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">' + unitHint + '</td>' +
+                    '<td style="white-space:nowrap;">' +
+                        '<button type="button" class="move-up-btn lock-hide" data-id="' + r.id + '" onclick="moveRecord(' + r.id + ',\'up\',this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;" title="上移">▲</button>' +
+                        '<button type="button" class="move-down-btn lock-hide" data-id="' + r.id + '" onclick="moveRecord(' + r.id + ',\'down\',this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;margin-right:0.3rem;" title="下移">▼</button>' +
+                        '<button type="button" class="edit-record-btn lock-hide" data-id="' + r.id + '" onclick="editRecord(' + r.id + ', this)" style="background:none;border:none;color:#00b894;cursor:pointer;font-size:0.85rem;margin-right:0.4rem;" title="修改">✏️</button>' +
+                        '<button type="button" class="del-record-btn lock-hide" data-id="' + r.id + '" onclick="deleteRecord(' + r.id + ', this)" style="background:none;border:none;color:#ff7675;cursor:pointer;font-size:0.85rem;" title="删除">🗑️</button>' +
+                    '</td>';
+                applyLoadingMismatch(tr, mismatch);
+                recalcLoadingSummary(tr.closest('.date-group'));
+            } else {
+                alert('保存失败：' + (res.error || '未知错误'));
+            }
+        }).catch(function(err) { handleApiError(err, '保存记录'); });
+    };
+
+    window.cancelEdit = function(btn) {
+        var tr = btn.closest('tr');
+        var orig = JSON.parse(tr.dataset.orig);
+        var units = ['支','kg','y','桶','张','件','块'];
+        var unitOptions = units.map(function(u) {
+            return u === orig.unit ? "<option value='"+u+"' selected>"+u+"</option>" : "<option value='"+u+"'>"+u+"</option>";
+        }).join('');
+        var unitHint = getLoadingUnitHint(orig.name, orig.spec, orig.qty) || '—';
+        tr.innerHTML = '<td style="width:36px; text-align:center; color:#868e96; font-size:0.85rem;">'+tr.dataset.seq+'</td>' +
+            '<td>'+orig.name+'</td>' +
+            '<td>'+orig.spec+'</td>' +
+            '<td>'+orig.qty+'</td>' +
+            '<td>'+orig.unit+'</td>' +
+            '<td class="remark-cell '+(orig.remark ? 'has-content' : '')+'">'+orig.remark+'</td>' +
+            '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">'+unitHint+'</td>' +
+            '<td class="lock-hide" style="white-space:nowrap;">' +
+                "<button type='button' class='move-up-btn lock-hide' data-id='"+tr.dataset.editId+"' onclick='moveRecord("+tr.dataset.editId+",\"up\",this)' style='background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;' title='上移'>▲</button>" +
+                "<button type='button' class='move-down-btn lock-hide' data-id='"+tr.dataset.editId+"' onclick='moveRecord("+tr.dataset.editId+",\"down\",this)' style='background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;margin-right:0.3rem;' title='下移'>▼</button>" +
+                "<button type='button' class='edit-record-btn lock-hide' data-id='"+tr.dataset.editId+"' onclick='editRecord("+tr.dataset.editId+", this)' style='background:none;border:none;color:#00b894;cursor:pointer;font-size:0.85rem;margin-right:0.4rem;' title='修改'>✏️</button>" +
+                "<button type='button' class='del-record-btn lock-hide' data-id='"+tr.dataset.editId+"' onclick='deleteRecord("+tr.dataset.editId+", this)' style='background:none;border:none;color:#ff7675;cursor:pointer;font-size:0.85rem;' title='删除'>🗑️</button>" +
+            '</td>';
+    };
+
+    window.deleteRecord = function(recordId, btn) {
+        if (!confirm('确定删除这条记录？')) return;
+        fetch('/api/v1/loading-orders/records/' + recordId, {
+            method: 'DELETE'
+        }).then(checkResponse)
+        .then(function(data) {
+            if (data.success) {
+                var tr = btn.closest('tr');
+                var dateGroup = tr.closest('.date-group');
+                if (tr) tr.remove();
+                if (dateGroup) recalcLoadingSummary(dateGroup);
+            } else {
+                alert('删除失败：' + (data.error || '未知错误'));
+            }
+        }).catch(function(err) { handleApiError(err, '删除记录'); });
+    };
+
+    window.moveRecord = function(recordId, direction, btn) {
+        var tr = btn.closest('tr');
+        fetch('/api/v1/loading-orders/records/' + recordId + '/move', {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({direction: direction})
+        })
+            .then(checkResponse)
+            .then(function(data) {
+                if (data.success) {
+                    if (direction === 'up') {
+                        var prev = tr.previousElementSibling;
+                        if (prev && prev.querySelector('td')) tr.parentNode.insertBefore(tr, prev);
+                    } else {
+                        var nxt = tr.nextElementSibling;
+                        if (nxt && nxt.querySelector('td')) tr.parentNode.insertBefore(nxt, tr);
+                    }
+                } else {
+                    alert(data.error || '操作失败');
+                }
+            }).catch(function(err) { handleApiError(err, '移动记录'); });
+    };
+
+    window.setImgCols = function(btn, n) {
+        // 只修改当前按钮所在的 .img-area 区域（按 order_pk 隔离）
+        var area = btn.closest('.img-area');
+        if (!area) return;
+        var orderPk = area.closest('.date-group')?.dataset.orderPk;
+        // 取消所有按钮的 active 状态
+        document.querySelectorAll('.img-area .img-col-btn').forEach(function(b) {
+            b.classList.remove('active');
+        });
+        btn.classList.add('active');
+        // 只更新当前区域
+        area.classList.remove('cols-1','cols-2','cols-3','cols-4','cols-5');
+        area.classList.add('cols-' + n);
+        area.dataset.cols = n;
+        // 持久化到后端（每个订单独立记忆）
+        if (orderPk) {
+            fetch('/api/v1/loading-orders/' + orderPk, {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({img_cols: parseInt(n)})
+            });
+        }
+    };
+
+    var savedCols = localStorage.getItem('loading-img-cols') || '5';
+    document.querySelectorAll('.img-area').forEach(function(area) {
+        // 优先读取 data-cols（JS 修改后的值），否则从 class 提取
+        var cols = area.dataset.cols || (area.className.match(/cols-(\d)/) ? area.className.match(/cols-(\d)/)[1] : savedCols);
+        area.classList.remove('cols-1','cols-2','cols-3','cols-4','cols-5');
+        area.classList.add('cols-' + cols);
+        area.dataset.cols = cols;
+    });
+    document.querySelectorAll('.img-col-btn').forEach(function(b) {
+        b.classList.remove('active');
+        var area = b.closest('.img-area');
+        if (area && b.textContent.trim() === (area.dataset.cols || savedCols)) {
+            b.classList.add('active');
+        }
+    });
+
+    // 快速添加表单提交
+    document.querySelectorAll('.quick-add').forEach(function(form) {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            var orderPk = this.getAttribute('data-order-pk');
+            var data = {
+                product_name: this.product_name.value,
+                specification: this.specification.value,
+                quantity: this.quantity.value,
+                unit: this.unit.value,
+                remark: this.remark.value
+            };
+            fetch('/api/v1/loading-orders/' + orderPk + '/records', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            }).then(checkResponse)
+            .then(function(res) {
+                if (res.success && res.record) {
+                    // 构建新行并插入
+                    var dateGroup = document.querySelector('.date-group[data-order-pk="' + orderPk + '"]');
+                    var tbody = dateGroup.querySelector('.record-table tbody');
+                    var quickAddRow = tbody.querySelector('.quick-add-row');
+                    var newTr = buildLoadingRecordRow(res.record, tbody);
+                    tbody.insertBefore(newTr, quickAddRow);
+                    recalcLoadingSummary(dateGroup);
+                    form.reset();
+                    // 高亮新行
+                    newTr.style.backgroundColor = '#d4f5e9';
+                    setTimeout(function() { newTr.style.backgroundColor = ''; }, 1500);
+                } else {
+                    alert('添加失败：' + (res.error || '未知错误'));
+                }
+            }).catch(function(err) { handleApiError(err, '添加记录'); });
+        });
+    });
+
+    // ── 构建装柜明细行 ──
+    function buildLoadingRecordRow(rec, tbody) {
+        // 计算序号：现有数据行数 + 1
+        var existingRows = tbody ? tbody.querySelectorAll('tr:not(.quick-add-row):not(.summary-row)').length : 0;
+        var tr = document.createElement('tr');
+        var unitHint = getLoadingUnitHint(rec.product_name, rec.specification || '', rec.quantity) || '—';
+        var mismatch = checkLoadingMismatch(rec.remark || '', rec.quantity, rec.product_name, rec.specification || '');
+        if (mismatch) tr.classList.add(mismatch === 'warn' ? 'row-warn' : 'row-info');
+        tr.innerHTML =
+            '<td style="width:40px;text-align:center;color:#868e96;font-size:0.85rem;">' + loadingMismatchIcon(mismatch) + (existingRows + 1) + '</td>' +
+            '<td>' + rec.product_name + '</td>' +
+            '<td>' + (rec.specification || '-') + '</td>' +
+            '<td><span class="qty-badge">' + rec.quantity + '</span></td>' +
+            '<td><span class="unit-badge">' + rec.unit + '</span></td>' +
+            '<td class="remark-cell' + (rec.remark ? ' has-content' : '') + '">' + (rec.remark || '-') + '</td>' +
+            '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">' + unitHint + '</td>' +
+            '<td style="white-space:nowrap;">' +
+                '<button type="button" class="move-up-btn lock-hide" data-id="' + rec.id + '" onclick="moveRecord(' + rec.id + ',\'up\',this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;" title="上移">▲</button>' +
+                '<button type="button" class="move-down-btn lock-hide" data-id="' + rec.id + '" onclick="moveRecord(' + rec.id + ',\'down\',this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;margin-right:0.3rem;" title="下移">▼</button>' +
+                '<button type="button" class="edit-record-btn lock-hide" data-id="' + rec.id + '" onclick="editRecord(' + rec.id + ', this)" style="background:none;border:none;color:#00b894;cursor:pointer;font-size:0.85rem;margin-right:0.4rem;" title="修改">✏️</button>' +
+                '<button type="button" class="del-record-btn lock-hide" data-id="' + rec.id + '" onclick="deleteRecord(' + rec.id + ', this)" style="background:none;border:none;color:#ff7675;cursor:pointer;font-size:0.85rem;" title="删除">🗑️</button>' +
+            '</td>';
+        return tr;
+    }
+
+    // ── 重新计算装柜备注汇总 ──
+    function recalcLoadingSummary(dateGroup) {
+        var tbody = dateGroup.querySelector('.record-table tbody');
+        var remarkCells = tbody.querySelectorAll('tr:not(.quick-add-row) .remark-cell');
+        var totalPieces = 0;
+        var totalLoosePieces = 0;
+        remarkCells.forEach(function(cell) {
+            var remark = cell.textContent.trim();
+            if (!remark || remark === '-') return;
+            var m = remark.match(/(\d+)支/);
+            if (m) totalPieces += parseInt(m[1]);
+            var looseMatches = remark.match(/\d+(?:\.\d+)?[yY码]/g);
+            if (looseMatches) totalLoosePieces += looseMatches.length;
+        });
+
+        // 移除旧汇总行
+        var oldSummary = tbody.querySelector('.summary-row');
+        if (oldSummary) oldSummary.remove();
+
+        if (totalPieces === 0 && totalLoosePieces === 0) return;
+
+        var summaryText = totalPieces + '支';
+        if (totalLoosePieces > 0) summaryText += '+' + totalLoosePieces + '支散码';
+
+        var summaryRow = document.createElement('tr');
+        summaryRow.className = 'summary-row';
+        summaryRow.style.cssText = 'background:#f0fdf4;font-weight:600;border-top:2px solid #00b894;';
+        summaryRow.innerHTML =
+            '<td colspan="6" style="text-align:right;padding:0.6rem 0.75rem;color:#00b894;font-size:0.9rem;">📊 备注汇总：</td>' +
+            '<td style="padding:0.6rem 0.75rem;color:#2d3436;font-size:0.9rem;">' + summaryText + '</td>' +
+            '<td style="padding:0.6rem 0.75rem;"></td>';
+        tbody.appendChild(summaryRow);
+    }
+});
+
+// === 订单备注功能 ===
+var currentNoteOrderPk = null;
+
+function openNoteModal(orderPk, orderDate, orderCustomer, currentNote) {
+    currentNoteOrderPk = orderPk;
+    document.getElementById('noteModal').classList.add('show');
+    document.getElementById('noteTextarea').value = currentNote || '';
+    document.getElementById('noteCustomerInput').value = orderCustomer || '';
+    document.getElementById('noteModalOrderInfo').textContent = '📦 ' + (orderDate || '') + ' ' + (orderCustomer || '');
+    document.getElementById('noteModalTitle').textContent = currentNote ? '✏️ 修改订单' : '📝 订单详情';
+    setTimeout(function() { document.getElementById('noteCustomerInput').focus(); }, 50);
+}
+
+function closeNoteModal() {
+    document.getElementById('noteModal').classList.remove('show');
+    currentNoteOrderPk = null;
+    document.getElementById('noteTextarea').value = '';
+    document.getElementById('noteCustomerInput').value = '';
+}
+
+function clearNote() {
+    document.getElementById('noteTextarea').value = '';
+}
+
+function saveNote() {
+    if (!currentNoteOrderPk) return;
+    var noteText = document.getElementById('noteTextarea').value.trim();
+    var customerText = document.getElementById('noteCustomerInput').value.trim();
+
+    var payload = {order_note: noteText};
+    if (customerText) payload.customer = customerText;
+
+    fetch('/api/v1/loading-orders/' + currentNoteOrderPk, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+    })
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+        if (data.success) {
+            updateNoteRow(currentNoteOrderPk, noteText);
+            updateNoteBtn(currentNoteOrderPk, noteText);
+            if (data.customer) {
+                updateCustomerRow(currentNoteOrderPk, data.customer);
+            }
+            closeNoteModal();
+        } else {
+            alert('保存失败：' + (data.error || '未知错误'));
+        }
+    })
+    .catch(function(err) { alert('请求失败：' + err); });
+}
+
+function updateCustomerRow(orderPk, newCustomer) {
+    var dateGroup = document.querySelector('.date-group[data-order-pk="' + orderPk + '"]');
+    if (!dateGroup) { location.reload(); return; }
+    var customerEl = dateGroup.querySelector('.group-customer');
+    if (customerEl) {
+        customerEl.textContent = newCustomer;
+    } else {
+        // 元素原本不存在（订单无 customer）—— 创建一个插在 group-date 后面
+        var dateEl = dateGroup.querySelector('.group-date');
+        if (dateEl) {
+            var newEl = document.createElement('span');
+            newEl.className = 'group-customer';
+            newEl.textContent = newCustomer;
+            dateEl.parentNode.insertBefore(newEl, dateEl.nextSibling);
+        }
+    }
+}
+
+function updateNoteRow(orderPk, noteText) {
+    var dateGroup = document.querySelector('.date-group[data-order-pk="' + orderPk + '"]');
+    if (!dateGroup) { location.reload(); return; }
+    var groupHeader = dateGroup.querySelector('.group-header');
+    var noteRow = dateGroup.querySelector('.order-note-row');
+    if (noteText) {
+        if (noteRow) {
+            noteRow.querySelector('.note-text').textContent = noteText;
+        } else {
+            var newRow = document.createElement('div');
+            newRow.className = 'order-note-row';
+            newRow.id = 'orderNote' + orderPk;
+            newRow.style.cssText = 'background:linear-gradient(90deg, #fff5e1 0%, #ffeaa7 100%); border-left:4px solid #fdcb6e; padding:0.5rem 0.75rem; margin:0.25rem 0; border-radius:6px; font-size:0.9rem; color:#2d3436; display:flex; align-items:flex-start; gap:0.5rem;';
+            newRow.innerHTML = '<span style="font-weight:600; flex-shrink:0;">📝 备注：</span><span class="note-text" style="flex:1; white-space:pre-wrap; word-break:break-word;"></span>';
+            newRow.querySelector('.note-text').textContent = noteText;
+            var table = dateGroup.querySelector('table.record-table');
+            if (table) {
+                groupHeader.parentNode.insertBefore(newRow, table);
+            } else {
+                groupHeader.parentNode.appendChild(newRow);
+            }
+        }
+    } else {
+        if (noteRow) noteRow.remove();
+    }
+}
+
+function updateNoteBtn(orderPk, noteText) {
+    var btn = document.querySelector('.note-btn[data-pk="' + orderPk + '"]');
+    if (!btn) return;
+    btn.setAttribute('data-note', noteText);
+    if (noteText) {
+        btn.style.boxShadow = '0 0 0 2px #6c5ce7';
+        btn.title = '修改备注';
+    } else {
+        btn.style.boxShadow = '';
+        btn.title = '添加备注';
+    }
+}
+
+// 备注按钮事件绑定
+document.querySelectorAll('.note-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        var pk = this.getAttribute('data-pk');
+        var note = this.getAttribute('data-note') || '';
+        var orderInfo = this.closest('.group-header');
+        var date = orderInfo ? orderInfo.querySelector('.group-date').textContent.trim() : '';
+        var customer = orderInfo && orderInfo.querySelector('.group-customer') ? orderInfo.querySelector('.group-customer').textContent.trim() : '';
+        openNoteModal(pk, date, customer, note);
+    });
+});
+
+document.getElementById('noteModal').addEventListener('click', function(e) {
+    if (e.target === this) closeNoteModal();
+});
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && document.getElementById('noteModal').classList.contains('show')) {
+        closeNoteModal();
+    }
+});
+</script>
+{% endblock %}

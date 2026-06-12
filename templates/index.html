@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+.home-hero {
+    padding: 1.5rem 0 0.75rem;
+    text-align: center;
+}
+.home-hero h1 {
+    font-size: 1.6rem;
+    color: #2d3436;
+    margin: 0 0 0.25rem;
+    font-weight: 600;
+}
+.home-hero .subtitle {
+    color: #636e72;
+    font-size: 0.95rem;
+    margin: 0;
+}
+
+.quick-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 1rem;
+    margin-top: 1.5rem;
+}
+.quick-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem 1rem;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    text-decoration: none;
+    color: #2d3436;
+    transition: transform 0.15s, box-shadow 0.15s;
+    min-height: 110px;
+}
+.quick-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(0,0,0,0.1);
+}
+.quick-card .icon {
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+}
+.quick-card .label {
+    font-size: 0.95rem;
+    font-weight: 500;
+}
+.quick-card .desc {
+    font-size: 0.78rem;
+    color: #868e96;
+    margin-top: 0.2rem;
+    text-align: center;
+}
+</style>
+
+<div class="home-hero">
+    <h1>📋 丰源工作台</h1>
+    <p class="subtitle">订单管理 · 商品资料 · 工作记录</p>
+</div>
+
+<div class="quick-grid">
+    <a href="/loading-orders" class="quick-card">
+        <div class="icon">📦</div>
+        <div class="label">装柜订单</div>
+        <div class="desc">柜号清点 + 图片证据</div>
+    </a>
+    <a href="/shipping-records" class="quick-card">
+        <div class="icon">🚛</div>
+        <div class="label">出货记录</div>
+        <div class="desc">客户出库 + AI 识别</div>
+    </a>
+    <a href="/inbound-records" class="quick-card">
+        <div class="icon" style="display:inline-block;transform:scaleX(-1);">🚚</div>
+        <div class="label">入库记录</div>
+        <div class="desc">供应商收货</div>
+    </a>
+    <a href="/stockout" class="quick-card">
+        <div class="icon">🚫</div>
+        <div class="label">当前缺货</div>
+        <div class="desc">缺货登记板</div>
+    </a>
+    <a href="/notice" class="quick-card">
+        <div class="icon">📢</div>
+        <div class="label">公司通知</div>
+        <div class="desc">最新公告</div>
+    </a>
+    <a href="/products" class="quick-card">
+        <div class="icon">📦</div>
+        <div class="label">产品管理</div>
+        <div class="desc">SKU + 分类</div>
+    </a>
+    <a href="/priceboard" class="quick-card">
+        <div class="icon">🧰</div>
+        <div class="label">码数报价</div>
+        <div class="desc">价格速查</div>
+    </a>
+    <a href="/todolist" class="quick-card">
+        <div class="icon">✅</div>
+        <div class="label">待办事项</div>
+        <div class="desc">今日清单</div>
+    </a>
+</div>
+{% endblock %}

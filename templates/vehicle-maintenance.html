@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+.vehicle-page .card-title { color: #d63031; border-bottom-color: #ffe3e3; }
+.vehicle-page .form-grid {
+    display: grid;
+    grid-template-columns: 150px 1fr 90px 100px 80px;
+    gap: 0.75rem; align-items: end;
+}
+.vehicle-page .form-grid label { display: block; font-weight: 600; font-size: 0.85rem; margin-bottom: 0.25rem; }
+.vehicle-page select, .vehicle-page input, .vehicle-page textarea {
+    width: 100%; padding: 0.4rem 0.6rem;
+    border: 1px solid #dfe6e9; border-radius: 6px;
+    font-size: 0.9rem; background: #fff;
+    box-sizing: border-box;
+}
+.vehicle-page select:focus, .vehicle-page input:focus, .vehicle-page textarea:focus {
+    outline: none; border-color: #d63031;
+    box-shadow: 0 0 0 2px rgba(214,48,49,0.1);
+}
+.vehicle-page .remark-row {
+    margin-top: 0.75rem;
+}
+.vehicle-page .remark-row label { display: block; font-weight: 600; font-size: 0.85rem; margin-bottom: 0.25rem; }
+.vehicle-page .remark-row textarea {
+    width: 100%; padding: 0.4rem 0.6rem;
+    border: 1px solid #dfe6e9; border-radius: 6px;
+    font-size: 0.9rem; background: #fff;
+    resize: vertical; min-height: 2.2rem;
+    box-sizing: border-box;
+}
+.vehicle-page .vehicle-table { width: 100%; border-collapse: collapse; margin-top: 1.5rem; }
+.vehicle-page .vehicle-table th {
+    background: #f8f9fa; padding: 0.6rem 0.75rem;
+    text-align: left; font-size: 0.82rem; color: #868e96;
+    border-bottom: 2px solid #e9ecef;
+}
+.vehicle-page .vehicle-table td {
+    padding: 0.65rem 0.75rem; border-bottom: 1px solid #f1f3f5;
+    font-size: 0.92rem; vertical-align: middle;
+}
+.vehicle-page .vehicle-table tr:hover td { background: #fff5f5; }
+.vehicle-page .plate-badge {
+    background: #fff0f0; color: #d63031;
+    border: 1px solid #fab1b1;
+    padding: 0.2rem 0.6rem; border-radius: 12px;
+    font-weight: 700; font-size: 0.88rem;
+    white-space: nowrap;
+}
+.vehicle-page .type-badge {
+    padding: 0.2rem 0.5rem; border-radius: 8px;
+    font-size: 0.82rem; font-weight: 600;
+    white-space: nowrap;
+}
+.vehicle-page .type-fault { background: #fff0f0; color: #d63031; }
+.vehicle-page .type-maintain { background: #fffbe6; color: #e67e22; }
+.vehicle-page .type-repair { background: #e8f5e9; color: #27ae60; }
+.vehicle-page .type-insurance { background: #e8f0fe; color: #2980b9; }
+.vehicle-page .date-col { color: #636e72; font-size: 0.88rem; white-space: nowrap; }
+.vehicle-page .cost-col { font-weight: 700; color: #27ae60; }
+.vehicle-page .remark-cell { color: #868e96; font-size: 0.88rem; }
+.vehicle-page .remark-cell.has-content { color: #555; }
+.vehicle-page .empty-state { text-align: center; padding: 3rem 1rem; color: #bbb; }
+.vehicle-page .empty-state .icon { font-size: 3.5rem; margin-bottom: 1rem; }
+.vehicle-page .record-date {
+    font-size: 1rem; font-weight: 700; color: #636e72;
+    padding: 0.4rem 0.8rem; background: #f1f3f5;
+    border-left: 4px solid #d63031; border-radius: 4px;
+    margin: 1.5rem 0 0.5rem;
+}
+@media (max-width: 640px) {
+    .vehicle-page .form-grid { grid-template-columns: 1fr 1fr; }
+    .vehicle-page .form-grid > div:nth-child(1),
+    .vehicle-page .form-grid > div:nth-child(2) { order: 1; }
+    .vehicle-page .form-grid > div:nth-child(3),
+    .vehicle-page .form-grid > div:nth-child(4),
+    .vehicle-page .form-grid > div:nth-child(5) { order: 2; }
+    .vehicle-page .remark-row { order: 3; }
+}
+</style>
+
+<!-- 添加维护记录表单 -->
+<div class="card vehicle-page">
+    <h2 class="card-title">🚛 记录车辆维护</h2>
+    <form action="/vehicle-maintenance/add" method="POST">
+        <div class="form-grid">
+            <div>
+                <label for="date">日期</label>
+                <input type="date" id="date" name="date" required>
+            </div>
+            <div>
+                <label for="vehicle_plate">车牌号</label>
+                <input type="text" id="vehicle_plate" name="vehicle_plate" placeholder="例如：粤B12345" required>
+            </div>
+            <div>
+                <label for="type">类型</label>
+                <select id="type" name="type">
+                    <option value="故障">故障</option>
+                    <option value="保养">保养</option>
+                    <option value="维修">维修</option>
+                    <option value="保险">保险</option>
+                </select>
+            </div>
+            <div>
+                <label for="cost">费用</label>
+                <input type="text" id="cost" name="cost" placeholder="例如：500">
+            </div>
+        </div>
+        <div style="margin-top:0.75rem;">
+            <label for="description" style="display:block;font-weight:600;font-size:0.85rem;margin-bottom:0.25rem;">描述</label>
+            <textarea id="description" name="description" rows="2" placeholder="故障/维护内容描述" required style="width:100%;padding:0.4rem 0.6rem;border:1px solid #dfe6e9;border-radius:6px;font-size:0.9rem;background:#fff;resize:vertical;box-sizing:border-box;"></textarea>
+        </div>
+        <div class="remark-row">
+            <label for="remark">备注</label>
+            <textarea id="remark" name="remark" rows="1" placeholder="可选，补充说明"></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary" style="margin-top:1rem;">💾 保存记录</button>
+    </form>
+</div>
+
+<!-- 维护记录列表 -->
+<div class="card vehicle-page">
+    <h2 class="card-title">📋 车辆维护记录</h2>
+    {% if records %}
+    <table class="vehicle-table">
+        <thead>
+            <tr>
+                <th>日期</th>
+                <th>车牌号</th>
+                <th>类型</th>
+                <th>描述</th>
+                <th>费用</th>
+                <th>备注</th>
+                <th style="width:60px;">操作</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for item in records %}
+            <tr>
+                <td class="date-col">{{ item.date }}</td>
+                <td><span class="plate-badge">{{ item.vehicle_plate }}</span></td>
+                <td>
+                    <span class="type-badge {% if item.type == '故障' %}type-fault{% elif item.type == '保养' %}type-maintain{% elif item.type == '维修' %}type-repair{% elif item.type == '保险' %}type-insurance{% endif %}">{{ item.type }}</span>
+                </td>
+                <td>{{ item.description }}</td>
+                <td class="cost-col">{% if item.cost %}{{ item.cost }}{% else %}—{% endif %}</td>
+                <td class="remark-cell {% if item.remark %}has-content{% endif %}">{{ item.remark or '—' }}</td>
+                <td>
+                    <form action="/vehicle-maintenance/delete/{{ item.id }}" method="POST" onsubmit="return confirm('确定要删除这条记录吗？');" style="display:inline;">
+                        <button type="submit" class="btn btn-danger btn-sm">🗑️</button>
+                    </form>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <div class="icon">🚛</div>
+        <p>暂无维护记录，开始记录第一笔吧！</p>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+    var today = new Date().toISOString().split('T')[0];
+    document.getElementById('date').value = today;
+    document.getElementById('remark').addEventListener('input', function() {
+        this.style.height = 'auto';
+        this.style.height = this.scrollHeight + 'px';
+    });
+</script>
+{% endblock %}

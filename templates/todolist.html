@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block content %}
+<!-- 添加待办事项表单 -->
+<div class="card">
+    <h2 class="card-title">➕ 添加待办事项</h2>
+    <form action="/todolist/add" method="POST">
+        <div class="form-group">
+            <label for="content">待办内容</label>
+            <input type="text" id="content" name="content" placeholder="输入待办事项..." required>
+        </div>
+        <button type="submit" class="btn btn-primary">➕ 添加</button>
+    </form>
+</div>
+
+<!-- 待办列表 -->
+<div class="card">
+    <h2 class="card-title">📋 待办事项列表</h2>
+    {% if items %}
+    <ul class="item-list">
+        {% for item in items %}
+        <li class="item {% if item.done %}done{% endif %}">
+            <div class="item-content">
+                <span class="seq-badge">{{ loop.index }}</span>
+                <div class="item-title">{{ item.content }}</div>
+                <div class="item-meta">📅 {{ item.created_at }}</div>
+            </div>
+            <div class="item-actions">
+                <form action="/todolist/toggle/{{ item.id }}" method="POST">
+                    {% if item.done %}
+                    <button type="submit" class="btn btn-sm" style="background:#ccc;color:#555;">📋 未完成</button>
+                    {% else %}
+                    <button type="submit" class="btn btn-done btn-sm">✅ 完成</button>
+                    {% endif %}
+                </form>
+                <form action="/todolist/delete/{{ item.id }}" method="POST" onsubmit="return confirm('确定要删除吗?');">
+                    <button type="submit" class="btn btn-danger btn-sm">🗑️ 删除</button>
+                </form>
+            </div>
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <div class="empty-state">
+        <div class="icon">🎉</div>
+        <p>没有待办事项，任务都完成了！</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

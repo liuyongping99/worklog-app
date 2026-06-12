@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+.pu-table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+.pu-table th, .pu-table td { padding: 10px 14px; text-align: left; border-bottom: 1px solid #e0e0e0; }
+.pu-table th { background: #f5f5f5; font-weight: bold; color: #555; font-size: 0.9rem; }
+.pu-table tr:hover { background: #fafafa; }
+.pu-table .empty-row td { text-align: center; padding: 40px 14px; color: #999; }
+.pu-table .badge-yard { display: inline-block; padding: 2px 10px; border-radius: 10px; font-size: 0.8rem; background: #e8f5e9; color: #2e7d32; }
+.pu-table .badge-no { display: inline-block; padding: 2px 10px; border-radius: 10px; font-size: 0.8rem; background: #f5f5f5; color: #999; }
+.pu-table .badge-spec { display: inline-block; padding: 2px 10px; border-radius: 10px; font-size: 0.8rem; background: #fff3e0; color: #e65100; }
+.pu-actions { display: flex; gap: 8px; }
+.pu-actions button { padding: 4px 12px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
+.btn-edit-pu { background: #e3f2fd; color: #1976d2; }
+.btn-edit-pu:hover { background: #bbdefb; }
+.btn-del-pu { background: #ffebee; color: #c62828; }
+.btn-del-pu:hover { background: #ffcdd2; }
+.pu-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999; align-items: center; justify-content: center; }
+.pu-modal.active { display: flex; }
+.pu-modal-content { background: white; border-radius: 12px; padding: 2rem; width: 90%; max-width: 420px; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+.pu-modal-content h3 { margin-bottom: 1.2rem; color: #4a90e2; }
+.pu-hint { color: #999; font-size: 0.85rem; margin-top: 4px; }
+.pu-checkbox { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.pu-checkbox input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; }
+.pu-checkbox label { cursor: pointer; font-size: 0.95rem; color: #555; }
+</style>
+
+<div class="card">
+    <h2 class="card-title">📐 商品辅助单位</h2>
+    <p style="color:#888;margin-bottom:1rem;">设置商品每支有多少码。同名商品可按规格关键词设置不同比例，匹配时规格命中优先于默认值</p>
+
+    <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:1rem;">
+        <div class="form-group" style="flex:1;min-width:160px;margin-bottom:0;">
+            <label for="puName">商品名称</label>
+            <input type="text" id="puName" placeholder="输入商品名称..." style="width:100%;">
+        </div>
+        <div class="form-group" style="flex:1;min-width:130px;margin-bottom:0;">
+            <label for="puSpecKw">规格匹配 <span style="color:#e65100;font-size:0.75rem;">(可选)</span></label>
+            <input type="text" id="puSpecKw" placeholder="如 加面" style="width:100%;">
+        </div>
+        <div class="form-group" style="flex:1;min-width:120px;margin-bottom:0;">
+            <label for="puYards">每支码数</label>
+            <input type="number" id="puYards" step="0.01" min="0.01" placeholder="如 48.5" style="width:100%;">
+        </div>
+        <div class="pu-checkbox" style="margin-bottom:4px;">
+            <input type="checkbox" id="puUseYard">
+            <label for="puUseYard">按码数卖</label>
+        </div>
+        <div style="padding-bottom:2px;">
+            <button class="btn btn-primary" onclick="addUnit()">➕ 添加</button>
+        </div>
+    </div>
+    <p class="pu-hint">码数支持小数，如 48.5 码/支；规格关键词留空表示默认规则</p>
+</div>
+
+<div class="card">
+    <h2 class="card-title">📋 已配置商品（<span id="unitCount">{{ units|length }}</span> 个）
+        <label style="margin-left:1rem;font-size:0.85rem;font-weight:normal;cursor:pointer;user-select:none;">
+            <input type="checkbox" id="filterYard" onchange="toggleFilter()" style="vertical-align:middle;margin-right:4px;">
+            仅显示按码数卖
+        </label>
+    </h2>
+    <table class="pu-table" id="puTable">
+        <thead>
+            <tr>
+                <th>商品名称</th>
+                <th>规格匹配</th>
+                <th>每支码数</th>
+                <th>按码数卖</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% if units %}
+            {% for u in units %}
+            <tr data-useyard="{{ u.is_usingyardforcounting }}">
+                <td><strong>{{ u.product_name }}</strong></td>
+                <td>
+                    {% if u.spec_keyword %}
+                    <span class="badge-spec">{{ u.spec_keyword }}</span>
+                    {% else %}
+                    <span style="color:#aaa;">默认</span>
+                    {% endif %}
+                </td>
+                <td><strong>{{ "%.2f"|format(u.yards_per_piece / 100) }}</strong> 码/支</td>
+                <td>
+                    {% if u.is_usingyardforcounting %}
+                    <span class="badge-yard">是</span>
+                    {% else %}
+                    <span class="badge-no">否</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <div class="pu-actions">
+                        <button class="btn-edit-pu"
+                            data-name="{{ u.product_name|e }}"
+                            data-speckw="{{ u.spec_keyword or ''|e }}"
+                            data-yards="{{ u.yards_per_piece }}"
+                            data-useyard="{{ u.is_usingyardforcounting }}">✏️ 编辑</button>
+                        <form action="/product-units/delete" method="POST" onsubmit="return confirm('确定要删除 ' + this.querySelector('button').getAttribute('data-name') + ' 的单位配置吗？');">
+                            <input type="hidden" name="product_name" value="{{ u.product_name|e }}">
+                            <input type="hidden" name="spec_keyword" value="{{ u.spec_keyword or ''|e }}">
+                            <button class="btn-del-pu" type="submit" data-name="{{ u.product_name|e }}">🗑️ 删除</button>
+                        </form>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+            {% else %}
+            <tr class="empty-row"><td colspan="5">暂无配置，请在上方添加商品单位</td></tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+
+<!-- 编辑弹窗 -->
+<div class="pu-modal" id="editModal">
+    <div class="pu-modal-content">
+        <h3>✏️ 修改单位</h3>
+        <form id="editForm" method="POST" action="/product-units/edit">
+            <input type="hidden" name="old_spec_keyword" id="editOldSpecKw">
+            <div class="form-group">
+                <label>商品名称</label>
+                <input type="text" id="editName" name="product_name" readonly style="width:100%;background:#f5f5f5;">
+            </div>
+            <div class="form-group">
+                <label>规格匹配</label>
+                <input type="text" id="editSpecKw" disabled style="width:100%;background:#f5f5f5;color:#888;">
+            </div>
+            <div class="form-group">
+                <label for="editYards">每支码数</label>
+                <input type="number" id="editYards" name="yards_per_piece" step="0.01" min="0.01" style="width:100%;" required>
+            </div>
+            <div class="pu-checkbox">
+                <input type="checkbox" id="editUseYard" name="is_usingyardforcounting" value="1">
+                <label for="editUseYard">按码数卖</label>
+            </div>
+            <div style="display:flex;gap:0.75rem;justify-content:flex-end;margin-top:1.5rem;">
+                <button type="button" class="btn btn-sm" onclick="closeEdit()" style="padding:0.5rem 1rem;background:#e0e0e0;color:#333;">取消</button>
+                <button type="submit" class="btn btn-primary btn-sm">💾 保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function toggleFilter() {
+    var onlyYard = document.getElementById('filterYard').checked;
+    var rows = document.querySelectorAll('#puTable tbody tr');
+    var count = 0;
+    rows.forEach(function(tr) {
+        if (tr.classList.contains('empty-row')) return;
+        var useYard = tr.getAttribute('data-useyard') === '1';
+        if (!onlyYard || useYard) {
+            tr.style.display = '';
+            count++;
+        } else {
+            tr.style.display = 'none';
+        }
+    });
+    document.getElementById('unitCount').textContent = count;
+}
+
+// 编辑按钮事件绑定
+document.querySelectorAll('.btn-edit-pu').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        var name = this.getAttribute('data-name');
+        var specKw = this.getAttribute('data-speckw');
+        var yards = parseInt(this.getAttribute('data-yards'));
+        var useYard = this.getAttribute('data-useyard');
+        document.getElementById('editName').value = name;
+        document.getElementById('editOldSpecKw').value = specKw;
+        document.getElementById('editSpecKw').value = specKw || '(默认)';
+        document.getElementById('editYards').value = (yards / 100).toFixed(2);
+        document.getElementById('editUseYard').checked = useYard == '1';
+        document.getElementById('editModal').classList.add('active');
+    });
+});
+
+// 删除确认
+document.querySelectorAll('.btn-del-pu').forEach(function(btn) {
+    btn.closest('form').addEventListener('submit', function(e) {
+        var nm = btn.getAttribute('data-name');
+        if (!confirm('确定要删除 ' + (nm || '') + ' 的单位配置吗？')) {
+            e.preventDefault();
+        }
+    });
+});
+
+function addUnit() {
+    var name = document.getElementById('puName').value.trim();
+    var specKw = document.getElementById('puSpecKw').value.trim();
+    var yards = document.getElementById('puYards').value.trim();
+    var useYard = document.getElementById('puUseYard').checked ? '1' : '0';
+    if (!name) { alert('请输入商品名称'); return; }
+    if (!yards || parseFloat(yards) <= 0) { alert('请输入有效的每支码数'); return; }
+    var form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/product-units/add';
+    form.style.display = 'none';
+    form.innerHTML = '<input name="product_name" value="' + name.replace(/"/g, '&quot;') + '">'
+        + (specKw ? '<input name="spec_keyword" value="' + specKw.replace(/"/g, '&quot;') + '">' : '')
+        + '<input name="yards_per_piece" value="' + yards + '">'
+        + '<input name="is_usingyardforcounting" value="' + useYard + '">';
+    document.body.appendChild(form);
+    form.submit();
+}
+
+function closeEdit() {
+    document.getElementById('editModal').classList.remove('active');
+}
+
+document.getElementById('editModal').addEventListener('click', function(e) {
+    if (e.target === this) closeEdit();
+});
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeEdit();
+});
+</script>
+{% endblock %}

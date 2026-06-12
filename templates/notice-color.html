@@ -1,0 +1,477 @@
+{% extends "base.html" %}
+{% set page_title = "通知彩色版" %}
+
+{% block content %}
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700;900&family=DM+Sans:wght@400;500;700&display=swap');
+
+  :root {
+    --bg: #f5f3f0;
+    --bg-card: #ffffff;
+    --border: rgba(0,0,0,0.06);
+    --text-primary: #1a1a2e;
+    --text-secondary: #7c7e8a;
+    --accent: #d4522a;
+    --accent-light: rgba(212, 82, 42, 0.06);
+    --accent-border: rgba(212, 82, 42, 0.15);
+    --green: #1a8a5c;
+    --green-bg: rgba(26, 138, 92, 0.06);
+    --green-border: rgba(26, 138, 92, 0.12);
+    --yellow: #b8860b;
+    --yellow-bg: rgba(184, 134, 11, 0.06);
+    --yellow-border: rgba(184, 134, 11, 0.12);
+    --blue: #2563eb;
+    --blue-bg: rgba(37, 99, 235, 0.06);
+    --blue-border: rgba(37, 99, 235, 0.12);
+    --purple: #7c3aed;
+    --purple-bg: rgba(124, 58, 237, 0.06);
+    --purple-border: rgba(124, 58, 237, 0.12);
+    --red: #dc2626;
+    --red-bg: rgba(220, 38, 38, 0.06);
+    --red-border: rgba(220, 38, 38, 0.12);
+    --radius: 14px;
+    --shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.03);
+    --shadow-hover: 0 4px 12px rgba(0,0,0,0.06), 0 2px 4px rgba(0,0,0,0.04);
+  }
+
+  .notice-wrapper {
+    background: var(--bg);
+    margin: -2rem -1.5rem;
+    padding: 2rem 1.5rem;
+    min-height: calc(100vh - 120px);
+  }
+
+  .bg-decoration {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+    z-index: 0;
+    overflow: hidden;
+  }
+
+  .bg-decoration .orb {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(100px);
+    opacity: 0.5;
+  }
+
+  .bg-decoration .orb-1 {
+    width: 500px; height: 500px;
+    background: radial-gradient(circle, rgba(212, 82, 42, 0.06), transparent 70%);
+    top: -150px; right: -50px;
+  }
+
+  .bg-decoration .orb-2 {
+    width: 400px; height: 400px;
+    background: radial-gradient(circle, rgba(37, 99, 235, 0.05), transparent 70%);
+    bottom: -100px; left: -50px;
+  }
+
+  .notice-container {
+    position: relative;
+    z-index: 1;
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 24px 0 60px;
+  }
+
+  .notice-header {
+    text-align: center;
+    margin-bottom: 40px;
+    animation: fadeInDown 0.7s ease-out;
+  }
+
+  .notice-header .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--accent-light);
+    border: 1px solid var(--accent-border);
+    color: var(--accent);
+    padding: 5px 16px;
+    border-radius: 100px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    margin-bottom: 20px;
+  }
+
+  .notice-header .badge .dot {
+    width: 6px; height: 6px;
+    background: var(--accent);
+    border-radius: 50%;
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  .notice-header h1 {
+    font-size: 44px;
+    font-weight: 900;
+    letter-spacing: -1px;
+    color: var(--text-primary);
+    line-height: 1.2;
+  }
+
+  .notice-header .subtitle {
+    color: var(--text-secondary);
+    font-size: 15px;
+    margin-top: 10px;
+    font-weight: 400;
+  }
+
+  .notice-header .date {
+    color: var(--text-secondary);
+    font-size: 13px;
+    margin-top: 6px;
+    opacity: 0.5;
+    font-weight: 300;
+  }
+
+  .divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border), rgba(212, 82, 42, 0.15), var(--border), transparent);
+    margin: 0 0 44px;
+  }
+
+  .section-group {
+    margin-bottom: 36px;
+    animation: fadeInUp 0.5s ease-out both;
+  }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 16px;
+    padding-left: 4px;
+  }
+
+  .section-icon {
+    width: 42px; height: 42px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 19px;
+    flex-shrink: 0;
+  }
+
+  .section-icon.delivery { background: var(--green-bg); border: 1px solid var(--green-border); }
+  .section-icon.loading  { background: var(--yellow-bg); border: 1px solid var(--yellow-border); }
+  .section-icon.receiving{ background: var(--blue-bg);   border: 1px solid var(--blue-border); }
+  .section-icon.vehicle  { background: var(--purple-bg); border: 1px solid var(--purple-border); }
+  .section-icon.returns  { background: var(--red-bg);    border: 1px solid var(--red-border); }
+
+  .section-title {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+    color: var(--text-primary);
+  }
+
+  .section-title-en {
+    font-size: 11px;
+    color: var(--text-secondary);
+    font-weight: 400;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-top: 1px;
+  }
+
+  .notice-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .notice-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px 22px;
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    transition: all 0.25s ease;
+    box-shadow: var(--shadow);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .notice-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0;
+    width: 3px; height: 100%;
+    opacity: 0;
+    transition: opacity 0.25s ease;
+  }
+
+  .notice-card:hover {
+    box-shadow: var(--shadow-hover);
+    transform: translateY(-1px);
+    border-color: rgba(0,0,0,0.08);
+  }
+
+  .notice-card:hover::before { opacity: 1; }
+
+  .section-group:nth-child(1) .notice-card::before { background: var(--green); }
+  .section-group:nth-child(2) .notice-card::before { background: var(--yellow); }
+  .section-group:nth-child(3) .notice-card::before { background: var(--blue); }
+  .section-group:nth-child(4) .notice-card::before { background: var(--red); }
+  .section-group:nth-child(5) .notice-card::before { background: var(--purple); }
+
+  .notice-number {
+    flex-shrink: 0;
+    width: 26px; height: 26px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 700;
+    font-family: 'DM Sans', sans-serif;
+    margin-top: 1px;
+  }
+
+  .section-group:nth-child(1) .notice-number { background: var(--green-bg); color: var(--green); }
+  .section-group:nth-child(2) .notice-number { background: var(--yellow-bg); color: var(--yellow); }
+  .section-group:nth-child(3) .notice-number { background: var(--blue-bg); color: var(--blue); }
+  .section-group:nth-child(4) .notice-number { background: var(--red-bg); color: var(--red); }
+  .section-group:nth-child(5) .notice-number { background: var(--purple-bg); color: var(--purple); }
+
+  .notice-content {
+    flex: 1;
+    font-size: 15px;
+    line-height: 1.8;
+    color: #3a3a4a;
+    font-weight: 400;
+  }
+
+  .notice-content strong {
+    color: var(--text-primary);
+    font-weight: 600;
+  }
+
+  .notice-content .highlight {
+    display: inline;
+    padding: 1px 8px;
+    background: var(--accent-light);
+    border: 1px solid var(--accent-border);
+    border-radius: 5px;
+    font-weight: 600;
+    color: var(--accent);
+  }
+
+  .warning-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(220, 38, 38, 0.06);
+    border: 1px solid rgba(220, 38, 38, 0.15);
+    color: #dc2626;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 9px;
+    border-radius: 5px;
+    margin-left: 4px;
+    vertical-align: middle;
+    letter-spacing: 0.5px;
+  }
+
+  .notice-footer {
+    text-align: center;
+    margin-top: 40px;
+    padding-top: 28px;
+    border-top: 1px solid var(--border);
+    animation: fadeInUp 0.5s ease-out 0.4s both;
+  }
+
+  .notice-footer p {
+    color: var(--text-secondary);
+    font-size: 13px;
+    opacity: 0.5;
+    line-height: 1.8;
+    font-weight: 300;
+  }
+
+  @keyframes fadeInDown {
+    from { opacity: 0; transform: translateY(-16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  @media (max-width: 640px) {
+    .notice-container { padding: 16px 0 40px; }
+    .notice-header h1 { font-size: 30px; }
+    .section-title { font-size: 17px; }
+    .notice-card { padding: 14px 16px; }
+    .notice-content { font-size: 14px; }
+  }
+</style>
+
+<div class="bg-decoration">
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+</div>
+
+<div class="notice-wrapper">
+  <div class="notice-container">
+    <header class="notice-header">
+      <div class="badge"><span class="dot"></span>内部通知</div>
+      <h1>运营操作规范</h1>
+      <p class="subtitle">送货 · 装货 · 收货 · 退货 · 车辆管理 — 全员必读</p>
+      <p class="date">2026 年 4 月 16 日</p>
+    </header>
+
+    <div class="divider"></div>
+
+    <!-- 送货 -->
+    <div class="section-group">
+      <div class="section-header">
+        <div class="section-icon delivery">🚛</div>
+        <div>
+          <div class="section-title">送货</div>
+          <div class="section-title-en">Delivery</div>
+        </div>
+      </div>
+      <div class="notice-list">
+        <div class="notice-card">
+          <div class="notice-number">1</div>
+          <div class="notice-content"><span class="highlight">所有的货全方位拍到</span>，要拍清楚，能点到数的那种 <span class="warning-tag">@所有人</span> 所有客户都一样。</div>
+        </div>
+        <div class="notice-card">
+          <div class="notice-number">2</div>
+          <div class="notice-content">送所有客户的<span class="highlight">加工厂、过胶店、冲皮店</span>等场所，送货完成后<strong>不要留单</strong>。</div>
+        </div>
+        <div class="notice-card">
+          <div class="notice-number">3</div>
+          <div class="notice-content">送<span class="highlight">福将</span>的货，卸货后<strong>每一袋都要拍照</strong>留档。只要是送<span class="highlight">福将</span>的货，每一包棉上必须<strong>打不干胶标签</strong>，跟精诺一样写好款号与总数，能在标签上体现出来的信息要打全面；另外再<strong>贴一条紫色封箱胶</strong>作为区分。</div>
+        </div>
+        <div class="notice-card">
+          <div class="notice-number">4</div>
+          <div class="notice-content">送<span class="highlight">切棉</span>出去，任何客户，都要<strong>拍清楚数量跟规格</strong>，有几包拍几包，以及<strong>大合照</strong>，请大家一定配合！</div>
+        </div>
+        <div class="notice-card">
+          <div class="notice-number">5</div>
+          <div class="notice-content"><span class="highlight">嘉瀚</span>的单全部<strong>优先安排</strong>，碰上缺货要<strong>及时告知</strong>，不能拖。</div>
+        </div>
+        <div class="notice-card">
+          <div class="notice-number">6</div>
+          <div class="notice-content"><span class="highlight">格莱尔</span>的货全部要<strong>写款号</strong>。</div>
+        </div>
+        <div class="notice-card">
+          <div class="notice-number">7</div>
+          <div class="notice-content"><span class="highlight">瑞洲</span>：中软都送<strong>软性的</strong>，不要乱送——现在过胶有些过起来手感完全不一样。</div>
+        </div>
+        <div class="notice-card">
+          <div class="notice-number">8</div>
+          <div class="notice-content"><span class="highlight">杂胶类</span>都是分手感的，出货自己一定要<strong>过手验一下</strong>，手感和单上不符的，<strong>及时告知、及时更换</strong>。尤其是出去调货的，<strong>一定要验货再拿</strong>。</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 装货 -->
+    <div class="section-group">
+      <div class="section-header">
+        <div class="section-icon loading">📦</div>
+        <div>
+          <div class="section-title">装货</div>
+          <div class="section-title-en">Loading</div>
+        </div>
+      </div>
+      <div class="notice-list">
+        <div class="notice-card">
+          <div class="notice-number">1</div>
+          <div class="notice-content">装货时须<strong>核对手感</strong>：单上开的是什么，实际装货也要过一手。手感不对要<strong>立即跟办公室说</strong>。</div>
+        </div>
+        <div class="notice-card">
+          <div class="notice-number">2</div>
+          <div class="notice-content"><span class="highlight">同价调拨单</span>用于仓库之间调货，可以先只写件数，实际数量以现场为准，手工填写。</div>
+        </div>
+        <div class="notice-card">
+          <div class="notice-number">3</div>
+          <div class="notice-content">通道<span class="highlight">不可以两边放货</span><span class="warning-tag">⚠ 绝对不允许</span></div>
+        </div>
+        <div class="notice-card">
+          <div class="notice-number">4</div>
+          <div class="notice-content">去<span class="highlight">芙蓉仓提货</span>一定要有单，提货需要<strong>签名</strong>，拍照发给<span class="highlight">陈傲</span>（货物和同价调拨单的图片都要有），<strong>一定不要漏发</strong>。如果是临时拿货没有带单的，回来后也要及时找办公室拿到，并签名拍照。</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 收货 -->
+    <div class="section-group">
+      <div class="section-header">
+        <div class="section-icon receiving">📥</div>
+        <div>
+          <div class="section-title">收货</div>
+          <div class="section-title-en">Receiving</div>
+        </div>
+      </div>
+      <div class="notice-list">
+        <div class="notice-card">
+          <div class="notice-number">1</div>
+          <div class="notice-content"><span class="highlight">轻胶</span>要贴大标签。</div>
+        </div>
+        <div class="notice-card">
+          <div class="notice-number">2</div>
+          <div class="notice-content"><span class="highlight">珍珠棉</span>都要贴标签。</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 退货 -->
+    <div class="section-group">
+      <div class="section-header">
+        <div class="section-icon returns">↩️</div>
+        <div>
+          <div class="section-title">退货</div>
+          <div class="section-title-en">Returns</div>
+        </div>
+      </div>
+      <div class="notice-list">
+        <div class="notice-card">
+          <div class="notice-number">1</div>
+          <div class="notice-content">收客户退货回来，不管多少，都要<strong>写单给到办公室</strong>，<strong>进仓要拍照发群里</strong>。</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 车辆 -->
+    <div class="section-group">
+      <div class="section-header">
+        <div class="section-icon vehicle">🚗</div>
+        <div>
+          <div class="section-title">车辆</div>
+          <div class="section-title-en">Vehicle</div>
+        </div>
+      </div>
+      <div class="notice-list">
+        <div class="notice-card">
+          <div class="notice-number">1</div>
+          <div class="notice-content">加油小票拿回来要<strong>签自己的名字</strong>，以及写上<strong>车牌号</strong>。</div>
+        </div>
+        <div class="notice-card">
+          <div class="notice-number">2</div>
+          <div class="notice-content">新仓库门口右手边 50 米，<span class="highlight">新加了摄像头</span>，南北方向都有，<strong>限速 40 拍照</strong><span class="warning-tag">⚠ 注意</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="notice-footer">
+      <p>本通知适用于全体物流与仓储人员<br>如有疑问请及时与办公室联系</p>
+    </div>
+  </div>
+</div>
+{% endblock %}

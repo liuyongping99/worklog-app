@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block content %}
+<!-- 添加记录表单 -->
+<div class="card">
+    <h2 class="card-title">📝 记录今日工作</h2>
+    <form action="/experience/add" method="POST">
+        <div class="form-group">
+            <label for="title">标题</label>
+            <input type="text" id="title" name="title" placeholder="今天完成了什么？" required>
+        </div>
+        <div class="form-group">
+            <label for="content">详细记录</label>
+            <textarea id="content" name="content" rows="4" placeholder="详细描述工作内容和进度.." required></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary">💾 保存记录</button>
+    </form>
+</div>
+
+<!-- 记录列表 -->
+<div class="card">
+    <h2 class="card-title">📋 工作记录列表</h2>
+    {% if logs %}
+    <ul class="item-list">
+        {% for log in logs %}
+        <li class="item">
+            <div class="item-content">
+                <span class="seq-badge">{{ loop.index }}</span>
+                <div class="item-title">{{ log.title }}</div>
+                <div class="item-text">{{ log.content }}</div>
+                <div class="item-meta">📅 {{ log.created_at }}</div>
+            </div>
+            <div class="item-actions">
+                    <form action="/experience/delete/{{ log.id }}" method="POST" onsubmit="return confirm('确定要删除这条记录吗？);">
+                    <button type="submit" class="btn btn-danger btn-sm">🗑️ 删除</button>
+                </form>
+            </div>
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <div class="empty-state">
+        <div class="icon">💼</div>
+        <p>还没有工作记录，赶快记录第一条吧！/p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

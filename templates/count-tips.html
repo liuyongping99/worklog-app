@@ -1,0 +1,741 @@
+{% extends "base.html" %}
+{% set page_title = "点数要点" %}
+
+{% block content %}
+<style>
+  /* Override base.html container for full-width layout */
+  .container {
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+</style>
+
+<div class="count-wrapper">
+
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700;900&family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --count-ink: #1a1208;
+    --count-paper: #f5f0e8;
+    --count-gold: #c8922a;
+    --count-gold-light: #e8b84b;
+    --count-red: #c0392b;
+    --count-red-light: #e74c3c;
+    --count-green: #1a6b3c;
+    --count-green-light: #27ae60;
+    --count-brown: #6b4226;
+    --count-cream: #faf6ee;
+    --count-shadow: rgba(26,18,8,0.15);
+    --step0: #8b4513;
+    --step1: #c0392b;
+    --step2: #d35400;
+    --step3: #c8922a;
+    --step4: #1a6b3c;
+    --step5: #1a4a6b;
+    --step6: #8e44ad;
+  }
+
+  .count-wrapper * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  .count-body {
+    background: var(--count-paper);
+    color: var(--count-ink);
+    font-family: 'Noto Sans SC', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+    position: relative;
+  }
+
+  /* 纸张纹理背景 */
+  .count-body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 28px,
+        rgba(139,100,60,0.06) 28px,
+        rgba(139,100,60,0.06) 29px
+      );
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* 顶部装饰条 */
+  .count-top-bar {
+    height: 6px;
+    background: linear-gradient(90deg, var(--count-red) 0%, var(--count-gold) 50%, var(--count-red) 100%);
+    position: relative;
+    z-index: 10;
+  }
+
+  /* 页眉 */
+  .count-header {
+    position: relative;
+    z-index: 5;
+    padding: 48px 40px 36px;
+    text-align: center;
+    border-bottom: 2px solid rgba(200,146,42,0.3);
+    background: linear-gradient(180deg, rgba(200,146,42,0.08) 0%, transparent 100%);
+  }
+
+  .count-header-badge {
+    display: inline-block;
+    background: var(--count-red);
+    color: #fff;
+    font-family: 'Noto Serif SC', serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    padding: 4px 16px;
+    border-radius: 2px;
+    margin-bottom: 20px;
+    text-transform: uppercase;
+  }
+
+  .count-h1 {
+    font-family: 'Noto Serif SC', serif;
+    font-size: clamp(28px, 5vw, 52px);
+    font-weight: 900;
+    color: var(--count-ink);
+    line-height: 1.2;
+    letter-spacing: 4px;
+    margin-bottom: 12px;
+  }
+
+  .count-h1 span { color: var(--count-gold); }
+
+  .count-subtitle {
+    font-size: 14px;
+    color: var(--count-brown);
+    letter-spacing: 2px;
+    font-weight: 300;
+  }
+
+  /* 主内容区 */
+  .count-main {
+    position: relative;
+    z-index: 5;
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 48px 24px 80px;
+  }
+
+  /* 步骤卡片 */
+  .count-steps-container { display: flex; flex-direction: column; gap: 0; }
+
+  .count-step-card {
+    position: relative;
+    display: grid;
+    grid-template-columns: 80px 1fr;
+    gap: 0;
+    margin-bottom: 0;
+    opacity: 0;
+    transform: translateX(-30px);
+    animation: count-slideIn 0.6s ease forwards;
+  }
+
+  .count-step-card:nth-child(1) { animation-delay: 0.1s; }
+  .count-step-card:nth-child(2) { animation-delay: 0.25s; }
+  .count-step-card:nth-child(3) { animation-delay: 0.4s; }
+  .count-step-card:nth-child(4) { animation-delay: 0.55s; }
+  .count-step-card:nth-child(5) { animation-delay: 0.7s; }
+
+  @keyframes count-slideIn {
+    to { opacity: 1; transform: translateX(0); }
+  }
+
+  /* 左侧序号轴 */
+  .count-step-axis {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-top: 28px;
+  }
+
+  .count-step-num {
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Noto Serif SC', serif;
+    font-size: 22px;
+    font-weight: 900;
+    color: #fff;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 2;
+    box-shadow: 0 4px 16px var(--count-shadow);
+  }
+
+  .count-step-line {
+    width: 2px;
+    flex: 1;
+    min-height: 20px;
+    margin-top: 8px;
+    opacity: 0.3;
+  }
+
+  .count-step-card:last-child .count-step-line { display: none; }
+
+  /* 右侧内容 */
+  .count-step-body {
+    padding: 20px 0 32px 24px;
+  }
+
+  .count-step-tag {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    padding: 2px 10px;
+    border-radius: 2px;
+    margin-bottom: 10px;
+    color: #fff;
+    text-transform: uppercase;
+  }
+
+  .count-step-title {
+    font-family: 'Noto Serif SC', serif;
+    font-size: clamp(18px, 3vw, 24px);
+    font-weight: 700;
+    line-height: 1.4;
+    margin-bottom: 14px;
+    color: var(--count-ink);
+  }
+
+  .count-step-content {
+    background: var(--count-cream);
+    border-radius: 8px;
+    padding: 20px 24px;
+    border-left: 4px solid;
+    box-shadow: 0 2px 12px var(--count-shadow);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .count-step-content::before {
+    content: '';
+    position: absolute;
+    top: 0; right: 0;
+    width: 80px; height: 80px;
+    border-radius: 0 0 0 80px;
+    opacity: 0.06;
+  }
+
+  .count-step-desc {
+    font-size: 15px;
+    line-height: 1.9;
+    color: #3a2e1e;
+    font-weight: 400;
+  }
+
+  .count-step-desc strong { font-weight: 700; }
+
+  /* 步骤颜色 */
+  .count-step-card[data-step="0"] .count-step-num { background: var(--step0); }
+  .count-step-card[data-step="0"] .count-step-line { background: var(--step0); }
+  .count-step-card[data-step="0"] .count-step-tag { background: var(--step0); }
+  .count-step-card[data-step="0"] .count-step-content { border-color: var(--step0); }
+  .count-step-card[data-step="0"] .count-step-content::before { background: var(--step0); }
+
+  .count-step-card[data-step="1"] .count-step-num { background: var(--step1); }
+  .count-step-card[data-step="1"] .count-step-line { background: var(--step1); }
+  .count-step-card[data-step="1"] .count-step-tag { background: var(--step1); }
+  .count-step-card[data-step="1"] .count-step-content { border-color: var(--step1); }
+  .count-step-card[data-step="1"] .count-step-content::before { background: var(--step1); }
+
+  .count-step-card[data-step="2"] .count-step-num { background: var(--step2); }
+  .count-step-card[data-step="2"] .count-step-line { background: var(--step2); }
+  .count-step-card[data-step="2"] .count-step-tag { background: var(--step2); }
+  .count-step-card[data-step="2"] .count-step-content { border-color: var(--step2); }
+  .count-step-card[data-step="2"] .count-step-content::before { background: var(--step2); }
+
+  .count-step-card[data-step="3"] .count-step-num { background: var(--step3); }
+  .count-step-card[data-step="3"] .count-step-line { background: var(--step3); }
+  .count-step-card[data-step="3"] .count-step-tag { background: var(--step3); }
+  .count-step-card[data-step="3"] .count-step-content { border-color: var(--step3); }
+  .count-step-card[data-step="3"] .count-step-content::before { background: var(--step3); }
+
+  .count-step-card[data-step="4"] .count-step-num { background: var(--step4); }
+  .count-step-card[data-step="4"] .count-step-line { background: var(--step4); }
+  .count-step-card[data-step="4"] .count-step-tag { background: var(--step4); }
+  .count-step-card[data-step="4"] .count-step-content { border-color: var(--step4); }
+  .count-step-card[data-step="4"] .count-step-content::before { background: var(--step4); }
+
+  .count-step-card[data-step="5"] .count-step-num { background: var(--step5); }
+  .count-step-card[data-step="5"] .count-step-line { background: var(--step5); }
+  .count-step-card[data-step="5"] .count-step-tag { background: var(--step5); }
+  .count-step-card[data-step="5"] .count-step-content { border-color: var(--step5); }
+  .count-step-card[data-step="5"] .count-step-content::before { background: var(--step5); }
+
+  .count-step-card[data-step="6"] .count-step-num { background: var(--step6); }
+  .count-step-card[data-step="6"] .count-step-line { background: var(--step6); }
+  .count-step-card[data-step="6"] .count-step-tag { background: var(--step6); }
+  .count-step-card[data-step="6"] .count-step-content { border-color: var(--step6); }
+  .count-step-card[data-step="6"] .count-step-content::before { background: var(--step6); }
+
+  /* 警告/提示框 */
+  .count-alert-box {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin-top: 14px;
+    padding: 12px 16px;
+    border-radius: 6px;
+    font-size: 13px;
+    line-height: 1.7;
+  }
+  .count-alert-icon { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+  .count-alert-warn {
+    background: rgba(192,57,43,0.08);
+    border: 1px solid rgba(192,57,43,0.2);
+    color: var(--count-red);
+  }
+  .count-alert-tip {
+    background: rgba(26,107,60,0.08);
+    border: 1px solid rgba(26,107,60,0.2);
+    color: var(--count-green);
+  }
+  .count-alert-info {
+    background: rgba(200,146,42,0.1);
+    border: 1px solid rgba(200,146,42,0.25);
+    color: #7a5a10;
+  }
+
+  /* 异常处理子项样式 */
+  .count-exception-item {
+    background: rgba(0,0,0,0.03);
+    border-radius: 6px;
+    padding: 14px 16px;
+    margin-top: 14px;
+    border-left: 3px solid var(--step6);
+  }
+  .count-exception-item:first-of-type { margin-top: 18px; }
+  .count-exception-title {
+    font-weight: 700;
+    color: var(--count-ink);
+    font-size: 14px;
+    margin-bottom: 6px;
+  }
+  .count-exception-desc {
+    font-size: 13px;
+    line-height: 1.7;
+    color: #4a3a2a;
+    margin-bottom: 10px;
+  }
+
+  /* 核查清单 */
+  .count-checklist {
+    list-style: none;
+    margin-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .count-checklist li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+    color: #3a2e1e;
+    cursor: pointer;
+    padding: 6px 10px;
+    border-radius: 4px;
+    transition: background 0.2s;
+    user-select: none;
+  }
+  .count-checklist li:hover { background: rgba(0,0,0,0.04); }
+  .count-checklist li.checked { text-decoration: line-through; opacity: 0.5; }
+  .count-check-box {
+    width: 20px;
+    height: 20px;
+    border: 2px solid currentColor;
+    border-radius: 4px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    font-size: 13px;
+  }
+  .count-checklist li.checked .count-check-box { background: currentColor; }
+  .count-checklist li.checked .count-check-box::after {
+    content: '✓';
+    color: #fff;
+    font-weight: 700;
+  }
+
+  /* 重置按钮 */
+  .count-reset-btn {
+    display: block;
+    margin: 8px 0 0 30px;
+    font-size: 12px;
+    color: var(--count-brown);
+    background: none;
+    border: 1px dashed var(--count-brown);
+    padding: 3px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+  }
+  .count-reset-btn:hover { opacity: 1; }
+
+  /* 底部总结 */
+  .count-summary-box {
+    margin-top: 48px;
+    padding: 28px 32px;
+    background: linear-gradient(135deg, var(--count-ink) 0%, #2d1f0a 100%);
+    border-radius: 12px;
+    color: var(--count-paper);
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 8px 32px rgba(26,18,8,0.3);
+    opacity: 0;
+    animation: count-fadeUp 0.8s ease 1s forwards;
+  }
+  @keyframes count-fadeUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .count-summary-box::before {
+    content: '✓';
+    position: absolute;
+    right: 24px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 120px;
+    color: rgba(200,146,42,0.08);
+    font-family: 'Noto Serif SC', serif;
+    font-weight: 900;
+    line-height: 1;
+  }
+  .count-summary-title {
+    font-family: 'Noto Serif SC', serif;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--count-gold-light);
+    margin-bottom: 12px;
+    letter-spacing: 2px;
+  }
+  .count-summary-text {
+    font-size: 14px;
+    line-height: 2;
+    color: rgba(245,240,232,0.85);
+    max-width: 600px;
+  }
+  .count-summary-text strong { color: var(--count-gold-light); }
+
+  /* 进度条 */
+  .count-progress-bar-wrap {
+    position: fixed;
+    top: 6px;
+    left: 0;
+    right: 0;
+    height: 3px;
+    z-index: 100;
+    background: rgba(0,0,0,0.1);
+  }
+  .count-progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, var(--count-gold), var(--count-gold-light));
+    width: 0%;
+    transition: width 0.3s ease;
+  }
+
+  /* 悬浮提示 */
+  .count-float-tip {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: var(--count-ink);
+    color: var(--count-paper);
+    padding: 10px 18px;
+    border-radius: 24px;
+    font-size: 13px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    opacity: 0;
+    transform: translateY(10px);
+    transition: all 0.3s;
+    pointer-events: none;
+    z-index: 50;
+  }
+  .count-float-tip.show { opacity: 1; transform: translateY(0); }
+
+  /* 分隔装饰 */
+  .count-divider {
+    text-align: center;
+    margin: 32px 0;
+    color: var(--count-gold);
+    font-size: 18px;
+    letter-spacing: 8px;
+    opacity: 0.4;
+  }
+
+  /* 响应式 */
+  @media (max-width: 600px) {
+    .count-header { padding: 32px 20px 24px; }
+    .count-main { padding: 32px 16px 60px; }
+    .count-step-card { grid-template-columns: 60px 1fr; }
+    .count-step-num { width: 42px; height: 42px; font-size: 18px; }
+    .count-step-body { padding: 16px 0 24px 16px; }
+    .count-step-content { padding: 16px 18px; }
+    .count-summary-box { padding: 20px 20px; }
+  }
+
+  /* 打印样式 */
+  @media print {
+    .count-progress-bar-wrap, .count-float-tip, .count-reset-btn { display: none; }
+    .count-body::before { display: none; }
+    .count-step-card { opacity: 1 !important; transform: none !important; }
+    .count-summary-box { opacity: 1 !important; transform: none !important; }
+  }
+</style>
+
+<div class="count-top-bar"></div>
+<div class="count-progress-bar-wrap"><div class="count-progress-bar" id="countProgressBar"></div></div>
+
+<header class="count-header">
+  <div class="count-header-badge">操作规范 · 狮岭皮具辅料</div>
+  <h1 class="count-h1">点数操作要点</h1>
+  <p class="count-subtitle">核查流程 · 零差错出货标准</p>
+</header>
+
+<main class="count-main">
+  <div class="count-steps-container">
+
+    <!-- 步骤 1：打印后 -->
+    <div class="count-step-card" data-step="1">
+      <div class="count-step-axis">
+        <div class="count-step-num">一</div>
+        <div class="count-step-line"></div>
+      </div>
+      <div class="count-step-body">
+        <span class="count-step-tag">打印后</span>
+        <h2 class="count-step-title">打印销售单后再次核查零数量项目</h2>
+        <div class="count-step-content">
+          <p class="count-step-desc">
+            销售单打印出来后，<strong>不要急着点数</strong>，先拿着纸质单据做第二轮检查。
+            <br><br>
+            打印过程中可能因格式问题导致数量显示异常，或者之前漏掉的零数量项目出现在单据上。
+          </p>
+          <div class="count-alert-box count-alert-tip">
+            <span class="count-alert-icon">✅</span>
+            <span>建议用红笔在纸质单据上划掉数量为零的行(赠品)，并在旁边注明「已确认」，避免后续点数时产生疑惑。</span>
+          </div>
+          <ul class="count-checklist" id="countList2">
+            <li onclick="countToggleCheck(this)"><span class="count-check-box"></span>拿到打印单据，逐行检查数量列</li>
+            <li onclick="countToggleCheck(this)"><span class="count-check-box"></span>用红笔标注或划掉数量为零的项目</li>
+            <li onclick="countToggleCheck(this)"><span class="count-check-box"></span>确认单据与系统数据一致后再继续</li>
+          </ul>
+          <button class="count-reset-btn" onclick="countResetList('countList2')">↺ 重置</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 步骤 2：总量核对 -->
+    <div class="count-step-card" data-step="2">
+      <div class="count-step-axis">
+        <div class="count-step-num">二</div>
+        <div class="count-step-line"></div>
+      </div>
+      <div class="count-step-body">
+        <span class="count-step-tag">总量核对</span>
+        <h2 class="count-step-title">清点销售单总支数与码数，核对车上货物</h2>
+        <div class="count-step-content">
+          <p class="count-step-desc">
+            先从销售单上<strong>汇总总支数和总码数</strong>，记录在纸上或手机备忘录里。
+            <br><br>
+            然后对车上的货物进行实物清点，得出车上的总支数和总码数，与单据数字逐一比对。
+          </p>
+          <div class="count-alert-box count-alert-info">
+            <span class="count-alert-icon">📋</span>
+            <span>建议先点单据总数，再点实物总数，两个数字都确认后再进行下一步逐条核对，避免重复劳动。</span>
+          </div>
+          <ul class="count-checklist" id="countList3">
+            <li onclick="countToggleCheck(this)"><span class="count-check-box"></span>统计销售单：总支数 _____ 支，总码数 _____ 码</li>
+            <li onclick="countToggleCheck(this)"><span class="count-check-box"></span>清点车上实物：总支数 _____ 支，总码数 _____ 码</li>
+            <li onclick="countToggleCheck(this)"><span class="count-check-box"></span>两组数字核对一致 ✓</li>
+          </ul>
+          <button class="count-reset-btn" onclick="countResetList('countList3')">↺ 重置</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 步骤 3：逐条核对 -->
+    <div class="count-step-card" data-step="3">
+      <div class="count-step-axis">
+        <div class="count-step-num">三</div>
+        <div class="count-step-line"></div>
+      </div>
+      <div class="count-step-body">
+        <span class="count-step-tag">逐条核对</span>
+        <h2 class="count-step-title">按条目逐条过，点过的品类用指甲掐一下</h2>
+        <div class="count-step-content">
+          <p class="count-step-desc">
+            按销售单上的条目顺序，<strong>一条一条地核对实物</strong>。每核对完一个品类，用指甲在单据对应行上<strong>掐一个印记</strong>作为标记。
+            <br><br>
+            这个方法简单有效：指甲印清晰可见，不会被风吹走，也不需要额外的笔或工具，是仓库现场最实用的标记方式。
+          </p>
+          <div class="count-alert-box count-alert-tip">
+            <span class="count-alert-icon">💡</span>
+            <span>指甲掐印的位置建议统一在行首或数量数字旁边，保持一致性，方便后续复查时快速识别哪些已核对。</span>
+          </div>
+          <ul class="count-checklist" id="countList4">
+            <li onclick="countToggleCheck(this)"><span class="count-check-box"></span>从第一条目开始，逐条核对品类与数量</li>
+            <li onclick="countToggleCheck(this)"><span class="count-check-box"></span>每核对完一条，用指甲在单据上掐印标记</li>
+            <li onclick="countToggleCheck(this)"><span class="count-check-box"></span>全部条目核对完毕，无遗漏</li>
+          </ul>
+          <button class="count-reset-btn" onclick="countResetList('countList4')">↺ 重置</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 步骤 4：点数相机 -->
+    <div class="count-step-card" data-step="4">
+      <div class="count-step-axis">
+        <div class="count-step-num">四</div>
+        <div class="count-step-line"></div>
+      </div>
+      <div class="count-step-body">
+        <span class="count-step-tag">辅助工具</span>
+        <h2 class="count-step-title">排列整齐后用点数相机辅助清点</h2>
+        <div class="count-step-content">
+          <p class="count-step-desc">
+            将货物<strong>排列整齐成行列</strong>，如果数量较多，可以借助<strong>点数相机</strong>进行自动计数，大幅提升效率和准确率。
+            <br><br>
+            点数相机通过拍照识别，能快速统计整齐排列的货物数量，特别适合支数较多、人工点数容易出错的场景。
+          </p>
+          <div class="count-alert-box count-alert-info">
+            <span class="count-alert-icon">📷</span>
+            <span>使用点数相机前，确保货物排列整齐、间距均匀，光线充足，避免遮挡。拍摄后核对相机显示数量与单据数量是否一致。</span>
+          </div>
+          <ul class="count-checklist" id="countList5">
+            <li onclick="countToggleCheck(this)"><span class="count-check-box"></span>将货物按品类整齐排列成行列</li>
+            <li onclick="countToggleCheck(this)"><span class="count-check-box"></span>数量多时启用点数相机拍照计数</li>
+            <li onclick="countToggleCheck(this)"><span class="count-check-box"></span>相机计数结果与单据数量核对一致</li>
+          </ul>
+          <button class="count-reset-btn" onclick="countResetList('countList5')">↺ 重置</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 步骤 5：异常处理 -->
+    <div class="count-step-card" data-step="6">
+      <div class="count-step-axis">
+        <div class="count-step-num">六</div>
+        <div class="count-step-line"></div>
+      </div>
+      <div class="count-step-body">
+        <span class="count-step-tag">异常处理</span>
+        <h2 class="count-step-title">常见异常情况处理方法</h2>
+        <div class="count-step-content">
+          <p class="count-step-desc">
+            点数过程中遇到特殊情况，按照以下方式处理，避免遗漏或出错：
+          </p>
+
+          <div class="count-exception-item">
+            <div class="count-exception-title">① 点数与单据不一致</div>
+            <p class="count-exception-desc">
+              清点货物时发现实际商品与销售单记录不一致，<strong>直接询问开单人</strong>，确认是开单错误还是货物发错，不要自行猜测处理。
+            </p>
+            <ul class="count-checklist" id="countList6b">
+              <li onclick="countToggleCheck(this)"><span class="count-check-box"></span>发现不一致立即停下，不自行判断</li>
+              <li onclick="countToggleCheck(this)"><span class="count-check-box"></span>联系开单人确认正确信息</li>
+            </ul>
+          </div>
+
+          <div class="count-exception-item">
+            <div class="count-exception-title">② 整支商品备注缺失</div>
+            <p class="count-exception-desc">
+              点数时发现某商品是整支，但销售单备注栏未填写，需要<strong>补填备注后重新打印</strong>，确保单据信息完整。
+            </p>
+            <ul class="count-checklist" id="countList6c">
+              <li onclick="countToggleCheck(this)"><span class="count-check-box"></span>检查每项整支商品是否有备注</li>
+              <li onclick="countToggleCheck(this)"><span class="count-check-box"></span>缺备注的补充后重新打印销售单</li>
+            </ul>
+          </div>
+
+          <div class="count-exception-item">
+            <div class="count-exception-title">③ 销售单打印后发现还有欠缺的货</div>
+            <p class="count-exception-desc">
+              销售单打印后，点数时发现<strong>还有欠缺未发的货</strong>，处理步骤：<br>
+              <strong>① 新开临时销售单</strong> → <strong>② 打印装车单，在备注栏注明欠的货物</strong> → <strong>③ 废弃该临时销售单</strong>。
+            </p>
+            <ul class="count-checklist" id="countList6d">
+              <li onclick="countToggleCheck(this)"><span class="count-check-box"></span>新开一张临时销售单</li>
+              <li onclick="countToggleCheck(this)"><span class="count-check-box"></span>打印装车单，在备注栏清楚注明欠货明细</li>
+              <li onclick="countToggleCheck(this)"><span class="count-check-box"></span>废弃该临时销售单（不作为正式单据）</li>
+            </ul>
+          </div>
+
+          <button class="count-reset-btn" onclick="countResetList('countList6b');countResetList('countList6c');countResetList('countList6d')">↺ 重置</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="count-divider">· · · ✦ · · ·</div>
+
+  <!-- 总结 -->
+  <div class="count-summary-box">
+    <div class="count-summary-title">🎯 核心原则：双重核查，零差错出货</div>
+    <p class="count-summary-text">
+      点数操作的关键在于<strong>「打印后复查 + 先总后分」</strong>——打印单据后先核查零数量项目，再按「总量核对→逐条核对」的顺序进行。指甲掐印是现场最高效的标记方式，点数相机是大批量清点时的得力助手，异常情况及时上报不擅自处理。
+    </p>
+  </div>
+</main>
+
+<div class="count-float-tip" id="countFloatTip">✓ 已完成</div>
+
+<script>
+  // 滚动进度条
+  window.addEventListener('scroll', () => {
+    const scrollTop = document.documentElement.scrollTop;
+    const scrollHeight = document.documentElement.scrollHeight - window.innerHeight;
+    const progress = scrollHeight > 0 ? (scrollTop / scrollHeight) * 100 : 0;
+    document.getElementById('countProgressBar').style.width = progress + '%';
+  });
+
+  // 切换勾选状态
+  function countToggleCheck(li) {
+    li.classList.toggle('checked');
+    countUpdateProgress();
+    countShowTip();
+  }
+
+  // 重置列表
+  function countResetList(id) {
+    const items = document.querySelectorAll('#' + id + ' li');
+    items.forEach(li => li.classList.remove('checked'));
+    countUpdateProgress();
+  }
+
+  // 更新进度
+  function countUpdateProgress() {
+    // 进度条已由滚动事件驱动
+  }
+
+  // 显示提示
+  let countTipTimer;
+  function countShowTip() {
+    const tip = document.getElementById('countFloatTip');
+    const done = document.querySelectorAll('.count-checklist li.checked').length;
+    const total = document.querySelectorAll('.count-checklist li').length;
+    tip.textContent = `✓ 已完成 ${done} / ${total} 项`;
+    tip.classList.add('show');
+    clearTimeout(countTipTimer);
+    countTipTimer = setTimeout(() => tip.classList.remove('show'), 2000);
+  }
+</script>
+
+</div><!-- end .count-wrapper -->
+{% endblock %}

@@ -1,0 +1,409 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+.products-page { display: flex; gap: 1rem; min-height: 70vh; }
+
+/* 左侧分类树 */
+.products-page .tree-sidebar {
+    width: 260px; min-width: 260px;
+    background: #fff; border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    overflow-y: auto; max-height: 80vh;
+    padding: 0.75rem 0;
+}
+.tree-sidebar h3 {
+    padding: 0.5rem 1rem; margin: 0;
+    font-size: 0.95rem; color: #2d3436;
+    border-bottom: 1px solid #f1f3f5;
+}
+.tree-sidebar .tree { list-style: none; padding: 0; margin: 0; }
+.tree-sidebar .tree ul { list-style: none; padding-left: 1.2rem; }
+.tree-sidebar .tree li { margin: 0; }
+.tree-sidebar .tree .node {
+    display: flex; align-items: center; gap: 0.25rem;
+    padding: 0.35rem 0.75rem; cursor: pointer;
+    font-size: 0.88rem; color: #555; border-radius: 4px;
+    transition: background 0.15s;
+    user-select: none;
+}
+.tree-sidebar .tree .node:hover { background: #f1f3f5; }
+.tree-sidebar .tree .node.active { background: #e3f2fd; color: #0984e3; font-weight: 600; }
+.tree-sidebar .tree .toggle {
+    width: 16px; text-align: center; flex-shrink: 0;
+    font-size: 0.7rem; color: #b2bec3; transition: transform 0.2s;
+}
+.tree-sidebar .tree .toggle.expanded { transform: rotate(90deg); }
+.tree-sidebar .tree .toggle.leaf { visibility: hidden; }
+
+/* 右侧主区域 */
+.products-page .main-area { flex: 1; min-width: 0; }
+.main-area .toolbar {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 1rem;
+}
+.main-area .cat-title { font-size: 1.1rem; font-weight: 600; color: #2d3436; }
+
+/* 产品表格 */
+.product-table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+.product-table th { background: #f8f9fa; padding: 0.55rem 0.65rem; font-size: 0.82rem; color: #636e72; text-align: left; border-bottom: 2px solid #e9ecef; white-space: nowrap; }
+.product-table td { padding: 0.5rem 0.65rem; font-size: 0.88rem; border-bottom: 1px solid #f1f3f5; }
+.product-table tr:hover td { background: #f8f9fa; }
+.product-table .btn-sm {
+    padding: 0.2rem 0.5rem; font-size: 0.75rem; border-radius: 4px; border: none; cursor: pointer;
+}
+
+/* 弹窗 */
+.modal-overlay {
+    display: none; position: fixed; top:0; left:0; width:100%; height:100%;
+    background: rgba(0,0,0,0.5); z-index: 2000; justify-content: center; align-items: center;
+}
+.modal-overlay.show { display: flex; }
+.modal-dialog {
+    background: #fff; border-radius: 12px; padding: 1.5rem; width: 640px; max-width: 95vw;
+    max-height: 90vh; overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+}
+.modal-dialog h3 { margin: 0 0 1rem 0; color: #2d3436; font-size: 1.1rem; }
+.modal-dialog .form-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;
+}
+.modal-dialog .form-grid .full { grid-column: 1 / -1; }
+.modal-dialog label { display: block; font-size: 0.82rem; color: #636e72; margin-bottom: 0.2rem; }
+.modal-dialog input, .modal-dialog select {
+    width: 100%; padding: 0.4rem 0.5rem; border: 1px solid #dfe6e9; border-radius: 6px;
+    font-size: 0.85rem; box-sizing: border-box;
+}
+.modal-dialog input:focus, .modal-dialog select:focus { outline: none; border-color: #0984e3; }
+.modal-dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem; }
+
+.empty-state { text-align: center; padding: 3rem; color: #b2bec3; }
+</style>
+
+<div class="products-page">
+    <!-- 左侧分类树 -->
+    <div class="tree-sidebar">
+        <h3>📂 商品分类</h3>
+        <ul class="tree" id="categoryTree">
+            {% macro render_tree(nodes) %}
+                {% for node in nodes %}
+                <li>
+                    <div class="node" data-cat-id="{{ node.id }}" data-has-children="{{ '1' if node.children else '0' }}">
+                        <span class="toggle {{ 'leaf' if not node.children else 'expanded' }}">▶</span>
+                        <span class="name">{{ node.category_name }}</span>
+                    </div>
+                    {% if node.children %}
+                    <ul style="{{ 'display:none;' if node.level >= 2 }}">{{ render_tree(node.children) }}</ul>
+                    {% endif %}
+                </li>
+                {% endfor %}
+            {% endmacro %}
+            {{ render_tree(categories) }}
+        </ul>
+    </div>
+
+    <!-- 右侧主区域 -->
+    <div class="main-area">
+        <div class="toolbar">
+            <span class="cat-title" id="catTitle">全部产品</span>
+            <button class="btn btn-primary" onclick="openProductModal()">➕ 添加产品</button>
+        </div>
+        <table class="product-table" id="productTable">
+            <thead>
+                <tr>
+                    <th>编号</th><th>品名</th><th>规格</th><th>型号</th>
+                    <th>主单位</th><th>辅单位</th><th>库存</th><th>辅数量</th>
+                    <th style="width:80px;">操作</th>
+                </tr>
+            </thead>
+            <tbody id="productTbody">
+            </tbody>
+        </table>
+        <div class="empty-state" id="emptyState" style="display:none;">
+            <p>该分类下暂无产品</p>
+        </div>
+    </div>
+</div>
+
+<!-- 添加/编辑弹窗 -->
+<div class="modal-overlay" id="productModal">
+    <div class="modal-dialog">
+        <h3 id="modalTitle">添加产品</h3>
+        <form id="productForm" onsubmit="return false;">
+            <input type="hidden" id="formProductId">
+            <div class="form-grid">
+                <div><label>产品编号 *</label><input type="text" id="fCode" required></div>
+                <div><label>品名 *</label><input type="text" id="fName" required></div>
+                <div><label>分类</label><input type="number" id="fCatId" readonly></div>
+                <div><label>规格</label><input type="text" id="fSpec"></div>
+                <div><label>型号</label><input type="text" id="fModel"></div>
+                <div><label>条码</label><input type="text" id="fBarcode"></div>
+                <div><label>主单位</label><input type="text" id="fBaseUnit"></div>
+                <div><label>辅单位</label><input type="text" id="fAuxUnit"></div>
+                <div><label>换算关系</label><input type="text" id="fConvRate"></div>
+                <div><label>库存(×100)</label><input type="number" id="fStockQty" step="any"></div>
+                <div><label>辅数量</label><input type="text" id="fAuxQty"></div>
+                <div><label>成本价(分)</label><input type="number" id="fCost" step="any"></div>
+                <div><label>预设售价</label><input type="number" id="fPresetPrice" step="any"></div>
+                <div>
+                    <label>状态</label>
+                    <select id="fStatus"><option value="1">启用</option><option value="0">禁用</option></select>
+                </div>
+            </div>
+            <div class="actions">
+                <button type="button" class="btn" onclick="closeProductModal()" style="background:#b2bec3;color:#fff;">取消</button>
+                <button type="button" class="btn btn-primary" onclick="saveProduct()">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+var currentCategoryId = null;
+
+// ── 分类树交互 ──
+document.getElementById('categoryTree').addEventListener('click', function(e) {
+    var node = e.target.closest('.node');
+    if (!node) return;
+    var toggle = node.querySelector('.toggle');
+
+    // 点击 toggle 展开/折叠
+    if (e.target === toggle && !toggle.classList.contains('leaf')) {
+        var ul = node.parentElement.querySelector(':scope > ul');
+        if (ul) {
+            var show = ul.style.display === 'none';
+            ul.style.display = show ? '' : 'none';
+            toggle.classList.toggle('expanded', show);
+        }
+        return;
+    }
+
+    // 选中分类
+    var catId = node.getAttribute('data-cat-id');
+    var catName = node.querySelector('.name').textContent;
+    selectCategory(catId, catName);
+});
+
+// 选中分类并加载产品
+function selectCategory(catId, catName) {
+    currentCategoryId = catId;
+    document.getElementById('catTitle').textContent = catName;
+    // 高亮
+    document.querySelectorAll('#categoryTree .node').forEach(function(n) { n.classList.remove('active'); });
+    var node = document.querySelector('#categoryTree .node[data-cat-id="' + catId + '"]');
+    if (node) node.classList.add('active');
+    document.getElementById('fCatId').value = catId;
+    loadProducts(catId);
+}
+
+function loadProducts(catId) {
+    fetch('/api/v1/products?category_id=' + catId)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var tbody = document.getElementById('productTbody');
+            var empty = document.getElementById('emptyState');
+            tbody.innerHTML = '';
+            if (!data.products || data.products.length === 0) {
+                empty.style.display = 'block';
+                document.getElementById('productTable').style.display = 'none';
+                return;
+            }
+            empty.style.display = 'none';
+            document.getElementById('productTable').style.display = '';
+            data.products.forEach(function(p) {
+                var tr = buildProductRow(p);
+                tbody.appendChild(tr);
+            });
+        });
+}
+
+function buildProductRow(p) {
+    var tr = document.createElement('tr');
+    tr.setAttribute('data-pid', p.product_id);
+    var sq = p.stock_quantity != null ? (p.stock_quantity / 100).toFixed(2) : '-';
+    tr.innerHTML =
+        '<td>' + (p.product_code || '') + '</td>' +
+        '<td>' + (p.product_name || '') + '</td>' +
+        '<td>' + (p.specification || '-') + '</td>' +
+        '<td>' + (p.model || '-') + '</td>' +
+        '<td>' + (p.base_unit || '-') + '</td>' +
+        '<td>' + (p.aux_unit || '-') + '</td>' +
+        '<td>' + sq + '</td>' +
+        '<td>' + (p.aux_quantity || '-') + '</td>' +
+        '<td style="white-space:nowrap;">' +
+            '<button class="btn btn-primary btn-sm" onclick="editProduct(' + p.product_id + ')" style="margin-right:0.25rem;">✏️</button>' +
+            '<button class="btn btn-danger btn-sm" onclick="deleteProduct(' + p.product_id + ', this)">🗑️</button>' +
+        '</td>';
+    return tr;
+}
+
+// ── 弹窗 ──
+function openProductModal() {
+    if (!currentCategoryId) { alert('请先选择左侧分类'); return; }
+    document.getElementById('modalTitle').textContent = '添加产品';
+    document.getElementById('formProductId').value = '';
+    document.getElementById('fCatId').value = currentCategoryId;
+    ['fCode','fName','fSpec','fModel','fBarcode','fBaseUnit','fAuxUnit','fConvRate','fAuxQty'].forEach(function(id) { document.getElementById(id).value = ''; });
+    ['fStockQty','fCost','fPresetPrice'].forEach(function(id) { document.getElementById(id).value = ''; });
+    document.getElementById('fStatus').value = '1';
+    document.getElementById('productModal').classList.add('show');
+}
+
+function closeProductModal() {
+    document.getElementById('productModal').classList.remove('show');
+}
+
+function editProduct(pid) {
+    fetch('/api/v1/products?category_id=' + currentCategoryId)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var p = (data.products || []).find(function(x) { return x.product_id === pid; });
+            if (!p) { alert('产品不存在'); return; }
+            document.getElementById('modalTitle').textContent = '编辑产品';
+            document.getElementById('formProductId').value = p.product_id;
+            document.getElementById('fCatId').value = p.category_id;
+            document.getElementById('fCode').value = p.product_code || '';
+            document.getElementById('fName').value = p.product_name || '';
+            document.getElementById('fSpec').value = p.specification || '';
+            document.getElementById('fModel').value = p.model || '';
+            document.getElementById('fBarcode').value = p.barcode || '';
+            document.getElementById('fBaseUnit').value = p.base_unit || '';
+            document.getElementById('fAuxUnit').value = p.aux_unit || '';
+            document.getElementById('fConvRate').value = p.conversion_rate || '';
+            document.getElementById('fStockQty').value = p.stock_quantity != null ? p.stock_quantity : '';
+            document.getElementById('fAuxQty').value = p.aux_quantity || '';
+            document.getElementById('fCost').value = p.cost_price != null ? p.cost_price : '';
+            document.getElementById('fPresetPrice').value = p.preset_price != null ? p.preset_price : '';
+            document.getElementById('fStatus').value = p.status != null ? p.status : 1;
+            document.getElementById('productModal').classList.add('show');
+        });
+}
+
+function saveProduct() {
+    var pid = document.getElementById('formProductId').value;
+    var data = {
+        product_code: document.getElementById('fCode').value.trim(),
+        product_name: document.getElementById('fName').value.trim(),
+        category_id: parseInt(document.getElementById('fCatId').value),
+        specification: document.getElementById('fSpec').value.trim(),
+        model: document.getElementById('fModel').value.trim(),
+        barcode: document.getElementById('fBarcode').value.trim(),
+        base_unit: document.getElementById('fBaseUnit').value.trim(),
+        aux_unit: document.getElementById('fAuxUnit').value.trim(),
+        conversion_rate: document.getElementById('fConvRate').value.trim(),
+        stock_quantity: document.getElementById('fStockQty').value ? parseFloat(document.getElementById('fStockQty').value) : null,
+        aux_quantity: document.getElementById('fAuxQty').value.trim(),
+        cost_price: document.getElementById('fCost').value ? parseFloat(document.getElementById('fCost').value) : null,
+        preset_price: document.getElementById('fPresetPrice').value ? parseFloat(document.getElementById('fPresetPrice').value) : null,
+        status: parseInt(document.getElementById('fStatus').value)
+    };
+
+    if (!data.product_code || !data.product_name) { alert('产品编号和品名不能为空'); return; }
+
+    var url = pid ? '/api/v1/products/' + pid : '/api/v1/products';
+    var method = pid ? 'PUT' : 'POST';
+
+    fetch(url, {
+        method: method,
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(result) {
+        if (result.success) {
+            closeProductModal();
+            // 刷新当前分类的产品列表
+            if (pid) {
+                // 更新行
+                var tr = document.querySelector('#productTbody tr[data-pid="' + pid + '"]');
+                if (tr) {
+                    var newTr = buildProductRow(result.product);
+                    tr.parentNode.replaceChild(newTr, tr);
+                }
+            } else {
+                // 追加新行
+                var tbody = document.getElementById('productTbody');
+                var newTr = buildProductRow(result.product);
+                tbody.appendChild(newTr);
+                document.getElementById('emptyState').style.display = 'none';
+                document.getElementById('productTable').style.display = '';
+            }
+        } else {
+            alert('保存失败: ' + (result.error || '未知错误'));
+        }
+    })
+    .catch(function(err) { alert('请求失败: ' + err.message); });
+}
+
+// ── 删除产品 ──
+function deleteProduct(pid, btn) {
+    if (!confirm('确定删除该产品吗？')) return;
+    fetch('/api/v1/products/' + pid, {method: 'DELETE'})
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) {
+                var tr = btn.closest('tr');
+                if (tr) tr.remove();
+                // 检查是否为空
+                var tbody = document.getElementById('productTbody');
+                if (tbody.querySelectorAll('tr').length === 0) {
+                    document.getElementById('emptyState').style.display = 'block';
+                    document.getElementById('productTable').style.display = 'none';
+                }
+            } else {
+                alert('删除失败: ' + (data.error || '未知错误'));
+            }
+        })
+        .catch(function(err) { alert('请求失败: ' + err.message); });
+}
+
+// ── 遮罩点击关闭 ──
+document.getElementById('productModal').addEventListener('click', function(e) {
+    if (e.target === this) closeProductModal();
+});
+
+// ── 默认选中 PE板 (category 166) ──
+(function init() {
+    var peNode = document.querySelector('#categoryTree .node[data-cat-id="166"]');
+    if (peNode) {
+        // 展开祖先路径
+        var li = peNode.closest('li');
+        while (li) {
+            var ul = li.parentElement;
+            if (ul && ul.tagName === 'UL') {
+                ul.style.display = '';
+                var toggle = ul.previousElementSibling ? ul.previousElementSibling.querySelector('.toggle') : null;
+                if (!toggle) {
+                    var parentLi = ul.closest('li');
+                    if (parentLi) {
+                        toggle = parentLi.querySelector(':scope > .node > .toggle');
+                    }
+                }
+                if (toggle) toggle.classList.add('expanded');
+            }
+            li = ul ? ul.closest('li') : null;
+        }
+        peNode.click();
+    } else {
+        // fallback: load all products
+        loadAllProducts();
+    }
+})();
+
+function loadAllProducts() {
+    fetch('/api/v1/products')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var tbody = document.getElementById('productTbody');
+            tbody.innerHTML = '';
+            if (!data.products || data.products.length === 0) {
+                document.getElementById('emptyState').style.display = 'block';
+                return;
+            }
+            document.getElementById('emptyState').style.display = 'none';
+            data.products.forEach(function(p) {
+                tbody.appendChild(buildProductRow(p));
+            });
+        });
+}
+</script>
+{% endblock %}

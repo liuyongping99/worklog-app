@@ -1,0 +1,523 @@
+{% extends "base.html" %}
+{% set page_title = "码数速查表" %}
+
+{% block content %}
+<style>
+  .price-wrapper {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    margin: -2rem -1.5rem;
+    padding: 2rem 0;
+    min-height: calc(100vh - 120px);
+  }
+
+  .price-container {
+    padding: 0 1.5rem;
+  }
+
+  .price-header {
+    text-align: center;
+    padding: 0 0 2rem;
+  }
+
+  .price-header h1 {
+    font-size: 2rem;
+    background: linear-gradient(90deg, #ff6b6b, #feca57, #48dbfb);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    font-weight: 700;
+  }
+
+  .price-header p {
+    color: #888;
+    margin-top: 8px;
+    font-size: 0.9rem;
+  }
+
+  .price-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+  }
+
+  @media (max-width: 1200px) {
+    .price-grid { grid-template-columns: 1fr; }
+  }
+
+  .price-card {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 16px;
+    padding: 28px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    display: flex;
+    flex-direction: column;
+  }
+
+  .price-card.wide {
+    grid-column: span 2;
+  }
+
+  .price-card-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .price-card-icon {
+    width: 52px;
+    height: 52px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.6rem;
+    flex-shrink: 0;
+  }
+
+  .price-card:nth-child(1) .price-card-icon { background: linear-gradient(135deg, #ff6b6b, #ee5a5a); }
+  .price-card:nth-child(2) .price-card-icon { background: linear-gradient(135deg, #48dbfb, #0abde3); }
+
+  .price-card-title {
+    font-size: 1.4rem;
+    font-weight: 600;
+    color: #fff;
+  }
+
+  .price-card-subtitle {
+    font-size: 0.8rem;
+    color: #888;
+    margin-top: 2px;
+  }
+
+  .price-card-inner {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    flex: 1;
+  }
+
+  @media (max-width: 1200px) {
+    .price-card.wide { grid-column: span 1; }
+    .price-card-inner { grid-template-columns: 1fr; }
+  }
+
+  .price-items {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .price-item {
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 10px;
+    padding: 12px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: all 0.2s ease;
+    border-left: 3px solid transparent;
+    cursor: pointer;
+  }
+
+  .price-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+    transform: translateX(4px);
+    border-left-color: #48dbfb;
+  }
+
+  .price-item-name {
+    font-size: 0.95rem;
+    color: #e0e0e0;
+    font-weight: 500;
+  }
+
+  .price-item-note {
+    font-size: 0.72rem;
+    color: #feca57;
+    display: block;
+    margin-top: 2px;
+  }
+
+  .price-item-right {
+    text-align: right;
+    flex-shrink: 0;
+    margin-left: 12px;
+  }
+
+  .price-item-price {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #48dbfb;
+    white-space: nowrap;
+  }
+
+  .price-item-price.empty {
+    color: #555;
+    font-weight: 400;
+    font-size: 0.9rem;
+  }
+
+  .price-divider {
+    font-size: 0.72rem;
+    color: #666;
+    padding: 10px 0 4px;
+    margin-top: 4px;
+    border-top: 1px dashed rgba(255,255,255,0.1);
+    letter-spacing: 1px;
+  }
+</style>
+
+<style>
+  /* Override base.html's container for this page — full width */
+  .container {
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+</style>
+
+<div class="price-wrapper" style="margin: -2rem 0;">
+  <div class="price-container">
+
+    <div class="price-header">
+      <h1>🧰 皮具辅料码数速查表</h1>
+      <p>广州狮岭 · 实时报价参考</p>
+    </div>
+
+    <div class="price-grid">
+
+      <!-- 按码数卖 -->
+      <div class="price-card wide">
+        <div class="price-card-header">
+          <div class="price-card-icon">📏</div>
+          <div>
+            <div class="price-card-title">按码数卖</div>
+            <div class="price-card-subtitle">按码数计价</div>
+          </div>
+        </div>
+        <div class="price-card-inner">
+          <!-- 左列 -->
+          <div class="price-items">
+            <div class="price-divider">杂胶系列 1.4M宽 黑白不同价</div>
+            <div class="price-item">
+              <div class="price-item-name">普通杂胶 <span class="price-item-note">软中</span></div>
+              <div class="price-item-right"><div class="price-item-price">34.5y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">加面杂胶 <span class="price-item-note">软中硬</span></div>
+              <div class="price-item-right"><div class="price-item-price">43y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">特硬杂胶 <span class="price-item-note">加面</span></div>
+              <div class="price-item-right"><div class="price-item-price">44y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">7P环保杂胶 <span class="price-item-note">软中 可加面</span></div>
+              <div class="price-item-right"><div class="price-item-price">48.5y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">磅布杂胶 <span class="price-item-note">加面</span></div>
+              <div class="price-item-right"><div class="price-item-price">46y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">7P磅布杂胶 <span class="price-item-note">中性&中性加面</span></div>
+              <div class="price-item-right"><div class="price-item-price">48.5y/支</div></div>
+            </div>
+
+            <div class="price-divider">三文治系列 黑白不同价</div>
+            <div class="price-item">
+              <div class="price-item-name">三文治(黑) ≤1.4mm</div>
+              <div class="price-item-right"><div class="price-item-price">34.5y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">三文治(黑) ≥1.6mm</div>
+              <div class="price-item-right"><div class="price-item-price">29y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">三文治白</div>
+              <div class="price-item-right"><div class="price-item-price">46y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">磅布三文治 <span class="price-item-note">软中硬同价</span></div>
+              <div class="price-item-right"><div class="price-item-price">36.5y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">磅布双面，双面磅布 1.4M <span class="price-item-note">黑白不同价</span></div>
+              <div class="price-item-right"><div class="price-item-price empty">—</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">7P三文治</div>
+              <div class="price-item-right"><div class="price-item-price">48.5y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">7P磅布三文治</div>
+              <div class="price-item-right"><div class="price-item-price">50y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">LD特软三文治</div>
+              <div class="price-item-right"><div class="price-item-price">36.5y/支</div></div>
+            </div>
+
+            <div class="price-divider">路华里 1.4M</div>
+            <div class="price-item">
+              <div class="price-item-name">路华里</div>
+              <div class="price-item-right"><div class="price-item-price">30y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">利达纹A级路华里</div>
+              <div class="price-item-right"><div class="price-item-price">50y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">7P环保路华里</div>
+              <div class="price-item-right"><div class="price-item-price">48.5y/支</div></div>
+            </div>
+
+            <div class="price-divider">纯胶系列 1.4M</div>
+            <div class="price-item">
+              <div class="price-item-name">纯胶</div>
+              <div class="price-item-right"><div class="price-item-price">36.5y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">真高弹纯胶</div>
+              <div class="price-item-right"><div class="price-item-price">38.5y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">鱼鳞布纯胶</div>
+              <div class="price-item-right"><div class="price-item-price">38.5y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">7P环保纯胶</div>
+              <div class="price-item-right"><div class="price-item-price">39y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">消光 <span class="price-item-note">加价</span></div>
+              <div class="price-item-right"><div class="price-item-price">+0.3元/y</div></div>
+            </div>
+
+            <div class="price-divider">潜水胶系列</div>
+            <div class="price-item">
+              <div class="price-item-name">潜水胶</div>
+              <div class="price-item-right"><div class="price-item-price">55y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">环保潜水胶</div>
+              <div class="price-item-right"><div class="price-item-price">38y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">B级潜水料1.0</div>
+              <div class="price-item-right"><div class="price-item-price">110y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">B级潜水料1.5</div>
+              <div class="price-item-right"><div class="price-item-price">55y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">B级潜水料1.5</div>
+              <div class="price-item-right"><div class="price-item-price">110y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">B级潜水料2.0</div>
+              <div class="price-item-right"><div class="price-item-price">55y/支</div></div>
+            </div>
+
+            <div class="price-divider">超纤绒贝斯</div>
+            <div class="price-item">
+              <div class="price-item-name">超纤绒贝斯</div>
+              <div class="price-item-right"><div class="price-item-price">50y/支</div></div>
+            </div>
+
+            <div class="price-divider">新品种</div>
+            <div class="price-item">
+              <div class="price-item-name">普通鱼鳞布LB</div>
+              <div class="price-item-right"><div class="price-item-price">36.5y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">普通猪皮纹HA</div>
+              <div class="price-item-right"><div class="price-item-price">36.5y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">7P环保LB鱼鳞布</div>
+              <div class="price-item-right"><div class="price-item-price">36.5y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">7P环保猪皮纹HA</div>
+              <div class="price-item-right"><div class="price-item-price">36.5y/支</div></div>
+            </div>
+          </div>
+
+          <!-- 右列 -->
+          <div class="price-items">
+            <div class="price-divider">泥胶系列</div>
+            <div class="price-item">
+              <div class="price-item-name">泥胶1.0</div>
+              <div class="price-item-right"><div class="price-item-price">92y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">泥胶1.0以上</div>
+              <div class="price-item-right"><div class="price-item-price">46y/支</div></div>
+            </div>
+
+            <div class="price-divider">水刺布</div>
+            <div class="price-item">
+              <div class="price-item-name">双面水刺布 <span class="price-item-note">软中硬不同价</span></div>
+              <div class="price-item-right"><div class="price-item-price">47y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">黑色 <span class="price-item-note">加价</span></div>
+              <div class="price-item-right"><div class="price-item-price">+1元/y</div></div>
+            </div>
+
+            <div class="price-divider">弹力胶 TPR 黑白同价</div>
+            <div class="price-item">
+              <div class="price-item-name">弹力胶 &lt;1.8mm</div>
+              <div class="price-item-right"><div class="price-item-price">92y</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">弹力胶 ≥1.8mm</div>
+              <div class="price-item-right"><div class="price-item-price">46y</div></div>
+            </div>
+
+            <div class="price-divider">回力胶EVA 38° C料&环保A料 1.4M&1.5M 黑白同价</div>
+            <div class="price-item">
+              <div class="price-item-name">回力胶 ≤2.0mm</div>
+              <div class="price-item-right"><div class="price-item-price">92y</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">回力胶 &gt;2.0mm</div>
+              <div class="price-item-right"><div class="price-item-price">46y</div></div>
+            </div>
+
+            <div class="price-divider">加硬黑白55° 1.4M&1.5M</div>
+            <div class="price-item">
+              <div class="price-item-name">加硬 &lt;2.0mm</div>
+              <div class="price-item-right"><div class="price-item-price">80y</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">加硬 ≥ 2.0mm</div>
+              <div class="price-item-right"><div class="price-item-price">40y</div></div>
+            </div>
+
+            <div class="price-divider">卷材65°按支 黑色1.4M&1.5M</div>
+            <div class="price-item">
+              <div class="price-item-name">白色卷材 ≤ 2.0mm</div>
+              <div class="price-item-right"><div class="price-item-price">35y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">白色卷材 &gt;2.0mm</div>
+              <div class="price-item-right"><div class="price-item-price">24y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">黑色卷材 ≤ 1.5mm</div>
+              <div class="price-item-right"><div class="price-item-price">70y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">黑色卷材 ≥ 2.0mm</div>
+              <div class="price-item-right"><div class="price-item-price">35y/支</div></div>
+            </div>
+
+            <div class="price-divider">硬片75°</div>
+            <div class="price-item">
+              <div class="price-item-name">硬片1.5</div>
+              <div class="price-item-right"><div class="price-item-price">35y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">硬片2.0</div>
+              <div class="price-item-right"><div class="price-item-price">21y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">硬片2.5</div>
+              <div class="price-item-right"><div class="price-item-price">17y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">硬片3.0</div>
+              <div class="price-item-right"><div class="price-item-price">14y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">硬片3.5</div>
+              <div class="price-item-right"><div class="price-item-price">10y/支</div></div>
+            </div>
+            <div class="price-item">
+              <div class="price-item-name">硬片4.0</div>
+              <div class="price-item-right"><div class="price-item-price">10y/支</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 按支卖 & 按斤卖 -->
+      <div class="price-card">
+        <div class="price-card-header">
+          <div class="price-card-icon">●●●</div>
+          <div>
+            <div class="price-card-title">按支卖</div>
+            <div class="price-card-subtitle">无纺布·回力胶·弹力胶</div>
+          </div>
+        </div>
+        <div class="price-items">
+          <div class="price-item">
+            <div class="price-item-name">普通无纺布1.5M 9g</div>
+            <div class="price-item-right"><div class="price-item-price empty">—</div></div>
+          </div>
+          <div class="price-divider">回力胶系列 1.4M&1.5M</div>
+          <div class="price-item">
+            <div class="price-item-name">A料 C料</div>
+            <div class="price-item-right"><div class="price-item-price">38°</div></div>
+          </div>
+          <div class="price-item">
+            <div class="price-item-name">加硬黑</div>
+            <div class="price-item-right"><div class="price-item-price">55°</div></div>
+          </div>
+          <div class="price-item">
+            <div class="price-item-name">黑色卷材</div>
+            <div class="price-item-right"><div class="price-item-price">65°</div></div>
+          </div>
+          <div class="price-divider">弹力胶系列 1.4M&1.5M</div>
+          <div class="price-item">
+            <div class="price-item-name">RA</div>
+            <div class="price-item-right"><div class="price-item-price empty">—</div></div>
+          </div>
+          <div class="price-item">
+            <div class="price-item-name">RB</div>
+            <div class="price-item-right"><div class="price-item-price empty">—</div></div>
+          </div>
+
+          <div class="price-divider" style="margin-top: 20px;">按斤卖</div>
+          <div class="price-item">
+            <div class="price-item-name">无纺布1.6M <span class="price-item-note">(kg)</span></div>
+            <div class="price-item-right"><div class="price-item-price empty">—</div></div>
+          </div>
+          <div class="price-item">
+            <div class="price-item-name">白色卷材 <span class="price-item-note">(按斤，地磅报kg)</span></div>
+            <div class="price-item-right"><div class="price-item-price empty">—</div></div>
+          </div>
+          <div class="price-item">
+            <div class="price-item-name">硬片 <span class="price-item-note">(按斤，地磅报kg)</span></div>
+            <div class="price-item-right"><div class="price-item-price">75°</div></div>
+          </div>
+          <div class="price-item">
+            <div class="price-item-name">硬弹 <span class="price-item-note">(按斤，地磅报kg)</span></div>
+            <div class="price-item-right"><div class="price-item-price empty">—</div></div>
+          </div>
+          <div class="price-item">
+            <div class="price-item-name">PE板 <span class="price-item-note">(kg)</span></div>
+            <div class="price-item-right"><div class="price-item-price empty">—</div></div>
+          </div>
+          <div class="price-item">
+            <div class="price-item-name">高弹高密海绵 <span class="price-item-note">(按斤，地磅报kg)</span></div>
+            <div class="price-item-right"><div class="price-item-price empty">—</div></div>
+          </div>
+          <div class="price-item">
+            <div class="price-item-name">卷装牛皮纸 <span class="price-item-note">(按kg)</span></div>
+            <div class="price-item-right"><div class="price-item-price empty">—</div></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+{% endblock %}

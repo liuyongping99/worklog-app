@@ -1,0 +1,97 @@
+# ===== Python 字节码 / 缓存 =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+
+# 测试 / 静态分析 / 类型检查缓存
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+htmlcov/
+coverage.xml
+*.cover
+
+# 虚拟环境
+venv/
+.venv/
+env/
+ENV/
+.python-version
+
+# ===== 业务数据 =====
+# SQLite 数据库（含真实业务记录）
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+worklog.db
+worklog.db.bak
+
+# 用户上传的图片（按月分组）
+upload/
+
+# ===== 密钥 / 环境变量 =====
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Flask 实例配置
+instance/
+
+# ===== 临时 / 一次性文件 =====
+# 临时分析 / 调试脚本（用一次就丢的）
+_analyze.py
+_db_check.py
+_check_*.py
+_tw_copy_prompt.html
+309A_result.txt
+templates_fixed/
+scratchpad.md
+
+# ===== Claude Code 配置 / memory =====
+# 个人化配置和会话 memory,不上传公开仓库
+.claude/
+
+# ===== 操作系统垃圾 =====
+# Windows
+Thumbs.db
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Linux
+*~
+
+# ===== IDE / 编辑器 =====
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+*.sublime-project
+*.sublime-workspace
+
+# ===== 日志 =====
+*.log
+logs/
+nohup.out
+
+# ===== 其他 =====
+# Windows 启动脚本的临时输出
+*.bak
+*.tmp
+*.swp

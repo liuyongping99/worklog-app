@@ -1,0 +1,247 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+.pc-wrap { max-width: 960px; margin: 0 auto; }
+.pc-card { background: #fff; border-radius: 12px; padding: 1.5rem 2rem; margin-bottom: 1rem; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+
+.tree { font-size: 0.92rem; }
+.tree-node { }
+.tree-row { display: flex; align-items: center; padding: 5px 8px; border-radius: 6px; gap: 6px; transition: background .15s; cursor: default; }
+.tree-row:hover { background: #f5f7fa; }
+.tree-row.root-row { font-weight: 700; background: #f0f4ff; border-radius: 8px; margin-bottom: 4px; }
+
+.tree-toggle { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; font-size: 0.7rem; color: #888; flex-shrink: 0; border-radius: 3px; }
+.tree-toggle:hover { background: #e0e0e0; }
+.tree-toggle.empty { visibility: hidden; }
+
+.tree-children { }
+.tree-children.collapsed { display: none; }
+
+.tree-code { font-family: 'Consolas','Courier New',monospace; color: #636e72; font-size: 0.82rem; min-width: 60px; }
+.tree-name { color: #2d3436; }
+.tree-level-badge { font-size: 0.7rem; padding: 1px 6px; border-radius: 8px; color: #fff; flex-shrink: 0; }
+.lvl-1 { background: #6c5ce7; }
+.lvl-2 { background: #0984e3; }
+.lvl-3 { background: #00b894; }
+.lvl-4 { background: #636e72; }
+
+.tree-actions { margin-left: auto; display: flex; gap: 4px; opacity: 0; transition: opacity .15s; }
+.tree-row:hover .tree-actions { opacity: 1; }
+.tree-actions button { border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem; padding: 2px 8px; }
+.btn-tree-add { background: #e8f5e9; color: #2e7d32; }
+.btn-tree-add:hover { background: #c8e6c9; }
+.btn-tree-edit { background: #e3f2fd; color: #1976d2; }
+.btn-tree-edit:hover { background: #bbdefb; }
+.btn-tree-del { background: #ffebee; color: #c62828; }
+.btn-tree-del:hover { background: #ffcdd2; }
+.btn-tree-root-add { background: #6c5ce7; color: #fff; padding: 4px 14px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; margin-left: 8px; }
+.btn-tree-root-add:hover { background: #5a4bd1; }
+
+/* 树形缩进线条 */
+.tree-indent { display: inline-block; flex-shrink: 0; }
+.indent-line { display: inline-block; width: 20px; text-align: center; color: #ccc; font-size: 0.75rem; }
+
+/* 小图标按钮 */
+.icon-btn { background: none; border: none; cursor: pointer; font-size: 0.85rem; padding: 2px 4px; border-radius: 3px; color: #888; }
+.icon-btn:hover { background: #e0e0e0; }
+
+/* 弹窗 */
+.pc-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.45); z-index: 9999; align-items: center; justify-content: center; }
+.pc-modal.active { display: flex; }
+.pc-modal-content { background: #fff; border-radius: 12px; padding: 1.8rem; width: 90%; max-width: 440px; box-shadow: 0 8px 32px rgba(0,0,0,.18); }
+.pc-modal-content h3 { margin-bottom: 1.2rem; color: #4a90e2; }
+.pc-modal-content .form-group { margin-bottom: 1rem; }
+.pc-modal-content label { display: block; font-size: 0.85rem; color: #666; margin-bottom: 4px; }
+.pc-modal-content input, .pc-modal-content select { width: 100%; padding: 0.45rem 0.6rem; border: 1px solid #dfe6e9; border-radius: 6px; font-size: 0.9rem; box-sizing: border-box; }
+.pc-modal-content input:focus, .pc-modal-content select:focus { border-color: #74b9ff; outline: none; }
+.pc-modal-actions { display: flex; gap: 0.6rem; justify-content: flex-end; margin-top: 1.5rem; }
+.pc-modal-actions button { padding: 0.45rem 1.2rem; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
+.btn-cancel { background: #e0e0e0; color: #333; }
+.btn-save { background: #4a90e2; color: #fff; }
+.btn-save:hover { background: #357abd; }
+
+/* 统计条 */
+.pc-stats { display: flex; gap: 1rem; align-items: center; color: #888; font-size: 0.85rem; margin-left: auto; }
+.pc-stats span { background: #f5f5f5; padding: 2px 10px; border-radius: 10px; }
+</style>
+
+<div class="pc-wrap">
+    <div class="pc-card" style="display:flex;align-items:center;">
+        <h2 class="card-title" style="margin:0;">📂 商品类型</h2>
+        <button class="btn-tree-root-add" onclick="openAdd(null, 1, '商品')">➕ 新增大类</button>
+        <div class="pc-stats">
+            <span>{{ all_cats|length }} 个分类</span>
+        </div>
+    </div>
+
+    <div class="pc-card">
+        <div class="tree" id="treeRoot">
+            {% macro render_node(node, level) %}
+            {% set has_children = node.children|length > 0 %}
+            <div class="tree-node" data-id="{{ node.id }}" data-level="{{ node.level }}" data-code="{{ node.category_code|e }}" data-name="{{ node.category_name|e }}" data-sort="{{ node.sort_order }}" data-status="{{ node.status }}">
+                <div class="tree-row{% if node.level == 1 %} root-row{% endif %}">
+                    {# 缩进 #}
+                    <span class="tree-indent">
+                        {% for i in range(1, level) %}
+                        <span class="indent-line">│</span>
+                        {% endfor %}
+                    </span>
+                    {# 展开/折叠 #}
+                    <span class="tree-toggle{% if not has_children %} empty{% endif %}" onclick="toggleNode(this)">{% if has_children %}▼{% endif %}</span>
+                    {# 编码 + 名称 #}
+                    <span class="tree-code">{{ node.category_code }}</span>
+                    <span class="tree-name">{{ node.category_name }}</span>
+                    <span class="tree-level-badge lvl-{{ node.level }}">L{{ node.level }}</span>
+                    {# 操作按钮 #}
+                    <div class="tree-actions">
+                        <button class="btn-tree-add" onclick="event.stopPropagation(); openAdd({{ node.id }}, {{ node.level + 1 }}, '{{ node.category_name|e }}')" title="添加子分类">＋</button>
+                        <button class="btn-tree-edit" onclick="event.stopPropagation(); openEdit({{ node.id }})" title="编辑">✏️</button>
+                        {% if not has_children %}
+                        <form method="POST" action="/product-categories/delete/{{ node.id }}" style="display:inline;" onsubmit="return confirm('确定要删除 {{ node.category_name|e }} 吗？')">
+                            <button class="btn-tree-del" title="删除">✕</button>
+                        </form>
+                        {% endif %}
+                    </div>
+                </div>
+                {% if has_children %}
+                <div class="tree-children">
+                    {% for child in node.children %}
+                    {{ render_node(child, level + 1) }}
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+            {% endmacro %}
+
+            {% for root in tree %}
+            {{ render_node(root, 1) }}
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<!-- 添加弹窗 -->
+<div class="pc-modal" id="addModal">
+    <div class="pc-modal-content">
+        <h3>➕ 添加分类</h3>
+        <form method="POST" action="/product-categories/add">
+            <input type="hidden" name="parent_id" id="addParentId">
+            <input type="hidden" name="level" id="addLevel">
+            <div class="form-group">
+                <label>父级分类</label>
+                <input type="text" id="addParentName" readonly style="background:#f5f5f5;color:#888;">
+            </div>
+            <div class="form-group">
+                <label for="addCode">分类编码 <span style="color:#e17055;">*</span></label>
+                <input type="text" name="category_code" id="addCode" required placeholder="如 0101">
+            </div>
+            <div class="form-group">
+                <label for="addName">分类名称 <span style="color:#e17055;">*</span></label>
+                <input type="text" name="category_name" id="addName" required placeholder="如 灰板类">
+            </div>
+            <div class="form-group">
+                <label for="addSort">排序</label>
+                <input type="number" name="sort_order" id="addSort" value="0" min="0">
+            </div>
+            <div class="pc-modal-actions">
+                <button type="button" class="btn-cancel" onclick="closeAdd()">取消</button>
+                <button type="submit" class="btn-save">💾 保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 编辑弹窗 -->
+<div class="pc-modal" id="editModal">
+    <div class="pc-modal-content">
+        <h3>✏️ 编辑分类</h3>
+        <form method="POST" id="editForm">
+            <input type="hidden" name="status" id="editStatus" value="1">
+            <div class="form-group">
+                <label>分类层级</label>
+                <input type="text" id="editLevelInfo" readonly style="background:#f5f5f5;color:#888;">
+            </div>
+            <div class="form-group">
+                <label for="editCode">分类编码 <span style="color:#e17055;">*</span></label>
+                <input type="text" name="category_code" id="editCode" required>
+            </div>
+            <div class="form-group">
+                <label for="editName">分类名称 <span style="color:#e17055;">*</span></label>
+                <input type="text" name="category_name" id="editName" required>
+            </div>
+            <div class="form-group">
+                <label for="editSort">排序</label>
+                <input type="number" name="sort_order" id="editSort" value="0" min="0">
+            </div>
+            <div class="form-group">
+                <label for="editStatusSel">状态</label>
+                <select name="status_display" id="editStatusSel" onchange="document.getElementById('editStatus').value = this.value">
+                    <option value="1">启用</option>
+                    <option value="0">禁用</option>
+                </select>
+            </div>
+            <div class="pc-modal-actions">
+                <button type="button" class="btn-cancel" onclick="closeEdit()">取消</button>
+                <button type="submit" class="btn-save">💾 保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+// 树节点展开/折叠
+function toggleNode(toggle) {
+    var node = toggle.closest('.tree-node');
+    var children = node.querySelector(':scope > .tree-children');
+    if (children) {
+        children.classList.toggle('collapsed');
+        toggle.textContent = children.classList.contains('collapsed') ? '▶' : '▼';
+    }
+}
+
+// 添加
+function openAdd(parentId, level, parentName) {
+    document.getElementById('addParentId').value = parentId || '';
+    document.getElementById('addLevel').value = level;
+    document.getElementById('addParentName').value = parentName || '(根)';
+    document.getElementById('addCode').value = '';
+    document.getElementById('addName').value = '';
+    document.getElementById('addSort').value = '0';
+    document.getElementById('addModal').classList.add('active');
+    document.getElementById('addName').focus();
+}
+
+function closeAdd() {
+    document.getElementById('addModal').classList.remove('active');
+}
+
+// 编辑
+function openEdit(categoryId) {
+    var node = document.querySelector('.tree-node[data-id="' + categoryId + '"]');
+    if (!node) return;
+    var code = node.getAttribute('data-code');
+    var name = node.getAttribute('data-name');
+    var sort = node.getAttribute('data-sort');
+    var level = node.getAttribute('data-level');
+    var status = node.getAttribute('data-status');
+    document.getElementById('editCode').value = code;
+    document.getElementById('editName').value = name;
+    document.getElementById('editSort').value = sort;
+    document.getElementById('editLevelInfo').value = '第' + level + '层';
+    document.getElementById('editStatus').value = status;
+    document.getElementById('editStatusSel').value = status;
+    document.getElementById('editForm').action = '/product-categories/edit/' + categoryId;
+    document.getElementById('editModal').classList.add('active');
+}
+
+function closeEdit() {
+    document.getElementById('editModal').classList.remove('active');
+}
+
+// 弹窗背景点击关闭
+document.getElementById('addModal').addEventListener('click', function(e) { if (e.target === this) closeAdd(); });
+document.getElementById('editModal').addEventListener('click', function(e) { if (e.target === this) closeEdit(); });
+document.addEventListener('keydown', function(e) { if (e.key === 'Escape') { closeAdd(); closeEdit(); } });
+</script>
+{% endblock %}
