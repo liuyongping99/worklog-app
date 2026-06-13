@@ -5,6 +5,7 @@
 - /api/v1/loading-orders/* REST API（订单/明细/图片 CRUD + 移动）
 """
 import os
+import base64
 from datetime import date, timedelta, datetime
 from flask import Blueprint, render_template, request, jsonify
 from models import (
@@ -85,11 +86,13 @@ def api_v1_loading_orders_create():
 
 @bp.route('/api/v1/loading-orders/<int:order_id>', methods=['DELETE'])
 def api_v1_loading_orders_delete(order_id):
-    """删除订单（级联删除明细和图片）→ 200"""
+    """删除装柜订单 → 200（有明细或图片时拒绝）"""
     order = LoadingOrder.get_by_id(order_id)
     if not order:
         return jsonify({'success': False, 'error': '订单不存在'}), 404
-    LoadingOrder.delete(order_id)
+    result = LoadingOrder.delete(order_id)
+    if not result.get('success'):
+        return jsonify(result), 400
     AuditLog.log('delete_order', 'loading_order', order_id, detail={'customer': order.get('customer')})
     return jsonify({'success': True})
 
@@ -279,10 +282,35 @@ def api_v1_loading_orders_move_record(record_id):
 # ── REST API 图片 CRUD ──────────────────────────────────────────────
 @bp.route('/api/v1/loading-orders/<int:order_id>/images', methods=['POST'])
 def api_v1_loading_orders_upload_image(order_id):
-    """上传图片 → 201"""
+    """上传图片 → 201（支持 multipart 文件和 base64 粘贴）"""
     order = LoadingOrder.get_by_id(order_id)
     if not order:
         return jsonify({'success': False, 'error': '订单不存在'}), 404
+
+    upload_dir, date_str = get_helpers_upload_dir()
+
+    # 支持 base64 粘贴
+    if request.is_json:
+        data = request.get_json()
+        image_data = data.get('image')
+        if image_data and image_data.startswith('data:image'):
+            header, base64_data = image_data.split(',', 1)
+            if 'png' in header.lower():
+                ext = 'png'
+            elif 'gif' in header.lower():
+                ext = 'gif'
+            elif 'webp' in header.lower():
+                ext = 'webp'
+            else:
+                ext = 'jpg'
+            img_bytes = base64.b64decode(base64_data)
+            filename = f"loading_{order_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}.{ext}"
+            filepath = os.path.join(upload_dir, filename)
+            with open(filepath, 'wb') as f:
+                f.write(img_bytes)
+            image_id = LoadingOrderImage.create(order_id, filepath, 'pasted_image')
+            relative_path = f"{date_str}/{filename}"
+            return jsonify({'success': True, 'image_id': image_id, 'image': relative_path}), 201
 
     if 'image' not in request.files:
         return jsonify({'success': False, 'error': '未提供图片'}), 400
@@ -290,10 +318,11 @@ def api_v1_loading_orders_upload_image(order_id):
     if file.filename == '':
         return jsonify({'success': False, 'error': '未选择文件'}), 400
 
-    upload_dir, date_str = get_helpers_upload_dir()
-
-    ext = file.filename.rsplit('.', 1)[-1] if '.' in file.filename else 'png'
-    filename = f"loading_{order_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{file.filename}"
+    ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else 'png'
+    if ext not in ('png', 'jpg', 'jpeg', 'gif', 'webp'):
+        ext = 'png'
+    safe_name = os.path.basename(file.filename)  # 防路径穿越
+    filename = f"loading_{order_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{safe_name}"
     filepath = os.path.join(upload_dir, filename)
     file.save(filepath)
 

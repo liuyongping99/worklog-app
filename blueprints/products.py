@@ -135,7 +135,10 @@ def api_v1_products_list():
     """按分类查询产品列表"""
     category_id = request.args.get('category_id', '').strip()
     if category_id:
-        products = Product.get_by_category(int(category_id))
+        try:
+            products = Product.get_by_category(int(category_id))
+        except (ValueError, TypeError):
+            return jsonify({'success': False, 'error': 'category_id 必须是整数'}), 400
     else:
         products = Product.get_all()
     return jsonify({'success': True, 'products': products})

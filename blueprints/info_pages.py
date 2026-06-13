@@ -11,7 +11,7 @@
 - 开单要点 /billing-tips
 - 当前缺货 /stockout
 """
-from flask import Blueprint, render_template, request
+from flask import Blueprint, render_template, request, jsonify
 from models import StockOutItem
 
 bp = Blueprint('info_pages', __name__)
@@ -74,13 +74,14 @@ def stockout():
 @bp.route('/stockout/add', methods=['POST'])
 def stockout_add():
     name = request.form.get('name', '').strip()
-    color = request.form.get('color', '')
-    if name:
-        StockOutItem.create(name, color)
-    return 'ok'
+    color = request.form.get('color', '').strip()
+    if not name:
+        return jsonify({'success': False, 'error': '商品名称不能为空'}), 400
+    StockOutItem.create(name, color)
+    return jsonify({'success': True})
 
 
 @bp.route('/stockout/delete/<int:item_id>', methods=['POST', 'DELETE'])
 def stockout_delete(item_id):
     StockOutItem.delete(item_id)
-    return 'ok'
+    return jsonify({'success': True})

@@ -153,6 +153,100 @@ def init_db():
         except Exception:
             pass  # 列已存在
 
+    # ── shipping_images（出货订单图片） ──
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS shipping_images (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_pk INTEGER NOT NULL,
+            file_path TEXT NOT NULL,
+            original_name TEXT DEFAULT '',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (order_pk) REFERENCES shipping_orders(id)
+        )
+    ''')
+
+    # ── inbound_images（入库订单图片） ──
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS inbound_images (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_pk INTEGER NOT NULL,
+            file_path TEXT NOT NULL,
+            original_name TEXT DEFAULT '',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (order_pk) REFERENCES inbound_orders(id)
+        )
+    ''')
+
+    # ── inbound_records（入库订单明细） ──
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS inbound_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_pk INTEGER NOT NULL,
+            product_name TEXT NOT NULL,
+            specification TEXT NOT NULL,
+            quantity TEXT NOT NULL,
+            unit TEXT NOT NULL DEFAULT '支',
+            remark TEXT DEFAULT '',
+            created_at TEXT NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (order_pk) REFERENCES inbound_orders(id)
+        )
+    ''')
+
+    # ── loading_order_records（装柜订单明细） ──
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS loading_order_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_pk INTEGER NOT NULL,
+            product_name TEXT NOT NULL,
+            specification TEXT NOT NULL,
+            quantity TEXT NOT NULL,
+            unit TEXT NOT NULL DEFAULT '支',
+            remark TEXT DEFAULT '',
+            created_at TEXT NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (order_pk) REFERENCES loading_orders(id)
+        )
+    ''')
+
+    # ── loading_order_images（装柜订单图片） ──
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS loading_order_images (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_pk INTEGER NOT NULL,
+            file_path TEXT NOT NULL,
+            original_name TEXT DEFAULT '',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (order_pk) REFERENCES loading_orders(id)
+        )
+    ''')
+
+    # ── product（产品管理） ──
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS product (
+            product_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_code TEXT NOT NULL,
+            product_name TEXT NOT NULL,
+            category_id INTEGER NOT NULL,
+            specification TEXT,
+            model TEXT,
+            barcode TEXT,
+            cost_price INTEGER,
+            base_unit TEXT,
+            aux_unit TEXT,
+            conversion_rate TEXT,
+            stock_quantity INTEGER,
+            aux_quantity TEXT,
+            preset_price REAL,
+            status INTEGER DEFAULT 1,
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            updated_at TEXT DEFAULT (datetime('now','localtime')),
+            FOREIGN KEY (category_id) REFERENCES product_categories(id)
+        )
+    ''')
+    cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS uk_product_code ON product(product_code)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_product_category ON product(category_id)')
+
     # 操作日志表（未来多用户用——"谁在什么时候改了什么"是刚需）
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS audit_log (
@@ -209,22 +303,28 @@ def init_db():
     cursor.execute("PRAGMA table_info(product_units)")
     cols = [r[1] for r in cursor.fetchall()]
     if 'spec_keyword' not in cols:
-        cursor.execute('''
-            CREATE TABLE product_units_new (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                product_name TEXT NOT NULL,
-                spec_keyword TEXT DEFAULT NULL,
-                yards_per_piece INTEGER NOT NULL DEFAULT 0,
-                is_usingyardforcounting INTEGER NOT NULL DEFAULT 0,
-                UNIQUE(product_name, spec_keyword)
-            )
-        ''')
-        cursor.execute('''
-            INSERT INTO product_units_new (id, product_name, spec_keyword, yards_per_piece, is_usingyardforcounting)
-            SELECT id, product_name, NULL, yards_per_piece, is_usingyardforcounting FROM product_units
-        ''')
-        cursor.execute('DROP TABLE product_units')
-        cursor.execute('ALTER TABLE product_units_new RENAME TO product_units')
+        cursor.execute('BEGIN')
+        try:
+            cursor.execute('''
+                CREATE TABLE product_units_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    product_name TEXT NOT NULL,
+                    spec_keyword TEXT DEFAULT NULL,
+                    yards_per_piece INTEGER NOT NULL DEFAULT 0,
+                    is_usingyardforcounting INTEGER NOT NULL DEFAULT 0,
+                    UNIQUE(product_name, spec_keyword)
+                )
+            ''')
+            cursor.execute('''
+                INSERT INTO product_units_new (id, product_name, spec_keyword, yards_per_piece, is_usingyardforcounting)
+                SELECT id, product_name, NULL, yards_per_piece, is_usingyardforcounting FROM product_units
+            ''')
+            cursor.execute('DROP TABLE product_units')
+            cursor.execute('ALTER TABLE product_units_new RENAME TO product_units')
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
 
     # ── 商品分类：统一为 product_categories（复数）表 ──
     # 首次启动时按目标 schema 建表；旧版 product_category（单数）若存在则自动迁移
@@ -306,8 +406,8 @@ def init_db():
     for tbl in ('inbound_records', 'shipping_records', 'loading_order_records'):
         try:
             cursor.execute(f'ALTER TABLE {tbl} ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0')
-        except Exception:
-            pass  # 列已存在
+        except sqlite3.OperationalError:
+            pass  # 列已存在（duplicate column name）— 预期内，幂等跳过
 
     # ── 索引：所有 orders 关联的明细/图片表都按 order_pk 高频查询 ──
     # 数据量小不明显,到几千行后会拖慢;幂等(IF NOT EXISTS)
@@ -321,8 +421,8 @@ def init_db():
     ]:
         try:
             cursor.execute(ddl)
-        except Exception:
-            pass  # 引用的表可能尚未创建(冷启动场景)——索引下次启动再加
+        except sqlite3.OperationalError:
+            pass  # 表尚未创建(冷启动场景)——索引下次启动再加
 
     conn.commit()
     conn.close()

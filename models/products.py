@@ -172,7 +172,7 @@ class ProductCategory:
                 vals.append(kwargs[k])
         if not sets:
             return
-        sets.append("updated_at = CURRENT_TIMESTAMP")
+        sets.append("updated_at = datetime('now','localtime')")
         vals.append(cat_id)
         conn = get_db()
         cursor = conn.cursor()

@@ -43,13 +43,19 @@ class ShippingOrder:
 
     @staticmethod
     def delete(order_id: int):
-        """删除订单及其所有明细"""
+        """删除订单。有明细或图片时拒绝删除，必须先手动清空。"""
         conn = get_db()
         cursor = conn.cursor()
-        cursor.execute('DELETE FROM shipping_records WHERE order_pk = ?', (order_id,))
+        # 检查子记录
+        n_items = cursor.execute('SELECT COUNT(*) FROM shipping_records WHERE order_pk = ?', (order_id,)).fetchone()[0]
+        n_imgs = cursor.execute('SELECT COUNT(*) FROM shipping_images WHERE order_pk = ?', (order_id,)).fetchone()[0]
+        if n_items > 0 or n_imgs > 0:
+            conn.close()
+            return {'success': False, 'error': f'该订单下还有 {n_items} 条明细和 {n_imgs} 张图片，请先删除所有明细和图片后再删除订单'}
         cursor.execute('DELETE FROM shipping_orders WHERE id = ?', (order_id,))
         conn.commit()
         conn.close()
+        return {'success': True}
 
     @staticmethod
     def lock(order_id: int):
@@ -288,8 +294,9 @@ class ShippingRecord:
         if not prev:
             conn.close()
             return False
-        cursor.execute('UPDATE shipping_records SET sort_order = ? WHERE id = ?', (prev['sort_order'], record_id))
+        cursor.execute('UPDATE shipping_records SET sort_order = -1 WHERE id = ?', (record_id,))
         cursor.execute('UPDATE shipping_records SET sort_order = ? WHERE id = ?', (cur_sort, prev['id']))
+        cursor.execute('UPDATE shipping_records SET sort_order = ? WHERE id = ?', (prev['sort_order'], record_id))
         conn.commit()
         conn.close()
         return True
@@ -312,8 +319,9 @@ class ShippingRecord:
         if not nxt:
             conn.close()
             return False
-        cursor.execute('UPDATE shipping_records SET sort_order = ? WHERE id = ?', (nxt['sort_order'], record_id))
+        cursor.execute('UPDATE shipping_records SET sort_order = -1 WHERE id = ?', (record_id,))
         cursor.execute('UPDATE shipping_records SET sort_order = ? WHERE id = ?', (cur_sort, nxt['id']))
+        cursor.execute('UPDATE shipping_records SET sort_order = ? WHERE id = ?', (nxt['sort_order'], record_id))
         conn.commit()
         conn.close()
         return True
@@ -324,7 +332,7 @@ class InboundOrder:
     def create(date: str, supplier: str):
         conn = get_db()
         cursor = conn.cursor()
-        cursor.execute('SELECT MAX(order_num) FROM inbound_orders WHERE date = ?', (date,))
+        cursor.execute('SELECT MAX(order_num) FROM inbound_orders WHERE date = ? AND supplier = ?', (date, supplier))
         max_num = cursor.fetchone()[0] or 0
         order_num = max_num + 1
         created_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -360,25 +368,19 @@ class InboundOrder:
 
     @staticmethod
     def delete(order_id: int):
+        """删除订单。有明细或图片时拒绝删除，必须先手动清空。"""
         conn = get_db()
         cursor = conn.cursor()
-        
-        # 先获取图片路径，用于删除文件
-        cursor.execute('SELECT file_path FROM inbound_images WHERE order_pk = ?', (order_id,))
-        image_rows = cursor.fetchall()
-        image_paths = [row['file_path'] for row in image_rows]
-        
-        # 删除数据库记录
-        cursor.execute('DELETE FROM inbound_images WHERE order_pk = ?', (order_id,))
-        cursor.execute('DELETE FROM inbound_records WHERE order_pk = ?', (order_id,))
+        # 检查子记录
+        n_items = cursor.execute('SELECT COUNT(*) FROM inbound_records WHERE order_pk = ?', (order_id,)).fetchone()[0]
+        n_imgs = cursor.execute('SELECT COUNT(*) FROM inbound_images WHERE order_pk = ?', (order_id,)).fetchone()[0]
+        if n_items > 0 or n_imgs > 0:
+            conn.close()
+            return {'success': False, 'error': f'该订单下还有 {n_items} 条明细和 {n_imgs} 张图片，请先删除所有明细和图片后再删除订单'}
         cursor.execute('DELETE FROM inbound_orders WHERE id = ?', (order_id,))
         conn.commit()
         conn.close()
-        
-        # 删除图片文件
-        for path in image_paths:
-            if os.path.exists(path):
-                os.remove(path)
+        return {'success': True}
 
 
 
@@ -552,8 +554,9 @@ class InboundRecord:
             conn.close()
             return False
         # 交换
-        cursor.execute('UPDATE inbound_records SET sort_order = ? WHERE id = ?', (prev['sort_order'], record_id))
+        cursor.execute('UPDATE inbound_records SET sort_order = -1 WHERE id = ?', (record_id,))
         cursor.execute('UPDATE inbound_records SET sort_order = ? WHERE id = ?', (cur_sort, prev['id']))
+        cursor.execute('UPDATE inbound_records SET sort_order = ? WHERE id = ?', (prev['sort_order'], record_id))
         conn.commit()
         conn.close()
         return True
@@ -579,8 +582,9 @@ class InboundRecord:
             conn.close()
             return False
         # 交换
-        cursor.execute('UPDATE inbound_records SET sort_order = ? WHERE id = ?', (nxt['sort_order'], record_id))
+        cursor.execute('UPDATE inbound_records SET sort_order = -1 WHERE id = ?', (record_id,))
         cursor.execute('UPDATE inbound_records SET sort_order = ? WHERE id = ?', (cur_sort, nxt['id']))
+        cursor.execute('UPDATE inbound_records SET sort_order = ? WHERE id = ?', (nxt['sort_order'], record_id))
         conn.commit()
         conn.close()
         return True
@@ -720,6 +724,21 @@ class ShippingImage:
         conn.close()
         return False
 
+    @staticmethod
+    def delete_by_order(order_pk: int):
+        """删除指定出货单的所有图片（DB 行 + 物理文件）"""
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('SELECT file_path FROM shipping_images WHERE order_pk = ?', (order_pk,))
+        rows = cursor.fetchall()
+        file_paths = [row['file_path'] for row in rows]
+        cursor.execute('DELETE FROM shipping_images WHERE order_pk = ?', (order_pk,))
+        conn.commit()
+        conn.close()
+        for file_path in file_paths:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+
 
 class LoadingOrder:
     """装柜订单主表"""
@@ -762,19 +781,19 @@ class LoadingOrder:
 
     @staticmethod
     def delete(order_id: int):
-        """删除订单及其所有明细和图片"""
+        """删除订单。有明细或图片时拒绝删除，必须先手动清空。"""
         conn = get_db()
         cursor = conn.cursor()
-        # 删除图片文件
-        cursor.execute('SELECT file_path FROM loading_order_images WHERE order_pk = ?', (order_id,))
-        for row in cursor.fetchall():
-            if os.path.exists(row['file_path']):
-                os.remove(row['file_path'])
-        cursor.execute('DELETE FROM loading_order_images WHERE order_pk = ?', (order_id,))
-        cursor.execute('DELETE FROM loading_order_records WHERE order_pk = ?', (order_id,))
+        # 检查子记录
+        n_items = cursor.execute('SELECT COUNT(*) FROM loading_order_records WHERE order_pk = ?', (order_id,)).fetchone()[0]
+        n_imgs = cursor.execute('SELECT COUNT(*) FROM loading_order_images WHERE order_pk = ?', (order_id,)).fetchone()[0]
+        if n_items > 0 or n_imgs > 0:
+            conn.close()
+            return {'success': False, 'error': f'该订单下还有 {n_items} 条明细和 {n_imgs} 张图片，请先删除所有明细和图片后再删除订单'}
         cursor.execute('DELETE FROM loading_orders WHERE id = ?', (order_id,))
         conn.commit()
         conn.close()
+        return {'success': True}
 
     @staticmethod
     def lock(order_id: int):
@@ -936,8 +955,9 @@ class LoadingOrderRecord:
         if not prev:
             conn.close()
             return False
-        cursor.execute('UPDATE loading_order_records SET sort_order = ? WHERE id = ?', (prev['sort_order'], record_id))
+        cursor.execute('UPDATE loading_order_records SET sort_order = -1 WHERE id = ?', (record_id,))
         cursor.execute('UPDATE loading_order_records SET sort_order = ? WHERE id = ?', (cur_sort, prev['id']))
+        cursor.execute('UPDATE loading_order_records SET sort_order = ? WHERE id = ?', (prev['sort_order'], record_id))
         conn.commit()
         conn.close()
         return True
@@ -960,8 +980,9 @@ class LoadingOrderRecord:
         if not nxt:
             conn.close()
             return False
-        cursor.execute('UPDATE loading_order_records SET sort_order = ? WHERE id = ?', (nxt['sort_order'], record_id))
+        cursor.execute('UPDATE loading_order_records SET sort_order = -1 WHERE id = ?', (record_id,))
         cursor.execute('UPDATE loading_order_records SET sort_order = ? WHERE id = ?', (cur_sort, nxt['id']))
+        cursor.execute('UPDATE loading_order_records SET sort_order = ? WHERE id = ?', (nxt['sort_order'], record_id))
         conn.commit()
         conn.close()
         return True

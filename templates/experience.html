@@ -31,7 +31,7 @@
                 <div class="item-meta">📅 {{ log.created_at }}</div>
             </div>
             <div class="item-actions">
-                    <form action="/experience/delete/{{ log.id }}" method="POST" onsubmit="return confirm('确定要删除这条记录吗？);">
+                    <form action="/experience/delete/{{ log.id }}" method="POST" onsubmit="return confirm('确定要删除这条记录吗？');">
                     <button type="submit" class="btn btn-danger btn-sm">🗑️ 删除</button>
                 </form>
             </div>

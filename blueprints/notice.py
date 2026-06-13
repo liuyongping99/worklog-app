@@ -108,7 +108,10 @@ def api_notice_set_img_cols(notice_id):
     data = request.get_json()
     if not data or 'img_cols' not in data:
         return jsonify({'success': False, 'error': '缺少 img_cols 参数'}), 400
-    cols = int(data['img_cols'])
+    try:
+        cols = int(data['img_cols'])
+    except (ValueError, TypeError):
+        return jsonify({'success': False, 'error': 'img_cols 必须是整数'}), 400
     if cols < 1 or cols > 5:
         return jsonify({'success': False, 'error': '列数范围 1-5'}), 400
     Notice.set_img_cols(notice_id, cols)

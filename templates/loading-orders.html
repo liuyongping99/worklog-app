@@ -507,12 +507,18 @@ document.addEventListener('DOMContentLoaded', function() {
     var currentStart = '{{ start_date }}';
     var currentEnd = '{{ end_date }}';
 
-    // 初始化：localStorage 记忆
-    var savedStart = localStorage.getItem('loading_start_date');
-    var savedEnd = localStorage.getItem('loading_end_date');
-    if (savedStart && savedEnd && (savedStart !== currentStart || savedEnd !== currentEnd)) {
-        window.location.href = '/loading-orders?start_date=' + savedStart + '&end_date=' + savedEnd;
-        return;
+    // 日期范围记忆：URL 无参数时用服务端默认值（始终是最新今天），
+    // 避免 localStorage 残留昨天的旧值导致页面重定向到过期范围
+    if (window.location.search.indexOf('start_date') === -1) {
+        localStorage.setItem('loading_start_date', currentStart);
+        localStorage.setItem('loading_end_date', currentEnd);
+    } else {
+        var savedStart = localStorage.getItem('loading_start_date');
+        var savedEnd = localStorage.getItem('loading_end_date');
+        if (savedStart && savedEnd && (savedStart !== currentStart || savedEnd !== currentEnd)) {
+            window.location.href = '/loading-orders?start_date=' + savedStart + '&end_date=' + savedEnd;
+            return;
+        }
     }
 
     function openDateRangeModal() {
@@ -718,12 +724,16 @@ document.addEventListener('DOMContentLoaded', function() {
         clearPreview();
     };
 
+    var pasteTimeout = null;
     window.activatePaste = function() {
+        document.removeEventListener('paste', handlePaste);  // 防止重复注册
+        if (pasteTimeout) clearTimeout(pasteTimeout);
         document.getElementById('pasteBox').classList.add('active');
         document.addEventListener('paste', handlePaste);
-        setTimeout(function() {
+        pasteTimeout = setTimeout(function() {
             document.getElementById('pasteBox').classList.remove('active');
             document.removeEventListener('paste', handlePaste);
+            pasteTimeout = null;
         }, 30000);
     };
 

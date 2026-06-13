@@ -129,10 +129,19 @@ def inbound_records_edit(record_id):
 @bp.route('/inbound-records/delete-order/<int:order_id>', methods=['POST'])
 def inbound_records_delete_order(order_id):
     order = InboundOrder.get_by_id(order_id)
-    InboundOrder.delete(order_id)
-    if order:
-        AuditLog.log('delete_order', 'inbound_order', order_id, detail={'supplier': order.get('supplier')})
-    flash('已删除入库单及所有明细')
+    if not order:
+        flash('订单不存在', 'error')
+        return redirect(url_for('inbound.inbound_records'))
+    if order.get('is_locked'):
+        flash('该订单已锁定，无法删除', 'error')
+        return redirect(url_for('inbound.inbound_records'))
+    supplier = order.get('supplier')
+    result = InboundOrder.delete(order_id)
+    if not result.get('success'):
+        flash(result.get('error', '删除失败'), 'error')
+        return redirect(url_for('inbound.inbound_records'))
+    AuditLog.log('delete_order', 'inbound_order', order_id, detail={'supplier': supplier})
+    flash('已删除入库单')
     return redirect(url_for('inbound.inbound_records'))
 
 
@@ -269,11 +278,13 @@ def api_v1_inbound_orders_create():
 
 @bp.route('/api/v1/inbound-orders/<int:order_id>', methods=['DELETE'])
 def api_v1_inbound_orders_delete(order_id):
-    """删除订单（级联删除明细和图片）→ 200"""
+    """删除入库订单 → 200（有明细或图片时拒绝）"""
     order = InboundOrder.get_by_id(order_id)
     if not order:
         return jsonify({'success': False, 'error': '订单不存在'}), 404
-    InboundOrder.delete(order_id)
+    result = InboundOrder.delete(order_id)
+    if not result.get('success'):
+        return jsonify(result), 400
     AuditLog.log('delete_order', 'inbound_order', order_id, detail={'supplier': order.get('supplier')})
     return jsonify({'success': True})
 
@@ -478,8 +489,11 @@ def api_v1_inbound_orders_upload_image(order_id):
 
     upload_dir, date_str = _get_upload_dir()
 
-    ext = file.filename.rsplit('.', 1)[-1] if '.' in file.filename else 'png'
-    filename = f"inbound_{order_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{file.filename}"
+    ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else 'png'
+    if ext not in ('png', 'jpg', 'jpeg', 'gif', 'webp'):
+        ext = 'png'
+    safe_name = os.path.basename(file.filename)  # 防路径穿越
+    filename = f"inbound_{order_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{safe_name}"
     filepath = os.path.join(upload_dir, filename)
     file.save(filepath)
 

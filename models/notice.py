@@ -58,6 +58,7 @@ class Notice:
         )
         above = cursor.fetchone()
         if above:
+            cursor.execute('UPDATE notices SET sort_order = -1 WHERE id = ?', (notice_id,))
             cursor.execute('UPDATE notices SET sort_order = ? WHERE id = ?', (order, above[0]))
             cursor.execute('UPDATE notices SET sort_order = ? WHERE id = ?', (above[1], notice_id))
             conn.commit()
@@ -79,6 +80,7 @@ class Notice:
         )
         below = cursor.fetchone()
         if below:
+            cursor.execute('UPDATE notices SET sort_order = -1 WHERE id = ?', (notice_id,))
             cursor.execute('UPDATE notices SET sort_order = ? WHERE id = ?', (order, below[0]))
             cursor.execute('UPDATE notices SET sort_order = ? WHERE id = ?', (below[1], notice_id))
             conn.commit()
@@ -132,7 +134,7 @@ class NoticeImage:
         # 删除文件
         try:
             import os
-            file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'notice', file_name)
+            file_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'static', 'notice', file_name)
             if os.path.exists(file_path):
                 os.remove(file_path)
         except Exception:

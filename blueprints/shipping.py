@@ -106,11 +106,13 @@ def api_v1_shipping_orders_create():
 
 @bp.route('/api/v1/shipping-orders/<int:order_id>', methods=['DELETE'])
 def api_v1_shipping_orders_delete(order_id):
-    """删除出货单（级联删除明细和图片）→ 200"""
+    """删除出货单 → 200（有明细或图片时拒绝）"""
     order = ShippingOrder.get_by_id(order_id)
     if not order:
         return jsonify({'success': False, 'error': '订单不存在'}), 404
-    ShippingOrder.delete(order_id)
+    result = ShippingOrder.delete(order_id)
+    if not result.get('success'):
+        return jsonify(result), 400
     AuditLog.log('delete_order', 'shipping_order', order_id, detail={'customer': order.get('customer')})
     return jsonify({'success': True})
 
@@ -152,14 +154,26 @@ def api_v1_shipping_orders_update(order_id):
             return jsonify({'success': False, 'error': '客户名称不能为空'}), 400
         if not new_date:
             return jsonify({'success': False, 'error': '日期不能为空'}), 400
-        # 改 date（会重排 order_num），再改 customer（同理会重排），最后改 note
-        result = ShippingOrder.set_date(order_id, new_date)
-        if not result.get('success'):
-            return jsonify(result), 400
-        result = ShippingOrder.set_customer(order_id, new_customer)
-        if not result.get('success'):
-            return jsonify(result), 400
-        ShippingOrder.set_note(order_id, note)
+        # 原子更新：在单个事务里完成 date + customer + order_num + note，避免半状态
+        from models import get_db
+        conn = get_db()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                'SELECT COALESCE(MAX(order_num), 0) + 1 FROM shipping_orders WHERE date = ? AND customer = ?',
+                (new_date, new_customer)
+            )
+            new_order_num = cursor.fetchone()[0]
+            cursor.execute(
+                'UPDATE shipping_orders SET date = ?, customer = ?, order_num = ?, order_note = ? WHERE id = ?',
+                (new_date, new_customer, new_order_num, note, order_id)
+            )
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            conn.close()
+            return jsonify({'success': False, 'error': str(e)}), 400
+        conn.close()
         return jsonify({'success': True, 'date': new_date, 'customer': new_customer, 'order_note': note})
 
     if 'order_note' in data:
@@ -289,7 +303,7 @@ def api_v1_shipping_orders_delete_all_records(order_id):
     if not order:
         return jsonify({'success': False, 'error': '订单不存在'}), 404
     if order.get('is_locked'):
-        return jsonify({'error': '该订单已锁定，无法操作'}), 403
+        return jsonify({'success': False, 'error': '该订单已锁定，无法操作'}), 403
 
     ShippingRecord.delete_by_order(order_id)
     return jsonify({'success': True})
@@ -478,7 +492,8 @@ def shipping_records_ai_recognize():
                 ]
             }],
             max_tokens=4000,
-            temperature=1  # Moonshot kimi-k2.6 限制：temperature 必须为 1
+            temperature=1,  # Moonshot kimi-k2.6 限制：temperature 必须为 1
+            timeout=60  # 防止 API 挂起导致 Flask 请求永久阻塞
         )
         raw_text = response.choices[0].message.content.strip()
         # 剥离 markdown 围栏:`​`​`json\n...\n​`​`​` 或裸 `​`​`...`​`​`,允许首尾空行

@@ -191,20 +191,24 @@
             method: 'POST',
             headers: {'Content-Type': 'application/x-www-form-urlencoded'},
             body: 'name=' + encodeURIComponent(name) + '&color=' + encodeURIComponent(color)
-        }).then(function() {
-            // 刷新页面重新加载
-            location.reload();
-        });
-        
+        }).then(function(r) { return r.json(); })
+          .then(function(data) {
+            if (data.success) { location.reload(); }
+            else { alert('添加失败：' + (data.error || '未知错误')); }
+          }).catch(function(err) { alert('网络错误，请刷新页面重试'); });
+
         input.value = '';
         input.focus();
     }
 
     function deleteItem(id) {
         if (!confirm('确定要删除这个缺货记录吗？')) return;
-        fetch('/stockout/delete/' + id, {method: 'POST'}).then(function() {
-            location.reload();
-        });
+        fetch('/stockout/delete/' + id, {method: 'POST'})
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.success) { location.reload(); }
+                else { alert('删除失败：' + (data.error || '未知错误')); }
+            }).catch(function(err) { alert('网络错误，请刷新页面重试'); });
     }
 
     document.getElementById('itemInput').addEventListener('keypress', function(e) {

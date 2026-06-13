@@ -26,6 +26,8 @@ def experience_add():
     if title and content:
         WorkLog.create(title, content)
         flash('工作经验已保存!', 'success')
+    else:
+        flash('标题和内容不能为空', 'error')
     return redirect(url_for('basic_records.experience'))
 
 
@@ -51,6 +53,8 @@ def errorlog_add():
     if title:
         ErrorLog.create(title, error_type, solution)
         flash('错误记录已保存!', 'success')
+    else:
+        flash('标题不能为空', 'error')
     return redirect(url_for('basic_records.errorlog'))
 
 
@@ -74,6 +78,8 @@ def todolist_add():
     if content:
         TodoItem.create(content)
         flash('待办已添加!', 'success')
+    else:
+        flash('内容不能为空', 'error')
     return redirect(url_for('basic_records.todolist'))
 
 
@@ -108,6 +114,8 @@ def vehicle_maintenance_add():
     if date and vehicle_plate and type_ and description:
         VehicleMaintenance.create(date, vehicle_plate, type_, description, cost, remark)
         flash('车辆维护记录已保存!', 'success')
+    else:
+        flash('日期、车牌、类型和描述不能为空', 'error')
     return redirect(url_for('basic_records.vehicle_maintenance'))
 
 
