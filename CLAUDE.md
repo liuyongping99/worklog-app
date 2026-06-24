@@ -45,7 +45,7 @@ worklog-app/
 ├── worklog.db              # SQLite 数据库
 ├── blueprints/             # 业务蓝图（8 个模块）
 │   ├── __init__.py
-│   ├── _helpers.py         # 共享：图片上传辅助
+│   ├── _helpers.py         # 共享：图片上传、单位匹配、支数换算、备注校验、汇总计算
 │   ├── upload.py           # /upload/<path> 静态文件服务
 │   ├── basic_records.py    # experience/errorlog/todolist/vehicle-maintenance
 │   ├── info_pages.py       # 首页/价格板/通知彩色版/工作流/仓库/计数要点/换单要点/开单要点/当前缺货
@@ -67,6 +67,8 @@ worklog-app/
 ├── static/                 # 静态资源
 ├── upload/YYYY-MM/         # 用户上传的图片，按月分组
 ├── sql/                    # SQL 脚本目录
+│   ├── new.sql             # 商品分类数据（MySQL 语法，设计稿/标准源）
+│   └── new_sqlite.sql      # 商品分类导入脚本（SQLite 语法，从 new.sql 自动生成）
 ├── start_server.bat        # Windows 启动脚本
 └── setup_startup.ps1       # Windows 自启动 PowerShell 脚本
 ```
@@ -100,7 +102,7 @@ worklog-app/
 
 ### `blueprints/products.py` — 商品管理（12 个）
 - `/product-units` 商品单位（67 条数据）
-- `/product-categories` 商品类型（使用 `product_category` 表，154 条数据）
+- `/product-categories` 商品类型（使用 `product_categories` 表，186 条数据 = 1 根 + 9 大类 + 93 中类 + 83 细类，以 `sql/new.sql` 为最终标准源）
 - `/products` 产品管理（`product` 表，0 条）
 - `/api/v1/products` REST API（GET/POST/PUT/DELETE）
 
@@ -151,7 +153,7 @@ worklog-app/
 | 表 | 用途 | 行数 | 模型类 |
 |---|---|---|---|
 | `product_units` | 商品单位/规格 | 67 | `ProductUnit` |
-| `product_categories` | 商品分类（带层级/编码） | 154 | `ProductCategory` |
+| `product_categories` | 商品分类（带层级/编码） | 186 | `ProductCategory` |
 | `product` | 产品（带价格/库存/条形码） | 0 | `Product` |
 
 > 表命名已统一：分类表使用复数 `product_categories`（语义"分类的集合"）。
@@ -220,6 +222,43 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
 **踩坑**：Moonshot kimi-k2.6 模型**锁死 temperature 必须为 1**。调到 0.2 等其他值会被服务端 400 拒绝（`invalid temperature: only 1 is allowed for this model`）。其他可调参数：`max_tokens` 已设到 4000 防大单据截断；prompt 抽到模块顶部 `AI_RECOGNIZE_PROMPT` 常量。
 
+### 7. 辅助单位提示与备注校验（支数换算）
+
+每个明细行显示"辅助单位提示"列，通过 YPP（Yards Per Piece，码/支）将码数换算为支数。三层逻辑（Python 后端 + JS 前端一致）：
+
+1. **unit='支'**：数量本身就是支数，直接显示 `X支`（无需 YPP 配置）
+2. **unit='y'/'码' 且有 YPP 配置**：`qty / ypp` 换算出支数，显示 `X支+Y码`
+3. **无 YPP 配置**：从备注中提取 `X支` 作为兜底
+
+**YPP 匹配**（`_match_unit_in_cache` / `findUnit` / `findInboundUnit` / `findLoadingUnit`）：
+- 第一轮：找 `product_name` 匹配且 `spec_keyword` 在规格中出现的行（精确匹配）
+- 第二轮：兜底取没有 `spec_keyword` 的默认行
+- 避免默认行抢在精确匹配之前返回
+
+**备注校验**（`check_remark` / `checkMismatch`）：
+- 解析备注中的 `X支*Yy`（乘法语义）和 `X支+Yy`（加法语义）
+- 期望值 = pieces × yards_per_piece + loose_yards，与 quantity 比较
+- 不一致时：单支标粉色(info)，多支标红色(warn)
+
+### 8. 备注汇总行（两列统计）
+
+每个日期组底部有汇总行，两列：
+- **📊 备注支数**：汇总备注中 `X支` 的支数 + 散码出现次数
+- **📊 明细支数**：汇总辅助单位提示列中提取的支数（含 unit='支' 直接显示 + unit='y' 换算后的结果）
+
+Python 端 `summarize_remarks()` 和 JS 端 `recalcXxxSummary()` 逻辑一致。
+
+### 9. 单位归一化（码 → y）
+
+**问题**：历史数据中 `inbound_records` 有 117 条 `unit='码'`，而 shipping/loading 已统一用 `unit='y'`。
+
+**三层防御**（防止 '码' 再次写入）：
+1. **模型层**：`InboundRecord.create` / `ShippingRecord.create` / `LoadingOrderRecord.create` 均自动归一化
+2. **API 层**：三个蓝图的 update + batch-add 端点均检查 `unit == '码' → 'y'`
+3. **前端 JS**：三个订单模板的编辑保存流程均归一化
+
+**数据库修复**：`UPDATE inbound_records SET unit='y' WHERE unit='码'`（已先备份到 `_safe-snapshot/`）
+
 ## 模板设计约定
 
 - 所有模板继承 `base.html`
@@ -274,17 +313,18 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 - `app.py:67-83` — 蓝图导入与注册
 
 ### 蓝图
+- `blueprints/_helpers.py` — 共享函数：`get_upload_dir` / `get_ypp` / `calc_hint` / `check_remark` / `summarize_remarks`（~270 行）
 - `blueprints/upload.py` — 静态文件服务（15 行）
 - `blueprints/basic_records.py` — 基础记录（116 行）
 - `blueprints/info_pages.py` — 信息展示页 + stockout（84 行）
 - `blueprints/notice.py` — 公司通知 + REST（212 行）
 - `blueprints/products.py` — 商品管理（197 行）
-- `blueprints/shipping.py` — 出货 + REST + AI 识别（432 行，最大）
-- `blueprints/inbound.py` — 入库 + REST（494 行，最大）
-- `blueprints/loading.py` — 装柜 + REST（264 行）
+- `blueprints/shipping.py` — 出货 + REST + AI 识别（~440 行）
+- `blueprints/inbound.py` — 入库 + REST（~505 行，最大）
+- `blueprints/loading.py` — 装柜 + REST（~270 行）
 
 ### 数据库层
-- `models/orders.py` — ShippingOrder / ShippingRecord / ShippingImage / InboundOrder / InboundRecord / InboundImage / LoadingOrder / LoadingOrderRecord / LoadingOrderImage(9 个模型,~1100 行)
+- `models/orders.py` — ShippingOrder / ShippingRecord / ShippingImage / InboundOrder / InboundRecord / InboundImage / LoadingOrder / LoadingOrderRecord / LoadingOrderImage(9 个模型,~1120 行)
 - `models/products.py` — ProductUnit / ProductCategory / Product
 - `models/basic.py` — WorkLog / ErrorLog / TodoItem / VehicleMaintenance
 - `models/notice.py` / `models/stock.py` / `models/audit.py` — Notice + 缺货 + 审计
@@ -298,6 +338,10 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 - [x] ~~图片上传后局部刷新（替代 `location.reload()`）~~ — **已完成**：三套订单均已实现 fetch + DOM 局部更新，E2E 验证通过
 - [x] ~~`app.py` 按业务拆分蓝图（Blueprint）~~ — **已完成**：从 1861 行单文件 → `app.py` 85 行 + `blueprints/` 下 8 个模块（最大 494 行）
 - [x] ~~`shipping-records.html` 删除 `deleteShippingImage(imageId, index)` 死代码~~ — **已删除**
+- [x] ~~单位归一化 `码 → y`~~ — **已完成**：DB 117 条已修复，模型+API+前端三层防御已就位（2026-06-24）
+- [x] ~~辅助单位提示升级：unit='支' 直接显示 + 无 YPP 时从备注提取支数~~ — **已完成**：Python `calc_hint` + JS `getXxxHint` 均已实现三层逻辑（2026-06-24）
+- [x] ~~备注汇总行拆分为「备注支数」+「明细支数」两列~~ — **已完成**：Python `summarize_remarks` + JS `recalcXxxSummary` 均已更新（2026-06-24）
+- [x] ~~商品分类树按 category_code 排序~~ — **已完成**：`ProductCategory.get_tree()` 递归排序（2026-06-24）
 
 ## 长期规划（2026-06-08 拍板）
 
@@ -318,7 +362,7 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 - `product` 表目前 0 行，需要录入：品名、规格、单位、箱规、条码、缩略图、典型包装图（AI 识别锚点）
 - 预期 **1000+ SKU**，需要分批录入工具（批量导入、批量匹配、相似 SKU 合并）
 - 配套：`product_units`（每支多少码）从 67 条扩到接近 1:1
-- 配套：`product_categories` 154 条已就位，但可能需要重新组织分类树
+- 配套：`product_categories` 186 条已就位（1+9+93+83 = 186，以 `sql/new.sql` 为最终标准源），但可能需要重新组织分类树
 
 #### 阶段 2：AI 验数 + 校对
 - 出货/入库/装柜时拍单据图，AI 自动识别商品 + 数量 + 单位

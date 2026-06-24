@@ -142,17 +142,17 @@ INSERT INTO product_category (category_code, category_name, parent_id, level, so
 ( '0303', '粉胶',          @category_id, 3, 3),
 ( '0304', '接枝胶',       @category_id, 3, 4),
 ( '0305', '白胶',          @category_id, 3, 5),
-( '0306', '白油',          @category_id, 3, 6),
+( '0306', '电油',          @category_id, 3, 6),
 ( '0307', '伟明',          @category_id, 3, 7),
 ( '0308', '衣车油',       @category_id, 3, 8),
 ( '0309', '七B水',        @category_id, 3, 9),
-( '0310', '双面胶',       @category_id, 3, 10),
-( '0311', '封箱胶',       @category_id, 3, 11),
-( '0312', '文具胶',       @category_id, 3, 12),
-( '0313', '美纹纸',       @category_id, 3, 13),
-( '0314', '牛皮胶',       @category_id, 3, 14),
-( '0315', '特殊用途胶', @category_id, 3, 15),
-( '0316', '补强带',       @category_id, 3, 16);
+( '0311', '双面胶',       @category_id, 3, 10),
+( '0312', '封箱胶',       @category_id, 3, 11),
+( '0313', '文具胶',       @category_id, 3, 12),
+( '0314', '美纹纸',       @category_id, 3, 13),
+( '0315', '牛皮胶',       @category_id, 3, 14),
+( '0319', '特殊用途胶', @category_id, 3, 15),
+( '0320', '补强带',       @category_id, 3, 16);
 
 -- 第3层：中类（防潮类大类下）
 SET @category_id = NULL;
@@ -162,7 +162,7 @@ INSERT INTO product_category ( category_code, category_name, parent_id, level, s
 ( '0401', '防潮珠', @category_id, 3, 1),
 ( '0402', '防霉片', @category_id, 3, 2),
 ( '0403', '防霉纸', @category_id, 3, 3),
-( '0404', '香片',    @category_id, 3, 4);
+( '0405', '香片',    @category_id, 3, 4);
 
 -- 第3层：中类（棉类大类下）
 SET @category_id = NULL;
@@ -171,17 +171,18 @@ SELECT @category_id := category_id FROM product_category WHERE category_code = '
 INSERT INTO product_category (category_code, category_name, parent_id, level, sort_order) VALUES
 ( '0501', '珍珠棉',       @category_id, 3, 1),
 ( '0502', '海绵',          @category_id, 3, 2),
-( '0503', '双面水刺布', @category_id, 3, 3),
-( '0504', '丝绵',          @category_id, 3, 4),
-( '0505', '针棉',          @category_id, 3, 5),
-( '0506', '水刺布（棉朴）', @category_id, 3, 6),
-( '0507', '棉绳',        @category_id, 3, 7),
-( '0508', '棉通',        @category_id, 3, 8),
-( '0509', '海王',       @category_id, 3, 9),
-( '0510', '单面水刺布', @category_id, 3, 10),
-( '0511', '环保托',       @category_id, 3, 11),
-( '0512', '成品水刺布袋', @category_id, 3, 12),
-( '0513', '棉加工',       @category_id, 3, 13);
+( '0503', '珍珠棒',        @category_id, 3, 2),
+( '0504', '双面水刺布', @category_id, 3, 3),
+( '0505', '丝绵',          @category_id, 3, 4),
+( '0506', '针棉',          @category_id, 3, 5),
+( '0507', '水刺布（棉朴）', @category_id, 3, 6),
+( '0508', '棉绳',        @category_id, 3, 7),
+( '0509', '棉通',        @category_id, 3, 8),
+( '0510', '港宝',       @category_id, 3, 9),
+( '0511', '单面水刺布', @category_id, 3, 10),
+( '0512', '环保托',       @category_id, 3, 11),
+( '0513', '成品水刺布袋', @category_id, 3, 12),
+( '0514', '棉加工',       @category_id, 3, 13);
 
 -- 第3层：中类（塑料类大类下）
 SET @category_id = NULL;
@@ -189,22 +190,15 @@ SELECT @category_id := category_id FROM product_category WHERE category_code = '
 
 INSERT INTO product_category ( category_code, category_name, parent_id, level, sort_order) VALUES
 ( '0601', 'PE板',       @category_id, 3, 1),
-( '0602', 'PVC胶片', @category_id, 3, 2),
-( '0603', '胶骨',       @category_id, 3, 3),
-( '0604', '胶通',       @category_id, 3, 4),
-( '0605', '胶针',       @category_id, 3, 5),
-( '0606', 'PVC软膜', @category_id, 3, 6),
-( '0607', '高发泡XPE', @category_id, 3, 7),
-( '0608', 'EVA软膜', @category_id, 3, 8),
-( '0609', '蜂巢板',   @category_id, 3, 9),
-( '0610', '牛津布',   @category_id, 3, 10),
-( '0611', '烫布',      @category_id, 3, 11),
-( '0612', '仿超',      @category_id, 3, 12),
-( '0613', '里布',      @category_id, 3, 13),
-( '0614', 'TA特软',  @category_id, 3, 14),
-( '0615', 'TP',         @category_id, 3, 15),
-( '0616', 'TQ',        @category_id, 3, 16),
-( '0617', 'TR',         @category_id, 3, 17);
+( '0602', 'PP板',       @category_id, 3, 2),
+( '0603', 'PVC胶片', @category_id, 3, 3),
+( '0604', '胶骨',       @category_id, 3, 4),
+( '0605', '胶通',       @category_id, 3, 5),
+( '0606', '胶针',       @category_id, 3, 6),
+( '0607', 'PVC软膜', @category_id, 3, 7),
+( '0608', '高发泡XPE', @category_id, 3, 8),
+( '0609', 'EVA软膜',  @category_id, 3, 9),
+( '0610', '蜂巢板',     @category_id, 3, 10);
 
 -- ============================================
 -- 第3层：中类（特材类大类下）
@@ -217,7 +211,7 @@ INSERT INTO product_category ( category_code, category_name, parent_id, level, s
 ('0702', '猪皮纹HC',      @category_id, 3, 2),
 ('0703', 'LB鱼鳞布特软', @category_id, 3, 3),
 ('0704', 'LC鱼鳞布特软', @category_id, 3, 4),
-('0705', 'QP特软',          @category_id, 3, 5),
+('0705', 'QB特软',          @category_id, 3, 5),
 ('0706', 'LD特软三文治', @category_id, 3, 6),
 ('0707', '牛津布',           @category_id, 3, 7),
 ('0708', 'GA',                @category_id, 3, 8),
@@ -275,10 +269,10 @@ INSERT INTO product_category ( category_code, category_name, parent_id, level, s
 ('010403', '398',               @category_id, 4, 3),
 ('010404', '222',               @category_id, 4, 4),
 ('010405', '268',               @category_id, 4, 5),
-('010406', '意大利进口',    @category_id, 4, 6),
-('010407', '普通再生革',    @category_id, 4, 7),
-('010408', '环保再生革',    @category_id, 4, 8),
-('010409', '888',              @category_id, 4, 9),
+('010406', '888',              @category_id, 4, 6),
+('010407', '意大利进口',    @category_id, 4, 7),
+('010408', '普通再生革',    @category_id, 4, 8),
+('010409', '环保再生革',    @category_id, 4, 9),
 ('010410', '加硬皮糠纸698', @category_id, 4, 10);
 
 
@@ -350,9 +344,9 @@ INSERT INTO product_category ( category_code, category_name, parent_id, level, s
 ( '021005', '7P环保纯胶', @category_id, 4, 5),
 ( '021006', '7P环保路华里', @category_id, 4, 6),
 ( '021007', '7P环保LB鱼鳞布', @category_id, 4, 7),
-( '021008', '7P环保HA猪皮纹', @category_id, 4, 8);
-
-
+( '021008', '7P环保HA猪皮纹', @category_id, 4, 8),
+( '021009', '7P环保毛底底胶', @category_id, 4, 9),
+( '021010', '7P环保里布革', @category_id, 4, 10);
 
 -- 第4层：小类（A级杂胶下）
 SET @category_id = NULL;
@@ -360,19 +354,19 @@ SELECT @category_id := category_id FROM product_category WHERE category_code = '
 
 INSERT INTO product_category (category_code, category_name, parent_id, level, sort_order) VALUES
 ( '021101', '中性纯胶',                @category_id, 4, 1),
-( '021102', '磅布杂胶',               @category_id, 4, 2),
-( '021103', '鱼麟布纯胶',             @category_id, 4, 3),
-( '021104', '水刺布杂胶（毛粗）', @category_id, 4, 4),
-( '021105', '软性纯胶',                @category_id, 4, 5),
-( '021106', '硬性纯胶',                @category_id, 4, 6),
-( '021107', '中软纯胶',                @category_id, 4, 7),
-( '021108', '中硬纯胶',                @category_id, 4, 8),
-( '021109', '高弹中性纯胶',          @category_id, 4, 9),
-( '021110', '高弹软性纯胶',          @category_id, 4, 10),
-( '021111', '高弹（硬性/特硬）纯胶', @category_id, 4, 11),
-( '021112', '高弹中软纯胶',          @category_id, 4, 12),
-( '021113', '真高弹（特软）纯胶', @category_id, 4, 13),
-( '021114', '高弹中硬纯胶',          @category_id, 4, 14),
+( '021105', '软性纯胶',                @category_id, 4, 2),
+( '021106', '硬性纯胶',                @category_id, 4, 3),
+( '021107', '中软纯胶',                @category_id, 4, 4),
+( '021108', '中硬纯胶',                @category_id, 4, 5),
+( '021109', '高弹中性纯胶',          @category_id, 4, 6),
+( '021110', '高弹软性纯胶',          @category_id, 4, 7),
+( '021111', '高弹（硬性/特硬）纯胶', @category_id, 4, 8),
+( '021112', '高弹中软纯胶',          @category_id, 4, 9),
+( '021114', '高弹中硬纯胶',          @category_id, 4, 10),
+( '021113', '真高弹（特软）纯胶', @category_id, 4, 11),
+( '021102', '磅布杂胶',               @category_id, 4, 12),
+( '021103', '鱼麟布纯胶',             @category_id, 4, 13),
+( '021104', '水刺布杂胶（毛粗）', @category_id, 4, 14),
 ( '021115', '订做 有色纯胶',         @category_id, 4, 15);
 
 
@@ -412,7 +406,73 @@ SELECT @category_id := category_id FROM product_category WHERE category_code = '
 
 INSERT INTO product_category ( category_code, category_name, parent_id, level, sort_order) VALUES
 ( '050201', '卷装海绵329（加密）', @category_id, 4, 1),
-( '050202', '特粗海绵',                   @category_id, 4, 2),
+( '050204', '卷装海绵324（中密）', @category_id, 4, 2),
 ( '050203', '卷装海绵330（高弹）', @category_id, 4, 3),
-( '050204', '卷装海绵324（中密）', @category_id, 4, 4),
-( '050205', '称斤高弹海绵',             @category_id, 4, 5);
+( '050205', '称斤高弹海绵',             @category_id, 4, 4),
+( '050202', '特粗海绵',                   @category_id, 4, 5);
+
+
+
+-- 第4层：小类（双面水刺布下）
+SET @category_id = NULL;
+SELECT @category_id := category_id FROM product_category WHERE category_code = '0504'  LIMIT 1;
+
+INSERT INTO product_category (category_code, category_name, parent_id, level, sort_order) VALUES
+( '050401', '双面水刺布-白色卷装', @category_id, 4, 1),
+( '050402', '双面片装水刺布',         @category_id, 4, 2),
+( '050403', '双面水刺布-黑色卷装', @category_id, 4, 3),
+( '050404', '双面水刺布-短幅',        @category_id, 4, 4),
+( '050405', '双面水刺布-A级卷装',   @category_id, 4, 5);
+
+-- 第4层：小类（针棉下）
+SET @category_id = NULL;
+SELECT @category_id := category_id FROM product_category WHERE category_code = '0506'  LIMIT 1;
+
+INSERT INTO product_category ( category_code, category_name, parent_id, level, sort_order) VALUES
+( '050601', '蓬松针棉',    @category_id, 4, 1),
+( '050602', '加密针棉',    @category_id, 4, 2),
+( '050603', '高密度针棉', @category_id, 4, 3);
+
+
+-- 第4层：小类（棉绳下）
+SET @category_id = NULL;
+SELECT @category_id := category_id FROM product_category WHERE category_code = '0508'  LIMIT 1;
+
+INSERT INTO product_category ( category_code, category_name, parent_id, level, sort_order) VALUES
+( '050801', '普通无弹力棉绳', @category_id, 4, 1),
+( '050805', '普通弹力棉绳',    @category_id, 4, 1),
+( '050802', '本白白心棉绳',    @category_id, 4, 2),
+( '050803', '本白黑心棉绳',    @category_id, 4, 3),
+( '050804', '灰白黑心棉绳',    @category_id, 4, 4);
+
+-- 第4层：小类（棉加工下）
+SET @category_id = NULL;
+SELECT @category_id := category_id FROM product_category WHERE category_code = '0514'  LIMIT 1;
+
+INSERT INTO product_category ( category_code, category_name, parent_id, level, sort_order) VALUES
+( '051401', '珍珠棉加工', @category_id, 4, 1),
+( '051402', '海绵加工',    @category_id, 4, 2);
+
+-- ============================================
+-- 第4层：小类（高发泡XPE下）
+-- ============================================
+SET @category_id = NULL;
+SELECT @category_id := category_id FROM product_category WHERE category_code = '0608'  LIMIT 1;
+
+INSERT INTO product_category ( category_code, category_name, parent_id, level, sort_order) VALUES
+( '060801', '25-30倍', @category_id, 4, 1),
+( '060802', '15-20倍', @category_id, 4, 2),
+( '060803', '8-10倍',   @category_id, 4, 3),
+( '060804', '3-5倍',     @category_id, 4, 4),
+( '060805', 'XPE切片', @category_id, 4, 5);
+
+-- ============================================
+-- 第4层：小类（烫布下）
+-- ============================================
+SET @category_id = NULL;
+SELECT @category_id := category_id FROM product_category WHERE category_code = '0710'  LIMIT 1;
+
+INSERT INTO product_category ( category_code, category_name, parent_id, level, sort_order) VALUES
+( '071001', '烫布',    @category_id, 4, 1),
+( '071002', '弹力布', @category_id, 4, 2);
+

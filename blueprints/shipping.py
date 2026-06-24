@@ -54,8 +54,8 @@ def shipping_records():
     def _get_ypp(product_name, spec):
         return get_ypp(product_name, spec, units_cache=units)
 
-    def _calc_hint(quantity_str, ypp):
-        return calc_hint(quantity_str, ypp)
+    def _calc_hint(quantity_str, ypp, unit=None, remark=None):
+        return calc_hint(quantity_str, ypp, unit=unit, remark=remark)
 
     def _check_remark(remark, quantity_str, ypp):
         return check_remark(remark, quantity_str, ypp)
@@ -63,7 +63,7 @@ def shipping_records():
     for group in groups:
         for item in group['records']:
             ypp = _get_ypp(item['product_name'], item.get('specification', ''))
-            item['unit_hint'] = _calc_hint(item['quantity'], ypp)
+            item['unit_hint'] = _calc_hint(item['quantity'], ypp, unit=item.get('unit', ''), remark=item.get('remark', ''))
             item['mismatch'] = _check_remark(
                 item.get('remark', ''),
                 item['quantity'],
@@ -277,6 +277,8 @@ def api_v1_shipping_orders_update_record(record_id):
     if not data:
         return jsonify({'success': False, 'error': '请求体不能为空'}), 400
 
+    if data.get('unit') == '码':
+        data['unit'] = 'y'
     ShippingRecord.update(record_id, data)
     updated = ShippingRecord.get_by_id(record_id)
     return jsonify({'success': True, 'record': updated})

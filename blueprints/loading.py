@@ -42,7 +42,7 @@ def loading_orders():
     for group in groups:
         for item in group['records']:
             ypp = get_ypp(item['product_name'], item.get('specification', ''), units_cache=units)
-            item['unit_hint'] = calc_hint(item['quantity'], ypp)
+            item['unit_hint'] = calc_hint(item['quantity'], ypp, unit=item.get('unit', ''), remark=item.get('remark', ''))
             item['mismatch'] = check_remark(
                 item.get('remark', ''),
                 item['quantity'],
@@ -234,6 +234,8 @@ def api_v1_loading_orders_update_record(record_id):
     if not data:
         return jsonify({'success': False, 'error': '请求体不能为空'}), 400
 
+    if data.get('unit') == '码':
+        data['unit'] = 'y'
     LoadingOrderRecord.update(record_id, data)
     updated = LoadingOrderRecord.get_by_id(record_id)
     return jsonify({'success': True, 'record': updated})

@@ -50,16 +50,13 @@ def inbound_records():
     def _get_ypp(product_name, spec):
         return get_ypp(product_name, spec, units_cache=units)
 
-    def _calc_hint(quantity_str, ypp):
-        return calc_hint(quantity_str, ypp)
-
     def _check_remark(remark, quantity_str, ypp):
         return check_remark(remark, quantity_str, ypp)
 
     for group in groups:
         for item in group['records']:
             ypp = _get_ypp(item['product_name'], item.get('specification', ''))
-            item['unit_hint'] = _calc_hint(item['quantity'], ypp)
+            item['unit_hint'] = calc_hint(item['quantity'], ypp, unit=item.get('unit', ''), remark=item.get('remark', ''))
             item['mismatch'] = _check_remark(
                 item.get('remark', ''),
                 item['quantity'],
@@ -391,10 +388,13 @@ def api_v1_inbound_orders_add_records_batch(order_id):
         result_records = []
         for rec in records:
             sort_order += 1
+            unit = rec.get('unit', '支')
+            if unit == '码':
+                unit = 'y'
             cursor.execute(
                 'INSERT INTO inbound_records (order_pk, product_name, specification, quantity, unit, remark, sort_order, created_at) VALUES (?,?,?,?,?,?,?,?)',
                 (order_id, rec.get('product_name', ''), rec.get('specification', ''),
-                 str(rec.get('quantity', '')), rec.get('unit', '支'), rec.get('remark', ''),
+                 str(rec.get('quantity', '')), unit, rec.get('remark', ''),
                  sort_order, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
             result_records.append({
                 'id': cursor.lastrowid,
@@ -402,7 +402,7 @@ def api_v1_inbound_orders_add_records_batch(order_id):
                 'product_name': rec.get('product_name', ''),
                 'specification': rec.get('specification', ''),
                 'quantity': str(rec.get('quantity', '')),
-                'unit': rec.get('unit', '支'),
+                'unit': unit,
                 'remark': rec.get('remark', ''),
                 'sort_order': sort_order
             })
@@ -428,6 +428,8 @@ def api_v1_inbound_orders_update_record(record_id):
     data = request.get_json()
     if not data:
         return jsonify({'success': False, 'error': '请求体不能为空'}), 400
+    if data.get('unit') == '码':
+        data['unit'] = 'y'
     InboundRecord.update(record_id, data)
     updated = InboundRecord.get_by_id(record_id)
     return jsonify({'success': True, 'record': updated})

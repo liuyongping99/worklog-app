@@ -529,16 +529,11 @@
             errEl.style.display = 'none';
         });
 
-        // 联动：开始日期改变时，结束日期限制同月
+        // 联动：开始日期改变时，结束日期不能早于开始日期
         startEl.addEventListener('change', function() {
             var s = startEl.value;
             if (s) {
-                var ym = s.substring(0, 7);
-                var parts = ym.split('-');
-                var y = parseInt(parts[0]), m = parseInt(parts[1]);
-                var lastDay = new Date(y, m, 0).getDate();
-                endEl.min = ym + '-01';
-                endEl.max = ym + '-' + String(lastDay).padStart(2, '0');
+                endEl.min = s;
             }
         });
 
@@ -614,14 +609,17 @@
                     </td>
                 </tr>
                 {% endfor %}
-                {% if group.summary_pieces > 0 or group.summary_loose_pieces > 0 %}
+                {% if group.summary_pieces > 0 or group.summary_loose_pieces > 0 or group.summary_unit_pieces > 0 %}
                 <tr class="summary-row" style="background:#f0fdf4; font-weight:600; border-top:2px solid #00b894;">
-                    <td colspan="5" style="text-align:right; padding:0.6rem 0.75rem; color:#00b894; font-size:0.9rem;">📊 备注汇总：</td>
+                    <td colspan="4" style="text-align:right; padding:0.6rem 0.75rem; color:#00b894; font-size:0.9rem;">📊 备注支数：</td>
                     <td style="padding:0.6rem 0.75rem; color:#2d3436; font-size:0.9rem;">
                         {{ group.summary_pieces }}支
                         {% if group.summary_loose_pieces > 0 %}
                         +{{ group.summary_loose_pieces }}支散码
                         {% endif %}
+                    </td>
+                    <td style="padding:0.6rem 0.75rem; color:#00b894; font-size:0.9rem;">
+                        📊 明细支数：{{ group.summary_unit_pieces }}支
                     </td>
                     <td style="padding:0.6rem 0.75rem;"></td>
                     <td style="padding:0.6rem 0.75rem;"></td>
@@ -786,16 +784,29 @@ function findInboundUnit(productName, spec) {
     return null;
 }
 
-function getInboundUnitHint(productName, spec, quantity) {
-    var u = findInboundUnit(productName, spec);
-    if (!u || !u.is_usingyardforcounting || u.yards_per_piece <= 0) return '';
+function getInboundUnitHint(productName, spec, quantity, unit, remark) {
     var qty = parseFloat(quantity);
     if (isNaN(qty)) return '';
-    var ypp = u.yards_per_piece;
-    var pieces = Math.floor(qty / ypp);
-    var remainder = qty - (pieces * ypp);
-    if (remainder < 0.01) return pieces + '支';
-    return pieces + '支+' + Math.round(remainder * 100) / 100 + '码';
+    // 单位已经是支：直接以数量作为支数提示（无需 YPP 配置）
+    if (unit === '支') {
+        if (qty === Math.floor(qty)) return Math.floor(qty) + '支';
+        return qty + '支';
+    }
+    // 单位是码（或其他）：需要 unit config 才能换算
+    var u = findInboundUnit(productName, spec);
+    if (u && u.is_usingyardforcounting && u.yards_per_piece > 0) {
+        var ypp = u.yards_per_piece;
+        var pieces = Math.floor(qty / ypp);
+        var remainder = qty - (pieces * ypp);
+        if (remainder < 0.01) return pieces + '支';
+        return pieces + '支+' + Math.round(remainder * 100) / 100 + '码';
+    }
+    // 兜底：从备注中提取支数（如 kg 计重的无纺布备注 "3支"）
+    if (remark) {
+        var rm = remark.match(/(\d+)支/);
+        if (rm) return rm[1] + '支';
+    }
+    return '';
 }
 
 function checkInboundMismatch(remark, quantity, productName, spec) {
@@ -1305,11 +1316,13 @@ setTimeout(() => {
             // 如果已经是编辑状态（按钮文本为保存），执行保存
             if (this.textContent.trim() === '💾') {
                 var inputs = tr.querySelectorAll('.edit-input');
+                var unit = inputs[3].value;
+                if (unit === '码') unit = 'y';
                 var data = {
                     product_name: inputs[0].value,
                     specification: inputs[1].value,
                     quantity: inputs[2].value,
-                    unit: inputs[3].value,
+                    unit: unit,
                     remark: inputs[4].value
                 };
                 fetch('/api/v1/inbound-orders/records/' + recordId, {
@@ -1329,7 +1342,7 @@ setTimeout(() => {
                         tds[3].innerHTML = '<span class="unit-badge">' + r.unit + '</span>';
                         tds[4].textContent = r.remark || '-';
                         tds[4].className = 'remark-cell' + (r.remark ? ' has-content' : '');
-                        tds[5].textContent = getInboundUnitHint(r.product_name, r.specification || '', r.quantity) || '—';
+                        tds[5].textContent = getInboundUnitHint(r.product_name, r.specification || '', r.quantity, r.unit, r.remark) || '—';
                         applyInboundMismatch(tr, newMismatch);
                         // 恢复按钮
                         btn.textContent = '✏️';
@@ -1558,7 +1571,7 @@ setTimeout(() => {
     function buildInboundRecordRow(rec, orderPk) {
         var tr = document.createElement('tr');
         tr.setAttribute('data-record-id', rec.id);
-        var unitHint = getInboundUnitHint(rec.product_name, rec.specification || '', rec.quantity) || '—';
+        var unitHint = getInboundUnitHint(rec.product_name, rec.specification || '', rec.quantity, rec.unit, rec.remark) || '—';
         var mismatch = checkInboundMismatch(rec.remark || '', rec.quantity, rec.product_name, rec.specification || '');
         if (mismatch) tr.classList.add(mismatch === 'warn' ? 'row-warn' : 'row-info');
         var escapedName = rec.product_name.replace(/"/g, '&quot;');
@@ -1621,11 +1634,13 @@ setTimeout(() => {
             if (btn.textContent.trim() === '💾') {
                 // 保存
                 var inputs = tr.querySelectorAll('.edit-input');
+                var unit = inputs[3].value;
+                if (unit === '码') unit = 'y';
                 var d = {
                     product_name: inputs[0].value,
                     specification: inputs[1].value,
                     quantity: inputs[2].value,
-                    unit: inputs[3].value,
+                    unit: unit,
                     remark: inputs[4].value
                 };
                 fetch('/api/v1/inbound-orders/records/' + btn.getAttribute('data-id'), {
@@ -1645,7 +1660,7 @@ setTimeout(() => {
                         tds[3].innerHTML = '<span class="unit-badge">' + r.unit + '</span>';
                         tds[4].textContent = r.remark || '-';
                         tds[4].className = 'remark-cell' + (r.remark ? ' has-content' : '');
-                        tds[5].textContent = getInboundUnitHint(r.product_name, r.specification || '', r.quantity) || '—';
+                        tds[5].textContent = getInboundUnitHint(r.product_name, r.specification || '', r.quantity, r.unit, r.remark) || '—';
                         applyInboundMismatch(tr, newMismatch);
                         tr.setAttribute('data-record-id', r.id);
                         btn.textContent = '✏️';
@@ -1682,33 +1697,51 @@ setTimeout(() => {
     // ── 重新计算入库备注汇总 ──
     function recalcInboundSummary(dateGroup) {
         var tbody = dateGroup.querySelector('.record-table tbody');
-        var remarkCells = tbody.querySelectorAll('tr:not(.quick-add-row) .remark-cell');
+        var rows = tbody.querySelectorAll('tr:not(.quick-add-row):not(.summary-row)');
         var totalPieces = 0;
         var totalLoosePieces = 0;
-        remarkCells.forEach(function(cell) {
-            var remark = cell.textContent.trim();
-            if (!remark || remark === '-') return;
-            var m = remark.match(/(\d+)支/);
-            if (m) totalPieces += parseInt(m[1]);
-            var looseMatches = remark.match(/\d+(?:\.\d+)?[yY码]/g);
-            if (looseMatches) totalLoosePieces += looseMatches.length;
+        var totalUnitPieces = 0;
+        rows.forEach(function(row) {
+            var remarkCell = row.querySelector('.remark-cell');
+            if (remarkCell) {
+                var remark = remarkCell.textContent.trim();
+                if (remark && remark !== '-') {
+                    var m = remark.match(/(\d+)支/);
+                    if (m) totalPieces += parseInt(m[1]);
+                    var looseMatches = remark.match(/\d+(?:\.\d+)?[yY码]/g);
+                    if (looseMatches) totalLoosePieces += looseMatches.length;
+                }
+            }
+            // 从辅助单位提示中提取支数（涵盖 unit=支 直接显示 + unit=y 换算后的结果）
+            var hintCell = row.querySelector('.unit-hint-cell');
+            if (hintCell) {
+                var hintText = hintCell.textContent.trim();
+                var hm = hintText.match(/(\d+(?:\.\d+)?)支/);
+                if (hm) totalUnitPieces += parseFloat(hm[1]);
+            }
         });
+
+        // 整数显示
+        if (totalUnitPieces === Math.floor(totalUnitPieces)) {
+            totalUnitPieces = Math.floor(totalUnitPieces);
+        }
 
         // 移除旧汇总行（包括服务端渲染的 and JS 创建的）
         var oldSummary = tbody.querySelector('.summary-row');
         if (oldSummary) oldSummary.remove();
 
-        if (totalPieces === 0 && totalLoosePieces === 0) return;
+        if (totalPieces === 0 && totalLoosePieces === 0 && totalUnitPieces === 0) return;
 
-        var summaryText = totalPieces + '支';
-        if (totalLoosePieces > 0) summaryText += '+' + totalLoosePieces + '支散码';
+        var summaryText1 = totalPieces + '支';
+        if (totalLoosePieces > 0) summaryText1 += '+' + totalLoosePieces + '支散码';
 
         var summaryRow = document.createElement('tr');
         summaryRow.className = 'summary-row';
         summaryRow.style.cssText = 'background:#f0fdf4;font-weight:600;border-top:2px solid #00b894;';
         summaryRow.innerHTML =
-            '<td colspan="5" style="text-align:right;padding:0.6rem 0.75rem;color:#00b894;font-size:0.9rem;">📊 备注汇总：</td>' +
-            '<td style="padding:0.6rem 0.75rem;color:#2d3436;font-size:0.9rem;">' + summaryText + '</td>' +
+            '<td colspan="4" style="text-align:right;padding:0.6rem 0.75rem;color:#00b894;font-size:0.9rem;">📊 备注支数：</td>' +
+            '<td style="padding:0.6rem 0.75rem;color:#2d3436;font-size:0.9rem;">' + summaryText1 + '</td>' +
+            '<td style="padding:0.6rem 0.75rem;color:#00b894;font-size:0.9rem;">📊 明细支数：' + totalUnitPieces + '支</td>' +
             '<td style="padding:0.6rem 0.75rem;"></td>' +
             '<td style="padding:0.6rem 0.75rem;"></td>';
         tbody.appendChild(summaryRow);

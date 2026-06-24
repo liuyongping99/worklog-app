@@ -119,39 +119,63 @@ def get_ypp(product_name, spec, units_cache=None):
 
 
 def _match_unit_in_cache(product_name, spec, units_cache):
-    """在预加载的 units 列表里找匹配项。简单子串匹配，与 ProductUnit.get_match 行为一致。"""
+    """在预加载的 units 列表里找匹配项。先找 spec_keyword 匹配的，未命中则取默认行。
+
+    与 ProductUnit.get_match 和 JS 端 findInboundUnit 行为一致：两轮匹配，
+    避免默认行（无 spec_keyword）排在前面时抢在精确匹配之前返回。
+    """
     spec_lower = (spec or '').lower()
-    name_lower = (product_name or '').lower()
+    # 第一轮：优先匹配有 spec_keyword 且关键字在 spec 中的行
+    if spec_lower:
+        for u in units_cache:
+            if u['product_name'] != product_name:
+                continue
+            kw = u['spec_keyword']
+            if kw and kw.lower() in spec_lower:
+                return u
+    # 第二轮：兜底取没有 spec_keyword 的默认行
     for u in units_cache:
         if u['product_name'] != product_name:
             continue
-        if u['spec_keyword'] and spec_lower and u['spec_keyword'].lower() not in spec_lower:
-            continue
-        return u
+        if not u['spec_keyword']:
+            return u
     return None
 
 
-def calc_hint(quantity_str, ypp):
+def calc_hint(quantity_str, ypp, unit=None, remark=None):
     """根据数量和 YPP 算支数提示，如 "33支" 或 "33支+0.5码"。
 
     Args:
         quantity_str: 数量字符串（如 "50"）
         ypp: 码/支（>0 才计算）
+        unit: 单位（可选）。当单位为"支"时直接返回数量作为支数提示
+        remark: 备注（可选）。当无 YPP 配置时，从备注中提取支数作为兜底
 
     Returns:
         str 提示，空串表示不适用
     """
-    if ypp <= 0:
-        return ''
     try:
         qty = float(quantity_str)
     except (ValueError, TypeError):
         return ''
-    pieces = int(qty / ypp)
-    remainder = qty - (pieces * ypp)
-    if remainder < 0.01:
-        return f'{pieces}支'
-    return f'{pieces}支+{round(remainder, 2)}码'
+    # 单位已经是支：直接以数量作为支数提示（无需 YPP 配置）
+    if unit == '支':
+        if qty == int(qty):
+            return f'{int(qty)}支'
+        return f'{qty}支'
+    # 单位是码（或其他）：需要 YPP 配置才能换算
+    if ypp > 0:
+        pieces = int(qty / ypp)
+        remainder = qty - (pieces * ypp)
+        if remainder < 0.01:
+            return f'{pieces}支'
+        return f'{pieces}支+{round(remainder, 2)}码'
+    # 兜底：从备注中提取支数（如 kg 计重的无纺布备注 "3支"）
+    if remark:
+        m = re.search(r'(\d+)支', remark)
+        if m:
+            return f'{m.group(1)}支'
+    return ''
 
 
 def check_remark(remark, quantity_str, ypp):
@@ -205,22 +229,39 @@ def check_remark(remark, quantity_str, ypp):
 
 
 def summarize_remarks(records):
-    """从一组明细里汇总备注支数和散码支数。
+    """从一组明细里汇总备注支数、散码支数，以及辅助单位提示中的总支数。
 
     Args:
-        records: 明细列表，每条需要有 'remark' 字段
+        records: 明细列表，每条需要有 'remark'、'unit_hint' 字段
 
     Returns:
-        dict {'summary_pieces': int, 'summary_loose_pieces': int}
+        dict {
+            'summary_pieces': int,        # 备注中 "X支" 的支数合计
+            'summary_loose_pieces': int,   # 备注中散码出现次数
+            'summary_unit_pieces': float,  # 辅助单位提示中提取的支数合计
+        }
     """
     total_pieces = 0
     total_loose = 0
+    total_unit_pieces = 0.0
     for item in records:
         remark = item.get('remark', '')
-        if not remark:
-            continue
-        m_pieces = re.search(r'(\d+)支', remark)
-        if m_pieces:
-            total_pieces += int(m_pieces.group(1))
-        total_loose += len(re.findall(r'\d+(?:\.\d+)?[yY码]', remark))
-    return {'summary_pieces': total_pieces, 'summary_loose_pieces': total_loose}
+        if remark:
+            m_pieces = re.search(r'(\d+)支', remark)
+            if m_pieces:
+                total_pieces += int(m_pieces.group(1))
+            total_loose += len(re.findall(r'\d+(?:\.\d+)?[yY码]', remark))
+        # 从辅助单位提示中提取支数（涵盖 unit=支 直接显示 + unit=y 换算后的结果）
+        hint = item.get('unit_hint', '')
+        if hint:
+            m_hint = re.search(r'(\d+(?:\.\d+)?)支', hint)
+            if m_hint:
+                total_unit_pieces += float(m_hint.group(1))
+    # 如果 total_unit_pieces 是整数，转为 int 显示
+    if total_unit_pieces == int(total_unit_pieces):
+        total_unit_pieces = int(total_unit_pieces)
+    return {
+        'summary_pieces': total_pieces,
+        'summary_loose_pieces': total_loose,
+        'summary_unit_pieces': total_unit_pieces,
+    }

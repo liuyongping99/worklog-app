@@ -125,7 +125,8 @@ class ProductCategory:
 
     @staticmethod
     def get_tree():
-        """返回嵌套树结构，根节点包含 children 列表"""
+        """返回嵌套树结构，根节点包含 children 列表。
+        每个节点下的 children 按 category_code 升序排列。"""
         all_rows = ProductCategory.get_all()
         node_map = {}
         for r in all_rows:
@@ -138,6 +139,16 @@ class ProductCategory:
                 node_map[pid]['children'].append(r)
             elif pid is None:
                 roots.append(r)
+
+        # 递归按 category_code 排序
+        def sort_children(node):
+            node['children'].sort(key=lambda c: c['category_code'])
+            for child in node['children']:
+                sort_children(child)
+
+        for root in roots:
+            sort_children(root)
+
         return roots
 
     @staticmethod

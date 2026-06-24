@@ -79,7 +79,7 @@ class CheckRemarkTests(unittest.TestCase):
 
 
 class SummarizeRemarksTests(unittest.TestCase):
-    """summarize_remarks(records) → {summary_pieces, summary_loose_pieces}"""
+    """summarize_remarks(records) → {summary_pieces, summary_loose_pieces, summary_unit_pieces}"""
 
     def test_multiple_records(self):
         records = [
@@ -91,18 +91,36 @@ class SummarizeRemarksTests(unittest.TestCase):
         self.assertEqual(result['summary_pieces'], 35)
         # 两条备注里有码数（20支+0.5码 1 条 + 5支 0 条）= 1
         self.assertEqual(result['summary_loose_pieces'], 1)
+        # 无 unit/quantity 字段，明细支数为 0
+        self.assertEqual(result['summary_unit_pieces'], 0)
 
     def test_empty_remarks(self):
         records = [{'remark': ''}, {'remark': None}]
         result = summarize_remarks(records)
         self.assertEqual(result['summary_pieces'], 0)
         self.assertEqual(result['summary_loose_pieces'], 0)
+        self.assertEqual(result['summary_unit_pieces'], 0)
 
     def test_no_remark_field(self):
         records = [{}, {'remark': '3支'}]
         result = summarize_remarks(records)
         self.assertEqual(result['summary_pieces'], 3)
         self.assertEqual(result['summary_loose_pieces'], 0)
+        self.assertEqual(result['summary_unit_pieces'], 0)
+
+    def test_unit_pieces_sum(self):
+        """辅助单位提示中的支数合计（涵盖 unit=支 直接显示 + unit=y 换算）"""
+        records = [
+            {'remark': '5支', 'unit_hint': '50支'},
+            {'remark': '3支', 'unit_hint': '30支'},
+            {'remark': '', 'unit_hint': '3支'},       # unit=y 换算后的支数
+            {'remark': '', 'unit_hint': ''},           # 无提示
+            {'remark': '', 'unit_hint': '—'},          # 无提示
+        ]
+        result = summarize_remarks(records)
+        self.assertEqual(result['summary_pieces'], 8)        # 5+3
+        self.assertEqual(result['summary_loose_pieces'], 0)
+        self.assertEqual(result['summary_unit_pieces'], 83)  # 50+30+3, float→int
 
 
 class GetUploadDirTests(unittest.TestCase):

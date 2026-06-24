@@ -170,6 +170,8 @@ class ShippingRecord:
     @staticmethod
     def create(date: str, customer: str, product_name: str = '', specification: str = '', quantity: str = '', unit: str = '支', remark: str = '', order_pk: int = None) -> int:
         """添加商品明细，order_pk 不传时自动创建新订单，返回 record id"""
+        if unit == '码':
+            unit = 'y'
         conn = get_db()
         cursor = conn.cursor()
         if order_pk is None:
@@ -443,6 +445,8 @@ class InboundOrder:
 class InboundRecord:
     @staticmethod
     def create(order_pk: int, product_name: str, specification: str, quantity: str, unit: str = '支', remark: str = ''):
+        if unit == '码':
+            unit = 'y'
         conn = get_db()
         cursor = conn.cursor()
         # 取当前订单最大 sort_order + 1
@@ -863,6 +867,8 @@ class LoadingOrderRecord:
     @staticmethod
     def create(date: str, customer: str = '', product_name: str = '', specification: str = '', quantity: str = '', unit: str = '支', remark: str = '', order_pk: int = None):
         """添加商品明细，order_pk 不传时自动创建新订单"""
+        if unit == '码':
+            unit = 'y'
         conn = get_db()
         cursor = conn.cursor()
         if order_pk is None:
