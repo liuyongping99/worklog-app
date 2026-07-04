@@ -2,102 +2,37 @@
 
 {% block content %}
 <style>
-.shipping-page .card-title { color: #00b894; border-bottom-color: #d4f5e9; }
-.shipping-page .date-group { margin-bottom: 3rem; border-bottom: 1px dashed #dfe6e9; padding-bottom: 1rem; }
+/* ── 出货页专属色：成功绿 ── */
+:root { --page-accent: #00b894; --page-accent-bg: #d4f5e9; --page-accent-light-bg: #f8fff8; }
+.shipping-page .card-title { color: var(--page-accent); border-bottom-color: var(--page-accent-bg); }
+.shipping-page .date-group { margin-bottom: var(--space-2xl); border-bottom: 1px dashed var(--gray-300); padding-bottom: var(--space-lg); }
 .date-group[data-locked="1"] .lock-hide { display: none !important; }
 .date-group[data-locked="1"] .lock-show { display: inline-block !important; }
 .date-group[data-locked="0"] .lock-hide { display: inline-block !important; }
 .date-group[data-locked="0"] .lock-show { display: none !important; }
-.shipping-page .group-header {
-    display: flex; align-items: center; gap: 0.75rem;
-    padding: 0.5rem 0.8rem; background: linear-gradient(135deg, #f8fff8 0%, #e8f5e9 100%);
-    border-left: 4px solid #00b894; border-radius: 6px;
-    margin-bottom: 0.75rem;
-}
-.shipping-page .group-date {
-    font-size: 1rem; font-weight: 700; color: #2d3436;
-}
-.shipping-page .group-customer {
-    font-size: 0.95rem; color: #00b894; font-weight: 600;
-    padding: 0.2rem 0.6rem; background: #d4f5e9; border-radius: 12px;
-}
-.shipping-page .record-table { width: 100%; border-collapse: collapse; margin-bottom: 1.5rem; }
-.shipping-page .record-table th {
-    background: #f8f9fa; padding: 0.5rem 0.75rem;
-    text-align: left; font-size: 0.8rem; color: #868e96;
-    border-bottom: 2px solid #e9ecef;
-}
-.shipping-page .record-table td {
-    padding: 0.6rem 0.75rem; border-bottom: 1px solid #f1f3f5;
-    font-size: 0.95rem; vertical-align: middle;
-}
-.shipping-page .record-table tr:hover td { background: #f8fff8; }
-.shipping-page .record-table tr.row-warn td { background: #ffdddd; }
-.shipping-page .record-table tr.row-warn td:first-child { border-left: 4px solid #e74c3c; }
-.shipping-page .record-table tr.row-warn:hover td { background: #ffcccc; }
-.shipping-page .record-table tr.row-info td { background: #ffebee; }
-.shipping-page .record-table tr.row-info td:first-child { border-left: 4px solid #ef9a9a; }
-.shipping-page .record-table tr.row-info:hover td { background: #ffcdd2; }
-/* 缺货行（quantity 为"货-"）：整行红底 + 左侧红边 + 序号前小红叉 */
-.shipping-page .record-table tr.row-out-of-stock td { background: #ffe0e0; }
-.shipping-page .record-table tr.row-out-of-stock td:first-child { border-left: 4px solid #d63031; }
+.shipping-page .group-header { background: linear-gradient(135deg, #f8fff8 0%, #e8f5e9 100%); }
+.shipping-page .group-customer { color: var(--page-accent); background: var(--page-accent-bg); }
+.shipping-page .record-table tr:hover td { background: var(--page-accent-light-bg); }
+/* 缺货行 */
+.shipping-page .record-table tr.row-out-of-stock td { background: var(--color-out-of-stock-bg); }
+.shipping-page .record-table tr.row-out-of-stock td:first-child { border-left-color: var(--color-out-of-stock); }
 .shipping-page .record-table tr.row-out-of-stock:hover td { background: #ffcccc; }
-.shipping-page .record-table tr.row-out-of-stock .stock-icon { color: #d63031; font-size: 1rem; margin-right: 2px; vertical-align: middle; }
-.shipping-page .record-table tr.row-out-of-stock .qty-badge { background: #fab1a0; color: #d63031; }
-.shipping-page .qty-badge {
-    background: #d4f5e9; color: #00b894;
-    padding: 0.2rem 0.6rem; border-radius: 12px;
-    font-weight: 700; font-size: 0.85rem;
-    white-space: nowrap;
-}
-.shipping-page .unit-badge {
-    background: #f0f0f0; color: #555;
-    padding: 0.2rem 0.5rem; border-radius: 8px;
-    font-size: 0.82rem; font-weight: 600;
-    white-space: nowrap;
-}
-.shipping-page .quick-add {
-    display: grid;
-    grid-template-columns: 1fr 90px 80px 70px auto;
-    gap: 0.5rem; align-items: end;
-    padding: 0.75rem; background: #fafafa;
-    border-radius: 6px; margin-top: 0.5rem;
-}
-.shipping-page .quick-add input, .shipping-page .quick-add select {
-    width: 100%; padding: 0.35rem 0.5rem;
-    border: 1px solid #dfe6e9; border-radius: 4px;
-    font-size: 0.85rem; background: #fff;
-    box-sizing: border-box;
-}
-.shipping-page .quick-add input:focus, .shipping-page .quick-add select:focus {
-    outline: none; border-color: #00b894;
-}
-.shipping-page .quick-add button {
-    padding: 0.35rem 0.8rem;
-}
-.shipping-page .form-grid {
-    display: grid;
-    grid-template-columns: 150px 1fr;
-    gap: 0.75rem; align-items: end;
-}
-.shipping-page .form-grid label { display: block; font-weight: 600; font-size: 0.85rem; margin-bottom: 0.25rem; }
+.shipping-page .record-table tr.row-out-of-stock .stock-icon { color: var(--color-out-of-stock); font-size: var(--font-md); margin-right: 2px; vertical-align: middle; }
+.shipping-page .record-table tr.row-out-of-stock .qty-badge { background: #fab1a0; color: var(--color-out-of-stock); }
+.shipping-page .quick-add { display: grid; grid-template-columns: 1fr 90px 80px 70px auto; align-items: end; }
+.shipping-page .quick-add input:focus, .shipping-page .quick-add select:focus { border-color: var(--page-accent); }
+.shipping-page .form-grid { display: grid; grid-template-columns: 150px 1fr; gap: var(--space-md); align-items: end; }
+.shipping-page .form-grid label { display: block; font-weight: 600; font-size: var(--font-sm); margin-bottom: var(--space-xs); }
 .shipping-page .form-grid input {
-    width: 100%; padding: 0.4rem 0.6rem;
-    border: 1px solid #dfe6e9; border-radius: 6px;
-    font-size: 0.9rem; background: #fff;
-    box-sizing: border-box;
+    width: 100%; padding: 0.4rem 0.6rem; border: 1px solid var(--gray-300);
+    border-radius: var(--radius-md); font-size: var(--font-base); background: #fff; box-sizing: border-box;
 }
 .shipping-page .form-grid input:focus {
-    outline: none; border-color: #00b894;
+    outline: none; border-color: var(--page-accent);
     box-shadow: 0 0 0 2px rgba(0,184,148,0.1);
 }
-.shipping-page .empty-state { text-align: center; padding: 3rem 1rem; color: #bbb; }
-.shipping-page .empty-state .icon { font-size: 3.5rem; margin-bottom: 1rem; }
-.shipping-page .remark-cell.has-content { color: #555; }
-.shipping-page .order-images-area {
-    display: grid; margin: 0.75rem 0;
-    gap: 0.5rem;
-}
+.shipping-page .remark-cell.has-content { color: var(--gray-800); }
+.shipping-page .order-images-area { display: grid; margin: var(--space-md) 0; gap: var(--space-sm); }
 .shipping-page .order-images-area.columns-1 { grid-template-columns: 1fr; }
 .shipping-page .order-images-area.columns-2 { grid-template-columns: repeat(2, 1fr); }
 .shipping-page .order-images-area.columns-3 { grid-template-columns: repeat(3, 1fr); }
@@ -1239,6 +1174,7 @@
             alert('没有有效的数据可添加');
             return;
         }
+        showLoading('批量添加中...');
         fetch('/api/v1/shipping-orders/' + currentSmartFillOrderPk + '/records/batch', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1247,6 +1183,7 @@
             })
         }).then(function(res) { return res.json(); })
         .then(function(data) {
+            hideLoading();
             if (data.success) {
                 closeSmartFill();
                 // 局部插入新行
@@ -1331,6 +1268,7 @@
             return;
         }
 
+        showLoading('批量添加中...');
         fetch('/api/v1/shipping-orders/' + currentSmartFillOrderPk + '/records/batch', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1339,6 +1277,7 @@
             })
         }).then(function(res) { return res.json(); })
         .then(function(data) {
+            hideLoading();
             if (data.success) {
                 closeSmartFill();
                 // 局部插入新行
@@ -1418,15 +1357,17 @@
             if (this.disabled) { alert('有明细或图片的订单不可删除！'); return; }
             var pk = this.getAttribute('data-pk');
             confirmDialog('确定要删除整个订单吗？', function() {
+                showLoading('删除中...');
                 fetch('/api/v1/shipping-orders/' + pk, {method: 'DELETE'})
                 .then(function(res) { return res.json(); })
                 .then(function(data) {
                     if (data.success) {
                         window.location.href = '/shipping-records';
                     } else {
+                        hideLoading();
                         alert('删除失败：' + (data.error || ''));
                     }
-                }).catch(function(err) { alert('请求失败：' + err); });
+                }).catch(function(err) { hideLoading(); alert('请求失败：' + err); });
             });
         });
     });
@@ -1436,9 +1377,11 @@
         btn.addEventListener('click', function() {
             var pk = this.getAttribute('data-pk');
             confirmDialog('确定要删除这些出货记录吗？', function() {
+                showLoading('删除中...');
                 fetch('/api/v1/shipping-orders/' + pk + '/records', {method: 'DELETE'})
                 .then(function(res) { return res.json(); })
                 .then(function(data) {
+                    hideLoading();
                     if (data.success) {
                         var dg = document.querySelector('.date-group[data-order-id="' + pk + '"]');
                         if (dg) {
@@ -1449,7 +1392,7 @@
                     } else {
                         alert('删除失败：' + (data.error || ''));
                     }
-                }).catch(function(err) { alert('请求失败：' + err); });
+                }).catch(function(err) { hideLoading(); alert('请求失败：' + err); });
             });
         });
     });
@@ -1706,6 +1649,7 @@ function bindEditDeleteButtons() {
                     unit: inputs[3].value,
                     remark: inputs[4].value
                 };
+                showBtnLoading(btn, '保存中...');
                 fetch('/api/v1/shipping-orders/records/' + recordId, {
                     method: 'PUT',
                     headers: {'Content-Type': 'application/json'},
@@ -1713,6 +1657,7 @@ function bindEditDeleteButtons() {
                 })
                 .then(function(res) { return res.json(); })
                 .then(function(result) {
+                    hideBtnLoading(btn);
                     if (result.success) {
                         var r = result.record;
                         var newMismatch = checkMismatch(r.remark || '', r.quantity, r.product_name, r.specification || '');
@@ -1736,7 +1681,7 @@ function bindEditDeleteButtons() {
                     } else {
                         alert('保存失败：' + (result.error || ''));
                     }
-                }).catch(function(err) { alert('请求失败：' + err); });
+                }).catch(function(err) { hideBtnLoading(btn); alert('请求失败：' + err); });
             } else {
                 var vals = [tds[1].textContent, tds[2].textContent, tds[3].textContent, tds[4].textContent.trim(), tds[5].textContent];
                 tds[1].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:100px;" value="' + vals[0] + '">';
@@ -1762,16 +1707,18 @@ function bindEditDeleteButtons() {
             confirmDialog('确定要删除这条记录吗？', function() {
                 var recordId = self.getAttribute('data-id');
                 var tr = self.closest('tr');
+                showLoading('删除中...');
                 fetch('/api/v1/shipping-orders/records/' + recordId, {method: 'DELETE'})
                 .then(function(res) { return res.json(); })
                 .then(function(data) {
+                    hideLoading();
                     if (data.success) {
                         var dg = tr.closest('.date-group');
                         tr.style.transition = 'opacity 0.3s';
                         tr.style.opacity = '0';
                         setTimeout(function() { tr.remove(); refreshRemarkSummary(dg); }, 300);
                     } else { alert('删除失败：' + (data.error || '')); }
-                }).catch(function(err) { alert('请求失败：' + err); });
+                }).catch(function(err) { hideLoading(); alert('请求失败：' + err); });
             });
         });
     });

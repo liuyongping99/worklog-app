@@ -2,71 +2,48 @@
 
 {% block content %}
 <style>
-.loading-page .card-title { color: #00b894; border-bottom-color: #dfe6e9; }
-.loading-page .date-group { margin-bottom: 2rem; border: 1px solid #dfe6e9; border-radius: 12px; overflow: hidden; }
+/* ── 装柜页专属色：成功绿 ── */
+:root { --page-accent: #00b894; --page-accent-bg: #d4f5e9; }
+.loading-page .card-title { color: var(--page-accent); border-bottom-color: var(--gray-300); }
+.loading-page .date-group { margin-bottom: var(--space-2xl); border: 1px solid var(--gray-300); border-radius: var(--radius-xl); overflow: hidden; }
 .loading-page .group-header {
-    display: flex; align-items: center; gap: 0.75rem;
-    padding: 0.75rem 1rem; background: linear-gradient(135deg, #f8f9fa 0%, #d4f5e9 100%);
-    border-left: 4px solid #00b894;
-}
-.loading-page .group-date {
-    font-size: 1rem; font-weight: 700; color: #2d3436;
+    display: flex; align-items: center; gap: var(--space-md);
+    padding: var(--space-md) var(--space-lg); background: linear-gradient(135deg, var(--gray-50) 0%, var(--page-accent-bg) 100%);
 }
 .loading-page .group-customer {
-    font-size: 0.9rem; color: #00b894; font-weight: 600;
-    padding: 0.2rem 0.6rem; background: #d4f5e9; border-radius: 12px;
+    font-size: var(--font-base); color: var(--page-accent); font-weight: 600;
+    padding: 0.2rem 0.6rem; background: var(--page-accent-bg); border-radius: 12px;
 }
-.loading-page .order-num {
-    font-size: 0.8rem; color: #636e72; font-weight: 600;
-}
-.locked-tag { background: #d63031; color: white; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; }
-.lock-btn { background: #74b9ff; color: white; border: none; border-radius: 6px; padding: 0.3rem 0.6rem; font-size: 0.78rem; cursor: pointer; }
-.unlock-btn { background: #00b894; color: white; border: none; border-radius: 6px; padding: 0.3rem 0.6rem; font-size: 0.78rem; cursor: pointer; }
-.del-btn { background: #d63031; color: white; border: none; border-radius: 6px; padding: 0.3rem 0.6rem; font-size: 0.78rem; cursor: pointer; }
-.upload-btn-sm { background: #6c5ce7; color: white; border: none; border-radius: 6px; padding: 0.3rem 0.6rem; font-size: 0.78rem; cursor: pointer; }
+.loading-page .order-num { font-size: var(--font-sm); color: var(--gray-700); font-weight: 600; }
+.locked-tag { background: var(--color-danger); color: white; padding: 0.2rem 0.5rem; border-radius: var(--radius-sm); font-size: var(--font-xs); }
+.lock-btn { background: #74b9ff; color: white; border: none; border-radius: var(--radius-md); padding: 0.3rem 0.6rem; font-size: var(--font-xs); cursor: pointer; }
+.unlock-btn { background: var(--page-accent); color: white; border: none; border-radius: var(--radius-md); padding: 0.3rem 0.6rem; font-size: var(--font-xs); cursor: pointer; }
+.del-btn { background: var(--color-danger); color: white; border: none; border-radius: var(--radius-md); padding: 0.3rem 0.6rem; font-size: var(--font-xs); cursor: pointer; }
+.upload-btn-sm { background: var(--color-purple); color: white; border: none; border-radius: var(--radius-md); padding: 0.3rem 0.6rem; font-size: var(--font-xs); cursor: pointer; }
 .upload-btn-sm:hover { background: #5b4bc4; }
 .lock-hide { display: inline-block; }
 .lock-show { display: none; }
 .date-group[data-locked="1"] .lock-hide { display: none !important; }
 .date-group[data-locked="1"] .lock-show { display: inline-block !important; }
-.img-count-badge { background: #00b894; color: white; padding: 0.15rem 0.4rem; border-radius: 8px; font-size: 0.7rem; }
-.qty-badge { background: #00b894; color: white; padding: 0.15rem 0.4rem; border-radius: 8px; font-size: 0.8rem; }
-.unit-badge { background: #636e72; color: white; padding: 0.15rem 0.4rem; border-radius: 8px; font-size: 0.75rem; }
-.remark-cell.has-content { color: #00b894; font-weight: 500; }
-.record-table { width: 100%; border-collapse: collapse; }
-.record-table th { background: #f8f9fa; padding: 0.65rem; font-size: 1.05rem; color: #636e72; text-align: left; border-bottom: 2px solid #dfe6e9; }
-.record-table td { padding: 0.65rem; border-bottom: 1px solid #f1f3f5; font-size: 1.1rem; }
-.loading-page .record-table tr.row-warn td { background: #ffdddd; }
-.loading-page .record-table tr.row-warn td:first-child { border-left: 4px solid #e74c3c; }
-.loading-page .record-table tr.row-warn:hover td { background: #ffcccc; }
-.loading-page .record-table tr.row-info td { background: #ffebee; }
-.loading-page .record-table tr.row-info td:first-child { border-left: 4px solid #ef9a9a; }
-.loading-page .record-table tr.row-info:hover td { background: #ffcdd2; }
-.quick-add { display: flex; gap: 0.5rem; padding: 0.5rem; background: #fafafa; flex-wrap: nowrap; align-items: center; width: 100%; box-sizing: border-box; }
-.quick-add input, .quick-add select { padding: 0.3rem 0.5rem; border: 1px solid #dfe6e9; border-radius: 4px; font-size: 0.85rem; flex: 1; min-width: 0; box-sizing: border-box; }
-.quick-add input[name="product_name"] { flex: 2; }
-.quick-add input[name="specification"] { flex: 1.5; }
-.quick-add input[name="quantity"] { flex: 1; min-width: 60px; }
-.quick-add select { flex: 1; min-width: 60px; }
-.quick-add input[name="remark"] { flex: 1.5; }
-.quick-add button { flex: 0 0 auto; padding: 0.3rem 1rem; font-size: 0.85rem; white-space: nowrap; }
-
-.loading-page .img-area .img-item { position: relative; overflow: hidden; border-radius: 8px; }
+.img-count-badge { background: var(--page-accent); color: white; padding: 0.15rem 0.4rem; border-radius: var(--radius-lg); font-size: var(--font-xs); }
+.loading-page .record-table th { font-size: var(--font-lg); }
+.loading-page .record-table td { font-size: var(--font-lg); }
+.loading-page .img-area .img-item { position: relative; overflow: hidden; border-radius: var(--radius-lg); }
 .loading-page .img-area .img-item:hover .del-img-btn { opacity: 1; }
-.loading-page .del-img-btn { position: absolute; top: 8px; right: 8px; background: rgba(200,30,30,0.85); color: white; border: none; border-radius: 6px; padding: 0.35rem 0.75rem; font-size: 0.8rem; cursor: pointer; font-weight: 600; opacity: 0; transition: opacity 0.2s; z-index: 5; }
-.loading-page .img-area { display: grid; margin: 0.5rem 0; gap: 0.5rem; }
+.loading-page .del-img-btn { position: absolute; top: 8px; right: 8px; background: rgba(200,30,30,0.85); color: white; border: none; border-radius: var(--radius-md); padding: 0.35rem 0.75rem; font-size: var(--font-sm); cursor: pointer; font-weight: 600; opacity: 0; transition: opacity 0.2s; z-index: 5; }
+.loading-page .img-area { display: grid; margin: var(--space-sm) 0; gap: var(--space-sm); }
 .loading-page .img-area.cols-1 { grid-template-columns: 1fr; }
 .loading-page .img-area.cols-2 { grid-template-columns: repeat(2, 1fr); }
 .loading-page .img-area.cols-3 { grid-template-columns: repeat(3, 1fr); }
 .loading-page .img-area.cols-4 { grid-template-columns: repeat(4, 1fr); }
 .loading-page .img-area.cols-5 { grid-template-columns: repeat(5, 1fr); }
-.img-item { position: relative; border-radius: 8px; overflow: hidden; }
-.img-item img { width: 100%; height: 360px; object-fit: cover; cursor: pointer; }
-.img-col-btn { padding: 0.2rem 0.5rem; border: 1px solid #dfe6e9; background: white; border-radius: 4px; cursor: pointer; font-size: 0.75rem; }
-.img-col-btn.active { background: #00b894; color: white; border-color: #00b894; }
-.empty-state { text-align: center; padding: 3rem; color: #636e72; }
-.empty-state .icon { font-size: 3rem; margin-bottom: 1rem; }
-.btn-sm { padding: 0.25rem 0.6rem; font-size: 0.78rem; }
+.img-item { position: relative; border-radius: var(--radius-lg); overflow: hidden; }
+.img-item img { width: 100%; aspect-ratio: var(--img-aspect-ratio); max-height: var(--img-max-height); object-fit: cover; cursor: pointer; }
+.img-col-btn { padding: 0.2rem 0.5rem; border: 1px solid var(--gray-300); background: white; border-radius: var(--radius-sm); cursor: pointer; font-size: var(--font-xs); }
+.img-col-btn.active { background: var(--page-accent); color: white; border-color: var(--page-accent); }
+.empty-state { text-align: center; padding: var(--space-2xl); color: var(--gray-700); }
+.empty-state .icon { font-size: 3rem; margin-bottom: var(--space-lg); }
+.btn-sm { padding: var(--space-xs) 0.6rem; font-size: var(--font-xs); }
 
 /* 日期筛选弹框 */
 .date-range-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center; }
@@ -918,17 +895,19 @@ document.addEventListener('DOMContentLoaded', function() {
 
     window.deleteOrder = function(orderPk) {
         if (!confirm('确定删除这个订单及其所有记录？')) return;
+        showLoading('删除中...');
         fetch('/api/v1/loading-orders/' + orderPk, {
             method: 'DELETE'
         }).then(checkResponse)
         .then(function(data) {
+            hideLoading();
             if (data.success) {
                 var section = document.querySelector('.date-group[data-order-pk="' + orderPk + '"]');
                 if (section) section.remove();
             } else {
                 alert('删除失败：' + (data.error || '未知错误'));
             }
-        }).catch(function(err) { handleApiError(err, '删除订单'); });
+        }).catch(function(err) { hideLoading(); handleApiError(err, '删除订单'); });
     };
 
     window.editRecord = function(recordId, btn) {
@@ -977,12 +956,14 @@ document.addEventListener('DOMContentLoaded', function() {
             unit: tr.querySelector('select[name=unit]').value,
             remark: tr.querySelector('input[name=remark]').value
         };
+        showBtnLoading(btn, '保存中...');
         fetch('/api/v1/loading-orders/records/' + recordId, {
             method: 'PUT',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(data)
         }).then(checkResponse)
         .then(function(res) {
+            hideBtnLoading(btn);
             if (res.success && res.record) {
                 var r = res.record;
                 var remarkClass = r.remark ? 'remark-cell has-content' : 'remark-cell';
@@ -1034,10 +1015,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
     window.deleteRecord = function(recordId, btn) {
         if (!confirm('确定删除这条记录？')) return;
+        showBtnLoading(btn, '删除中...');
         fetch('/api/v1/loading-orders/records/' + recordId, {
             method: 'DELETE'
         }).then(checkResponse)
         .then(function(data) {
+            hideBtnLoading(btn);
             if (data.success) {
                 var tr = btn.closest('tr');
                 var dateGroup = tr.closest('.date-group');
@@ -1046,7 +1029,7 @@ document.addEventListener('DOMContentLoaded', function() {
             } else {
                 alert('删除失败：' + (data.error || '未知错误'));
             }
-        }).catch(function(err) { handleApiError(err, '删除记录'); });
+        }).catch(function(err) { hideBtnLoading(btn); handleApiError(err, '删除记录'); });
     };
 
     window.moveRecord = function(recordId, direction, btn) {

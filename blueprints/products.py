@@ -121,12 +121,50 @@ def product_categories_delete(category_id):
     return redirect(url_for('products.product_categories'))
 
 
+# ── 分类 API (RESTful v1) ──────────────────────────────────────────────
+@bp.route('/api/v1/product-categories/<int:category_id>/children', methods=['GET'])
+def api_v1_categories_children(category_id):
+    """获取指定分类的直接子节点（JSON），用于分类树懒加载"""
+    children = ProductCategory.get_children(category_id)
+    # 每个子节点回复 has_children 标记（用于前端区分叶子/可展开）
+    result = []
+    for c in children:
+        grandchildren = ProductCategory.get_children(c['id'])
+        result.append({
+            'id': c['id'],
+            'category_code': c['category_code'],
+            'category_name': c['category_name'],
+            'level': c['level'],
+            'parent_id': c['parent_id'],
+            'has_children': len(grandchildren) > 0
+        })
+    return jsonify({'success': True, 'children': result})
+
+
 # ── 产品管理 ──────────────────────────────────────────────
 @bp.route('/products')
 def products():
-    """产品管理页面"""
-    categories = ProductCategory.get_tree()
-    return render_template('products.html', categories=categories, page_title='产品管理')
+    """产品管理页面 — 只传前 2 层分类，更深层通过 API 懒加载"""
+    roots = ProductCategory.get_children(None)  # 根节点们
+    # 为每个根节点附带其子节点（即前 2 层）
+    tree = []
+    for r in roots:
+        children = ProductCategory.get_children(r['id'])
+        node = {
+            'id': r['id'],
+            'category_code': r['category_code'],
+            'category_name': r['category_name'],
+            'level': r['level'],
+            'children': children,
+            'has_children': len(children) > 0
+        }
+        # 为 level-2 节点标记是否有孙节点
+        for c in node['children']:
+            grandchildren = ProductCategory.get_children(c['id'])
+            c['has_children'] = len(grandchildren) > 0
+            c['children'] = []  # 不传，等前端懒加载
+        tree.append(node)
+    return render_template('products.html', categories=tree, page_title='产品管理')
 
 
 # ── 产品 API (RESTful v1) ──────────────────────────────────────────────

@@ -62,7 +62,7 @@
                     <div class="notice-image-area cols-{{ notice.img_cols | default(5) }}" data-cols="{{ notice.img_cols | default(5) }}" data-notice-id="{{ notice.id }}" style="display:grid; gap:0.5rem; width:100%; box-sizing:border-box; grid-template-columns: repeat({{ notice.img_cols | default(5) }}, 1fr);">
                         {% for img in n_imgs %}
                         <div class="notice-img-item" style="position:relative; border-radius:6px; overflow:hidden; border:1px solid #dfe6e9; background:#f8f9fa; width:100%;">
-                            <img src="/static/notice/{{ img.file_name }}" alt="{{ img.original_name or '图片' }}" style="width:100%; height:300px; object-fit:contain; cursor:pointer; display:block;" onclick="previewNoticeImage('/static/notice/{{ img.file_name }}')">
+                            <img src="/static/notice/{{ img.file_name }}" alt="{{ img.original_name or '图片' }}" style="width:100%; aspect-ratio:var(--img-aspect-ratio); max-height:var(--img-max-height); object-fit:contain; cursor:pointer; display:block;" onclick="previewNoticeImage('/static/notice/{{ img.file_name }}')">
                             <button type="button" onclick="deleteNoticeImage({{ img.id }}, this)" style="position:absolute; top:2px; right:2px; background:rgba(220,53,69,0.85); color:white; border:none; border-radius:50%; width:22px; height:22px; cursor:pointer; font-size:0.7rem; line-height:1; padding:0;">×</button>
                         </div>
                         {% endfor %}
@@ -180,6 +180,8 @@ document.getElementById('editForm').addEventListener('submit', function(e) {
         category: document.getElementById('editCategory').value,
         content: document.getElementById('editContent').value
     };
+    var submitBtn = this.querySelector('button[type=submit]');
+    showBtnLoading(submitBtn, '保存中...');
     fetch('/api/v1/notices/' + id, {
         method: 'PUT',
         headers: {'Content-Type': 'application/json'},
@@ -188,9 +190,9 @@ document.getElementById('editForm').addEventListener('submit', function(e) {
     .then(function(r) { return r.json(); })
     .then(function(res) {
         if (res.success) { location.reload(); }
-        else { alert('保存失败: ' + (res.error || '未知错误')); }
+        else { hideBtnLoading(submitBtn); alert('保存失败: ' + (res.error || '未知错误')); }
     })
-    .catch(function(err) { alert('请求失败: ' + err.message); });
+    .catch(function(err) { hideBtnLoading(submitBtn); alert('请求失败: ' + err.message); });
 });
 
 // 添加通知（RESTful POST）
@@ -201,6 +203,8 @@ document.getElementById('addNoticeForm').addEventListener('submit', function(e) 
         content: document.getElementById('content').value
     };
     if (!data.category || !data.content) { alert('请填写分类和内容'); return; }
+    var submitBtn = this.querySelector('button[type=submit]');
+    showBtnLoading(submitBtn, '添加中...');
     fetch('/api/v1/notices', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -209,34 +213,38 @@ document.getElementById('addNoticeForm').addEventListener('submit', function(e) 
     .then(function(r) { return r.json(); })
     .then(function(res) {
         if (res.success) { location.reload(); }
-        else { alert('添加失败: ' + (res.error || '未知错误')); }
+        else { hideBtnLoading(submitBtn); alert('添加失败: ' + (res.error || '未知错误')); }
     })
-    .catch(function(err) { alert('请求失败: ' + err.message); });
+    .catch(function(err) { hideBtnLoading(submitBtn); alert('请求失败: ' + err.message); });
 });
 
 // 上移 / 下移（RESTful PATCH）
 document.querySelectorAll('.btn-move-up').forEach(function(btn) {
     btn.addEventListener('click', function() {
         var id = this.dataset.id;
+        showBtnLoading(this, '移动中...');
         fetch('/api/v1/notices/' + id + '/move', {
             method: 'PATCH',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({direction: 'up'})
         })
         .then(function(r) { return r.json(); })
-        .then(function(res) { if (res.success) location.reload(); else alert(res.error); });
+        .then(function(res) { if (res.success) location.reload(); else { hideBtnLoading(btn); alert(res.error); } })
+        .catch(function(err) { hideBtnLoading(btn); alert('请求失败: ' + err.message); });
     });
 });
 document.querySelectorAll('.btn-move-down').forEach(function(btn) {
     btn.addEventListener('click', function() {
         var id = this.dataset.id;
+        showBtnLoading(this, '移动中...');
         fetch('/api/v1/notices/' + id + '/move', {
             method: 'PATCH',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({direction: 'down'})
         })
         .then(function(r) { return r.json(); })
-        .then(function(res) { if (res.success) location.reload(); else alert(res.error); });
+        .then(function(res) { if (res.success) location.reload(); else { hideBtnLoading(btn); alert(res.error); } })
+        .catch(function(err) { hideBtnLoading(btn); alert('请求失败: ' + err.message); });
     });
 });
 
@@ -245,10 +253,11 @@ document.querySelectorAll('.btn-delete-notice').forEach(function(btn) {
     btn.addEventListener('click', function() {
         if (!confirm('确定要删除这条通知吗？相关图片也会被删除。')) return;
         var id = this.dataset.id;
+        showBtnLoading(this, '删除中...');
         fetch('/api/v1/notices/' + id, {method: 'DELETE'})
         .then(function(r) { return r.json(); })
-        .then(function(res) { if (res.success) location.reload(); else alert('删除失败: ' + (res.error || '未知错误')); })
-        .catch(function(err) { alert('请求失败: ' + err.message); });
+        .then(function(res) { if (res.success) location.reload(); else { hideBtnLoading(btn); alert('删除失败: ' + (res.error || '未知错误')); } })
+        .catch(function(err) { hideBtnLoading(btn); alert('请求失败: ' + err.message); });
     });
 });
 
@@ -316,16 +325,18 @@ function confirmNoticeUpload() {
     if (!pendingNoticeFile) { alert('请先选择或粘贴图片'); return; }
     var formData = new FormData();
     formData.append('image', pendingNoticeFile);
+    showLoading('上传中...');
     fetch('/api/v1/notice/' + currentNoticePk + '/images', { method: 'POST', body: formData })
     .then(function(r) { return r.json(); })
     .then(function(data) {
         if (data.success) {
             location.reload();
         } else {
+            hideLoading();
             alert('上传失败: ' + (data.error || '未知错误'));
         }
     })
-    .catch(function(err) { alert('请求失败: ' + err.message); });
+    .catch(function(err) { hideLoading(); alert('请求失败: ' + err.message); });
 }
 
 function deleteNoticeImage(imageId, btn) {

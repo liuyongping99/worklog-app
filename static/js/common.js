@@ -80,6 +80,47 @@ function updateNavArrows() {
 document.querySelector('.nav-links')?.addEventListener('scroll', updateNavArrows);
 window.addEventListener('DOMContentLoaded', updateNavArrows);
 window.addEventListener('resize', updateNavArrows);
+// ── 全局 Loading ──
+var _loadingTimer = null;
+function showLoading(msg) {
+    var overlay = document.getElementById('globalLoading');
+    var msgEl = document.getElementById('globalLoadingMsg');
+    if (!overlay) return;
+    msgEl.textContent = msg || '处理中...';
+    overlay.style.display = 'flex';
+    // 超过 15 秒自动隐藏，防止卡死
+    clearTimeout(_loadingTimer);
+    _loadingTimer = setTimeout(function() { hideLoading(); }, 15000);
+}
+function hideLoading() {
+    var overlay = document.getElementById('globalLoading');
+    if (overlay) overlay.style.display = 'none';
+    clearTimeout(_loadingTimer);
+}
+
+// ── 按钮 Loading ──
+var _btnOriginals = new WeakMap();
+function showBtnLoading(btn, label) {
+    if (!btn) return;
+    // 保存原始文本
+    if (!_btnOriginals.has(btn)) {
+        _btnOriginals.set(btn, { html: btn.innerHTML, disabled: btn.disabled });
+    }
+    btn.disabled = true;
+    btn.classList.add('loading');
+    btn.innerHTML = (label || '保存中...');
+}
+function hideBtnLoading(btn) {
+    if (!btn) return;
+    btn.classList.remove('loading');
+    btn.disabled = false;
+    var orig = _btnOriginals.get(btn);
+    if (orig) {
+        btn.innerHTML = orig.html;
+        btn.disabled = orig.disabled;
+    }
+}
+
 function confirmDialog(msg, onConfirm) {
     var d = document.createElement('dialog');
     d.innerHTML = '<p>' + msg + '</p><menu><button value="cancel">取消</button><button value="ok">确定</button></menu>';

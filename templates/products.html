@@ -2,102 +2,98 @@
 
 {% block content %}
 <style>
-.products-page { display: flex; gap: 1rem; min-height: 70vh; }
-
-/* 左侧分类树 */
+:root { --page-accent: #0984e3; --page-accent-bg: #e3f2fd; }
+.products-page { display: flex; gap: var(--space-lg); min-height: 70vh; }
 .products-page .tree-sidebar {
     width: 260px; min-width: 260px;
-    background: #fff; border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-    overflow-y: auto; max-height: 80vh;
-    padding: 0.75rem 0;
+    background: #fff; border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm); overflow-y: auto;
+    max-height: 80vh; padding: var(--space-md) 0;
 }
 .tree-sidebar h3 {
-    padding: 0.5rem 1rem; margin: 0;
-    font-size: 0.95rem; color: #2d3436;
-    border-bottom: 1px solid #f1f3f5;
+    padding: var(--space-sm) var(--space-lg); margin: 0;
+    font-size: var(--font-md); color: var(--gray-900);
+    border-bottom: 1px solid var(--gray-100);
 }
 .tree-sidebar .tree { list-style: none; padding: 0; margin: 0; }
 .tree-sidebar .tree ul { list-style: none; padding-left: 1.2rem; }
 .tree-sidebar .tree li { margin: 0; }
 .tree-sidebar .tree .node {
-    display: flex; align-items: center; gap: 0.25rem;
-    padding: 0.35rem 0.75rem; cursor: pointer;
-    font-size: 0.88rem; color: #555; border-radius: 4px;
-    transition: background 0.15s;
+    display: flex; align-items: center; gap: var(--space-xs);
+    padding: 0.35rem var(--space-md); cursor: pointer;
+    font-size: var(--font-sm); color: var(--gray-800);
+    border-radius: var(--radius-sm); transition: background 0.15s;
     user-select: none;
 }
-.tree-sidebar .tree .node:hover { background: #f1f3f5; }
-.tree-sidebar .tree .node.active { background: #e3f2fd; color: #0984e3; font-weight: 600; }
+.tree-sidebar .tree .node:hover { background: var(--gray-100); }
+.tree-sidebar .tree .node.active { background: var(--page-accent-bg); color: var(--page-accent); font-weight: 600; }
 .tree-sidebar .tree .toggle {
     width: 16px; text-align: center; flex-shrink: 0;
-    font-size: 0.7rem; color: #b2bec3; transition: transform 0.2s;
+    font-size: var(--font-xs); color: var(--gray-500); transition: transform 0.2s;
 }
 .tree-sidebar .tree .toggle.expanded { transform: rotate(90deg); }
 .tree-sidebar .tree .toggle.leaf { visibility: hidden; }
-
-/* 右侧主区域 */
 .products-page .main-area { flex: 1; min-width: 0; }
 .main-area .toolbar {
     display: flex; align-items: center; justify-content: space-between;
-    margin-bottom: 1rem;
+    margin-bottom: var(--space-lg);
 }
-.main-area .cat-title { font-size: 1.1rem; font-weight: 600; color: #2d3436; }
-
-/* 产品表格 */
-.product-table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
-.product-table th { background: #f8f9fa; padding: 0.55rem 0.65rem; font-size: 0.82rem; color: #636e72; text-align: left; border-bottom: 2px solid #e9ecef; white-space: nowrap; }
-.product-table td { padding: 0.5rem 0.65rem; font-size: 0.88rem; border-bottom: 1px solid #f1f3f5; }
-.product-table tr:hover td { background: #f8f9fa; }
-.product-table .btn-sm {
-    padding: 0.2rem 0.5rem; font-size: 0.75rem; border-radius: 4px; border: none; cursor: pointer;
-}
-
-/* 弹窗 */
+.main-area .cat-title { font-size: var(--font-lg); font-weight: 600; color: var(--gray-900); }
+.product-table { width: 100%; border-collapse: collapse; background: #fff; border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-sm); }
+.product-table th { background: var(--gray-50); padding: 0.55rem 0.65rem; font-size: var(--font-sm); color: var(--gray-700); text-align: left; border-bottom: 2px solid var(--gray-200); white-space: nowrap; }
+.product-table td { padding: 0.5rem 0.65rem; font-size: var(--font-sm); border-bottom: 1px solid var(--gray-100); }
+.product-table tr:hover td { background: var(--gray-50); }
+.product-table .btn-sm { padding: 0.2rem 0.5rem; font-size: var(--font-xs); border-radius: var(--radius-sm); border: none; cursor: pointer; }
 .modal-overlay {
     display: none; position: fixed; top:0; left:0; width:100%; height:100%;
     background: rgba(0,0,0,0.5); z-index: 2000; justify-content: center; align-items: center;
 }
 .modal-overlay.show { display: flex; }
 .modal-dialog {
-    background: #fff; border-radius: 12px; padding: 1.5rem; width: 640px; max-width: 95vw;
-    max-height: 90vh; overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    background: #fff; border-radius: var(--radius-xl); padding: var(--space-xl); width: 640px; max-width: 95vw;
+    max-height: 90vh; overflow-y: auto; box-shadow: var(--shadow-xl);
 }
-.modal-dialog h3 { margin: 0 0 1rem 0; color: #2d3436; font-size: 1.1rem; }
-.modal-dialog .form-grid {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;
-}
+.modal-dialog h3 { margin: 0 0 var(--space-lg) 0; color: var(--gray-900); font-size: var(--font-lg); }
+.modal-dialog .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-md); }
 .modal-dialog .form-grid .full { grid-column: 1 / -1; }
-.modal-dialog label { display: block; font-size: 0.82rem; color: #636e72; margin-bottom: 0.2rem; }
+.modal-dialog label { display: block; font-size: var(--font-sm); color: var(--gray-700); margin-bottom: 0.2rem; }
 .modal-dialog input, .modal-dialog select {
-    width: 100%; padding: 0.4rem 0.5rem; border: 1px solid #dfe6e9; border-radius: 6px;
-    font-size: 0.85rem; box-sizing: border-box;
+    width: 100%; padding: 0.4rem 0.5rem; border: 1px solid var(--gray-300); border-radius: var(--radius-md);
+    font-size: var(--font-sm); box-sizing: border-box;
 }
-.modal-dialog input:focus, .modal-dialog select:focus { outline: none; border-color: #0984e3; }
-.modal-dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem; }
-
-.empty-state { text-align: center; padding: 3rem; color: #b2bec3; }
+.modal-dialog input:focus, .modal-dialog select:focus { outline: none; border-color: var(--page-accent); }
+.modal-dialog .actions { display: flex; gap: var(--space-sm); justify-content: flex-end; margin-top: var(--space-lg); }
+.empty-state { text-align: center; padding: var(--space-2xl); color: var(--gray-500); }
 </style>
 
 <div class="products-page">
-    <!-- 左侧分类树 -->
+    <!-- 左侧分类树（懒加载：初始只显示前 2 层，深层按需 fetch） -->
     <div class="tree-sidebar">
         <h3>📂 商品分类</h3>
         <ul class="tree" id="categoryTree">
-            {% macro render_tree(nodes) %}
-                {% for node in nodes %}
-                <li>
-                    <div class="node" data-cat-id="{{ node.id }}" data-has-children="{{ '1' if node.children else '0' }}">
-                        <span class="toggle {{ 'leaf' if not node.children else 'expanded' }}">▶</span>
-                        <span class="name">{{ node.category_name }}</span>
-                    </div>
-                    {% if node.children %}
-                    <ul style="{{ 'display:none;' if node.level >= 2 }}">{{ render_tree(node.children) }}</ul>
-                    {% endif %}
-                </li>
-                {% endfor %}
-            {% endmacro %}
-            {{ render_tree(categories) }}
+            {% for root in categories %}
+            <li>
+                <div class="node" data-cat-id="{{ root.id }}" data-level="{{ root.level }}">
+                    <span class="toggle expanded">▶</span>
+                    <span class="name">{{ root.category_name }}</span>
+                </div>
+                <ul>
+                    {% for child in root.children %}
+                    <li>
+                        <div class="node" data-cat-id="{{ child.id }}" data-level="{{ child.level }}"
+                             data-has-children="{{ '1' if child.has_children else '0' }}">
+                            <span class="toggle {{ 'leaf' if not child.has_children else '' }}">▶</span>
+                            <span class="name">{{ child.category_name }}</span>
+                            {% if child.has_children %}<span class="lazy-badge" style="font-size:0.6rem;color:#b2bec3;margin-left:0.2rem;">+</span>{% endif %}
+                        </div>
+                        {% if child.has_children %}
+                        <ul style="display:none;"></ul>
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+            </li>
+            {% endfor %}
         </ul>
     </div>
 
@@ -161,26 +157,71 @@
 var currentCategoryId = null;
 
 // ── 分类树交互 ──
+var _loadedChildren = {};
+function _toggleNode(node, show) {
+    var badge = node.querySelector('.lazy-badge');
+    if (badge) {
+        badge.textContent = show ? '…' : '+';
+        badge.style.color = show ? '#0984e3' : '#b2bec3';
+    }
+}
+function _renderCategoryChildren(ul, children) {
+    children.forEach(function(c) {
+        var li = document.createElement('li');
+        var hasKids = c.has_children;
+        li.innerHTML =
+            '<div class="node" data-cat-id="' + c.id + '" data-level="' + c.level + '"' +
+            ' data-has-children="' + (hasKids ? '1' : '0') + '">' +
+            '<span class="toggle ' + (hasKids ? '' : 'leaf') + '">▶</span>' +
+            '<span class="name">' + c.category_name.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</span>' +
+            (hasKids ? '<span class="lazy-badge" style="font-size:0.6rem;color:#b2bec3;margin-left:0.2rem;">+</span>' : '') +
+            '</div>';
+        if (hasKids) {
+            var subUl = document.createElement('ul');
+            subUl.style.display = 'none';
+            li.appendChild(subUl);
+        }
+        ul.appendChild(li);
+    });
+}
 document.getElementById('categoryTree').addEventListener('click', function(e) {
     var node = e.target.closest('.node');
     if (!node) return;
     var toggle = node.querySelector('.toggle');
+    var catId = node.getAttribute('data-cat-id');
 
-    // 点击 toggle 展开/折叠
     if (e.target === toggle && !toggle.classList.contains('leaf')) {
         var ul = node.parentElement.querySelector(':scope > ul');
-        if (ul) {
-            var show = ul.style.display === 'none';
-            ul.style.display = show ? '' : 'none';
-            toggle.classList.toggle('expanded', show);
+        if (!ul) return;
+
+        if (ul.style.display === 'none') {
+            var hasChildren = node.getAttribute('data-has-children') === '1';
+            if (hasChildren && !_loadedChildren[catId]) {
+                _toggleNode(node, true);
+                fetch('/api/v1/product-categories/' + catId + '/children')
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        _toggleNode(node, false);
+                        if (data.success && data.children) {
+                            _loadedChildren[catId] = data.children;
+                            _renderCategoryChildren(ul, data.children);
+                            ul.style.display = '';
+                            toggle.classList.add('expanded');
+                        }
+                    })
+                    .catch(function() { _toggleNode(node, false); });
+                return;
+            }
+            ul.style.display = '';
+            toggle.classList.add('expanded');
+        } else {
+            ul.style.display = 'none';
+            toggle.classList.remove('expanded');
         }
         return;
     }
 
-    // 选中分类
-    var catId = node.getAttribute('data-cat-id');
-    var catName = node.querySelector('.name').textContent;
-    selectCategory(catId, catName);
+    selectCategory(catId, node.querySelector('.name').textContent);
 });
 
 // 选中分类并加载产品
@@ -196,11 +237,33 @@ function selectCategory(catId, catName) {
 }
 
 function loadProducts(catId) {
+    // 显示骨架屏
+    var tbody = document.getElementById('productTbody');
+    var empty = document.getElementById('emptyState');
+    var table = document.getElementById('productTable');
+    empty.style.display = 'none';
+    table.style.display = '';
+    tbody.innerHTML = '';
+    for (var i = 0; i < 5; i++) {
+        var skel = document.createElement('tr');
+        skel.className = 'skeleton-row-tr';
+        skel.innerHTML = '<td colspan="9"><div class="skeleton-row">' +
+            '<div class="skeleton-cell" style="flex:1;"></div>' +
+            '<div class="skeleton-cell" style="flex:1.5;"></div>' +
+            '<div class="skeleton-cell" style="flex:0.8;"></div>' +
+            '<div class="skeleton-cell" style="flex:0.8;"></div>' +
+            '<div class="skeleton-cell" style="flex:0.6;"></div>' +
+            '<div class="skeleton-cell" style="flex:0.6;"></div>' +
+            '<div class="skeleton-cell" style="flex:0.8;"></div>' +
+            '<div class="skeleton-cell" style="flex:0.8;"></div>' +
+            '<div class="skeleton-cell" style="flex:0.4;"></div>' +
+            '</div></td>';
+        tbody.appendChild(skel);
+    }
+
     fetch('/api/v1/products?category_id=' + catId)
         .then(function(r) { return r.json(); })
         .then(function(data) {
-            var tbody = document.getElementById('productTbody');
-            var empty = document.getElementById('emptyState');
             tbody.innerHTML = '';
             if (!data.products || data.products.length === 0) {
                 empty.style.display = 'block';
@@ -213,6 +276,11 @@ function loadProducts(catId) {
                 var tr = buildProductRow(p);
                 tbody.appendChild(tr);
             });
+        })
+        .catch(function(err) {
+            tbody.innerHTML = '';
+            empty.style.display = 'block';
+            empty.querySelector('p').textContent = '加载失败，请重试';
         });
 }
 
@@ -301,6 +369,8 @@ function saveProduct() {
 
     var url = pid ? '/api/v1/products/' + pid : '/api/v1/products';
     var method = pid ? 'PUT' : 'POST';
+    var saveBtn = document.querySelector('#productModal .btn-primary');
+    showBtnLoading(saveBtn, '保存中...');
 
     fetch(url, {
         method: method,
@@ -309,6 +379,7 @@ function saveProduct() {
     })
     .then(function(r) { return r.json(); })
     .then(function(result) {
+        hideBtnLoading(saveBtn);
         if (result.success) {
             closeProductModal();
             // 刷新当前分类的产品列表
@@ -331,29 +402,44 @@ function saveProduct() {
             alert('保存失败: ' + (result.error || '未知错误'));
         }
     })
-    .catch(function(err) { alert('请求失败: ' + err.message); });
+    .catch(function(err) {
+        hideBtnLoading(saveBtn);
+        alert('请求失败: ' + err.message);
+    });
 }
 
 // ── 删除产品 ──
 function deleteProduct(pid, btn) {
     if (!confirm('确定删除该产品吗？')) return;
+    showBtnLoading(btn, '删除中...');
     fetch('/api/v1/products/' + pid, {method: 'DELETE'})
         .then(function(r) { return r.json(); })
         .then(function(data) {
+            hideBtnLoading(btn);
             if (data.success) {
                 var tr = btn.closest('tr');
-                if (tr) tr.remove();
-                // 检查是否为空
-                var tbody = document.getElementById('productTbody');
-                if (tbody.querySelectorAll('tr').length === 0) {
-                    document.getElementById('emptyState').style.display = 'block';
-                    document.getElementById('productTable').style.display = 'none';
+                if (tr) {
+                    // 淡出动画
+                    tr.style.opacity = '0';
+                    tr.style.transition = 'opacity 0.3s';
+                    setTimeout(function() { tr.remove(); }, 300);
                 }
+                // 检查是否为空
+                setTimeout(function() {
+                    var tbody = document.getElementById('productTbody');
+                    if (tbody.querySelectorAll('tr').length === 0) {
+                        document.getElementById('emptyState').style.display = 'block';
+                        document.getElementById('productTable').style.display = 'none';
+                    }
+                }, 350);
             } else {
                 alert('删除失败: ' + (data.error || '未知错误'));
             }
         })
-        .catch(function(err) { alert('请求失败: ' + err.message); });
+        .catch(function(err) {
+            hideBtnLoading(btn);
+            alert('请求失败: ' + err.message);
+        });
 }
 
 // ── 遮罩点击关闭 ──
@@ -361,30 +447,13 @@ document.getElementById('productModal').addEventListener('click', function(e) {
     if (e.target === this) closeProductModal();
 });
 
-// ── 默认选中 PE板 (category 166) ──
+// ── 初始化：选中根节点，展开到第 2 层 ──
 (function init() {
-    var peNode = document.querySelector('#categoryTree .node[data-cat-id="166"]');
-    if (peNode) {
-        // 展开祖先路径
-        var li = peNode.closest('li');
-        while (li) {
-            var ul = li.parentElement;
-            if (ul && ul.tagName === 'UL') {
-                ul.style.display = '';
-                var toggle = ul.previousElementSibling ? ul.previousElementSibling.querySelector('.toggle') : null;
-                if (!toggle) {
-                    var parentLi = ul.closest('li');
-                    if (parentLi) {
-                        toggle = parentLi.querySelector(':scope > .node > .toggle');
-                    }
-                }
-                if (toggle) toggle.classList.add('expanded');
-            }
-            li = ul ? ul.closest('li') : null;
-        }
-        peNode.click();
+    var rootNode = document.querySelector('#categoryTree .node[data-level="1"]');
+    if (rootNode) {
+        // 根节点已展开（level-2 已在 DOM 中），直接选中
+        rootNode.click();
     } else {
-        // fallback: load all products
         loadAllProducts();
     }
 })();

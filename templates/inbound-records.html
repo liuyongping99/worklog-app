@@ -2,72 +2,33 @@
 
 {% block content %}
 <style>
-.inbound-page .card-title { color: #00b894; border-bottom-color: #d4f5e9; }
-.inbound-page .date-group { margin-bottom: 2rem; border-bottom: 1px dashed #dfe6e9; padding-bottom: 0.5rem; }
+/* ── 入库页专属色：成功绿 ── */
+:root { --page-accent: #00b894; --page-accent-bg: #d4f5e9; --page-accent-light-bg: #f8fff8; }
+.inbound-page .card-title { color: var(--page-accent); border-bottom-color: var(--page-accent-bg); }
+.inbound-page .date-group { margin-bottom: var(--space-2xl); border-bottom: 1px dashed var(--gray-300); padding-bottom: var(--space-sm); }
 .inbound-page .date-group[data-locked="1"] .lock-hide { display: none !important; }
 .inbound-page .date-group[data-locked="1"] .lock-show { display: inline-block !important; }
 .inbound-page .date-group[data-locked="0"] .lock-hide { display: inline-block !important; }
 .inbound-page .date-group[data-locked="0"] .lock-show { display: none !important; }
-.inbound-page .group-header {
-    display: flex; align-items: center; gap: 0.75rem;
-    padding: 0.5rem 0.8rem; background: linear-gradient(135deg, #f8fff8 0%, #e8f5e9 100%);
-    border-left: 4px solid #00b894; border-radius: 6px;
-    margin-bottom: 0.75rem;
-}
-.inbound-page .group-date {
-    font-size: 1rem; font-weight: 700; color: #2d3436;
-}
-.inbound-page .group-supplier {
-    font-size: 0.95rem; color: #00b894; font-weight: 600;
-    padding: 0.2rem 0.6rem; background: #d4f5e9; border-radius: 12px;
-}
-.inbound-page .record-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-.inbound-page .record-table th {
-    background: #f8f9fa; padding: 0.5rem 0.75rem;
-    text-align: left; font-size: 0.8rem; color: #868e96;
-    border-bottom: 2px solid #e9ecef;
-}
-.inbound-page .record-table td {
-    padding: 0.6rem 0.75rem; border-bottom: 1px solid #f1f3f5;
-    font-size: 0.95rem; vertical-align: middle;
-}
-.inbound-page .record-table tr:hover td { background: #f8fff8; }
-.inbound-page .record-table tr.row-warn td { background: #ffdddd; }
-.inbound-page .record-table tr.row-warn td:first-child { border-left: 4px solid #e74c3c; }
-.inbound-page .record-table tr.row-warn:hover td { background: #ffcccc; }
-.inbound-page .record-table tr.row-info td { background: #ffebee; }
-.inbound-page .record-table tr.row-info td:first-child { border-left: 4px solid #ef9a9a; }
-.inbound-page .record-table tr.row-info:hover td { background: #ffcdd2; }
+.inbound-page .group-header { background: linear-gradient(135deg, #f8fff8 0%, #e8f5e9 100%); }
+.inbound-page .group-supplier { color: var(--page-accent); background: var(--page-accent-bg); }
+.inbound-page .record-table { table-layout: fixed; }
+.inbound-page .record-table tr:hover td { background: var(--page-accent-light-bg); }
 /* 订单备注弹框 */
 .note-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1020; justify-content: center; align-items: center; }
 .note-modal.show { display: flex; }
-.note-modal .note-dialog { background: white; padding: 1.5rem; border-radius: 12px; min-width: 420px; max-width: 600px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
-.note-modal .note-dialog h3 { margin: 0 0 0.5rem; color: #2d3436; font-size: 1.1rem; }
-.note-modal .note-dialog .order-info { color: #6c5ce7; font-size: 0.85rem; margin-bottom: 0.75rem; }
-.note-modal .note-dialog textarea { width: 100%; min-height: 120px; padding: 0.6rem; border: 1px solid #dfe6e9; border-radius: 6px; font-size: 0.9rem; font-family: inherit; box-sizing: border-box; resize: vertical; }
-.note-modal .note-dialog textarea:focus { outline: none; border-color: #6c5ce7; }
-.note-modal .note-dialog .actions { display: flex; gap: 0.75rem; justify-content: flex-end; margin-top: 1rem; }
-.inbound-page .qty-badge {
-    background: #d4f5e9; color: #00b894;
-    padding: 0.2rem 0.6rem; border-radius: 12px;
-    font-weight: 700; font-size: 0.85rem;
-    white-space: nowrap;
-}
-.inbound-page .unit-badge {
-    background: #f0f0f0; color: #555;
-    padding: 0.2rem 0.5rem; border-radius: 8px;
-    font-size: 0.82rem; font-weight: 600;
-    white-space: nowrap;
-}
-.inbound-page .quick-add-row td {
-    width: 100%;
-    display: table-cell;
-}
+.note-modal .note-dialog { background: white; padding: var(--space-xl); border-radius: var(--radius-xl); min-width: 420px; max-width: 600px; box-shadow: var(--shadow-xl); }
+.note-modal .note-dialog h3 { margin: 0 0 var(--space-sm); color: var(--gray-900); font-size: var(--font-lg); }
+.note-modal .note-dialog .order-info { color: var(--color-purple); font-size: var(--font-sm); margin-bottom: var(--space-md); }
+.note-modal .note-dialog textarea { width: 100%; min-height: 120px; padding: 0.6rem; border: 1px solid var(--gray-300); border-radius: var(--radius-md); font-size: var(--font-base); font-family: inherit; box-sizing: border-box; resize: vertical; }
+.note-modal .note-dialog textarea:focus { outline: none; border-color: var(--color-purple); }
+.note-modal .note-dialog .actions { display: flex; gap: var(--space-md); justify-content: flex-end; margin-top: var(--space-lg); }
+.inbound-page .quick-add-row td { width: 100%; display: table-cell; }
 .inbound-page .quick-add {
     display: grid;
     grid-template-columns: 150px 120px 100px 70px 1fr auto;
-    gap: 0.5rem; align-items: end;
-    padding: 0.75rem; background: #fafafa;
+    gap: var(--space-sm); align-items: end;
+    padding: var(--space-md); background: #fafafa;
     border-radius: 6px; margin-top: 0.5rem;
     width: 100%;
 }
@@ -640,6 +601,7 @@
                     <option value="支">支</option><option value="kg">kg</option><option value="y">y</option>
                     <option value="桶">桶</option><option value="张">张</option><option value="件">件</option>
                     <option value="箱">箱</option><option value="卷">卷</option><option value="块">块</option>
+                    <option value="令">令</option>
                 </select>
                 <input type="text" name="remark" placeholder="备注" style="flex:14;min-width:0;padding:0.4rem 0.5rem;border:1px solid #dfe6e9;border-radius:4px;font-size:0.85rem;">
                 <button type="submit" style="margin-left:auto;flex-shrink:0;background:#00b894;color:#fff;border:none;padding:0.4rem 1.2rem;border-radius:4px;cursor:pointer;font-size:0.85rem;font-weight:600;">➕ 添加</button>
@@ -1325,6 +1287,7 @@ setTimeout(() => {
                     unit: unit,
                     remark: inputs[4].value
                 };
+                showBtnLoading(btn, '保存中...');
                 fetch('/api/v1/inbound-orders/records/' + recordId, {
                     method: 'PUT',
                     headers: {'Content-Type': 'application/json'},
@@ -1332,6 +1295,7 @@ setTimeout(() => {
                 })
                 .then(function(res) { return res.json(); })
                 .then(function(result) {
+                    hideBtnLoading(btn);
                     if (result.success) {
                         var r = result.record;
                         var newMismatch = checkInboundMismatch(r.remark || '', r.quantity, r.product_name, r.specification || '');
@@ -1352,6 +1316,7 @@ setTimeout(() => {
                         alert('保存失败：' + (result.error || ''));
                     }
                 }).catch(function(err) {
+                    hideBtnLoading(btn);
                     console.error('保存编辑错误:', err);
                     alert('请求失败：' + err.message);
                 });
@@ -1373,7 +1338,7 @@ setTimeout(() => {
             // 数量
             tds[2].innerHTML = '<input type="number" class="form-control form-control-sm edit-input" style="width:100px;" value="' + vals[2] + '">';
             // 单位（下拉框）
-            var unitOpts = ['支','kg','y','桶','张','件','箱','卷','块'];
+            var unitOpts = ['支','kg','y','桶','张','件','箱','卷','块','令'];
             var unitHtml = '<select class="form-control form-control-sm edit-input" style="width:70px;">';
             unitOpts.forEach(function(u) {
                 unitHtml += '<option value="' + u + '"' + (u === vals[3] ? ' selected' : '') + '>' + u + '</option>';
@@ -1437,9 +1402,11 @@ setTimeout(() => {
     // ── 删除入库订单 ──
     function deleteInboundOrder(orderId) {
         if (!confirm('确定要删除这个入库单及所有明细吗？')) return;
+        showLoading('删除中...');
         fetch('/api/v1/inbound-orders/' + orderId, {method: 'DELETE'})
             .then(function(r) { return r.json(); })
             .then(function(data) {
+                hideLoading();
                 if (data.success) {
                     var section = document.querySelector('.date-group[data-order-id="' + orderId + '"]');
                     if (section) section.remove();
@@ -1448,6 +1415,7 @@ setTimeout(() => {
                 }
             })
             .catch(function(err) {
+                hideLoading();
                 alert('请求失败: ' + err.message);
             });
     }
@@ -1455,9 +1423,11 @@ setTimeout(() => {
     // ── 删除明细 ──
     function deleteInboundRecord(recordId, btn) {
         if (!confirm('确定要删除这个明细吗？')) return;
+        showBtnLoading(btn, '删除中...');
         fetch('/api/v1/inbound-orders/records/' + recordId, {method: 'DELETE'})
             .then(function(r) { return r.json(); })
             .then(function(data) {
+                hideBtnLoading(btn);
                 if (data.success) {
                     var tr = btn.closest('tr');
                     var dateGroup = tr.closest('.date-group');
@@ -1468,6 +1438,7 @@ setTimeout(() => {
                 }
             })
             .catch(function(err) {
+                hideBtnLoading(btn);
                 alert('请求失败: ' + err.message);
             });
     }
@@ -1681,7 +1652,7 @@ setTimeout(() => {
                 tds[0].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:80px;" value="' + vals[0].replace(/"/g, '&quot;') + '">';
                 tds[1].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + vals[1].replace(/"/g, '&quot;') + '">';
                 tds[2].innerHTML = '<input type="number" class="form-control form-control-sm edit-input" style="width:100px;" value="' + vals[2] + '">';
-                var unitOpts = ['支','kg','y','桶','张','件','箱','卷','块'];
+                var unitOpts = ['支','kg','y','桶','张','件','箱','卷','块','令'];
                 var unitHtml = '<select class="form-control form-control-sm edit-input" style="width:70px;">';
                 unitOpts.forEach(function(u) { unitHtml += '<option value="' + u + '"' + (u === vals[3] ? ' selected' : '') + '>' + u + '</option>'; });
                 unitHtml += '</select>';

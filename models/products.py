@@ -118,7 +118,10 @@ class ProductCategory:
     def get_children(parent_id):
         conn = get_db()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM product_categories WHERE parent_id = ? ORDER BY sort_order, id", (parent_id,))
+        if parent_id is None:
+            cursor.execute("SELECT * FROM product_categories WHERE parent_id IS NULL ORDER BY sort_order, id")
+        else:
+            cursor.execute("SELECT * FROM product_categories WHERE parent_id = ? ORDER BY sort_order, id", (parent_id,))
         rows = cursor.fetchall()
         conn.close()
         return [dict(r) for r in rows]
