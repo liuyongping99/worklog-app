@@ -72,6 +72,7 @@ def create_app():
     from blueprints.shipping import bp as shipping_bp
     from blueprints.inbound import bp as inbound_bp
     from blueprints.loading import bp as loading_bp
+    from blueprints.search import bp as search_bp
 
     app.register_blueprint(upload_bp)
     app.register_blueprint(basic_records_bp)
@@ -81,6 +82,7 @@ def create_app():
     app.register_blueprint(shipping_bp)
     app.register_blueprint(inbound_bp)
     app.register_blueprint(loading_bp)
+    app.register_blueprint(search_bp)
 
     return app
 

@@ -11,6 +11,7 @@ from .orders import (
     ShippingOrder, ShippingRecord, ShippingImage,
     InboundOrder, InboundRecord, InboundImage,
     LoadingOrder, LoadingOrderRecord, LoadingOrderImage,
+    UnifiedSearch,
 )
 from .stock import StockOutItem
 from .products import ProductUnit, ProductCategory, Product
@@ -23,6 +24,7 @@ __all__ = [
     'ShippingOrder', 'ShippingRecord', 'ShippingImage',
     'InboundOrder', 'InboundRecord', 'InboundImage',
     'LoadingOrder', 'LoadingOrderRecord', 'LoadingOrderImage',
+    'UnifiedSearch',
     'StockOutItem',
     'ProductUnit', 'ProductCategory', 'Product',
     'AuditLog',

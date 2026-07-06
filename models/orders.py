@@ -1136,7 +1136,114 @@ class LoadingOrderImage:
             order_pk = item['order_pk']
             if order_pk not in result:
                 result[order_pk] = []
-            result[order_pk].append(item)
+                result[order_pk].append(item)
         return result
+
+
+class UnifiedSearch:
+    """综合查找：跨出货/入库/装柜三个订单类型的明细搜索。"""
+
+    @staticmethod
+    def _build_where(table_alias, start_date, end_date, customer, product_name, specification):
+        """为单个订单类型构建 WHERE 子句和参数列表。"""
+        conditions = []
+        params = []
+        if start_date:
+            conditions.append(f"{table_alias}.date >= ?")
+            params.append(start_date)
+        if end_date:
+            conditions.append(f"{table_alias}.date <= ?")
+            params.append(end_date)
+        if customer:
+            # 入库表用 supplier，出货/装柜用 customer
+            col = 'supplier' if table_alias == 'io' else 'customer'
+            conditions.append(f"{table_alias}.{col} LIKE ?")
+            params.append(f"%{customer}%")
+        if product_name:
+            conditions.append("r.product_name LIKE ?")
+            params.append(f"%{product_name}%")
+        if specification:
+            # 同时模糊匹配明细表 specification 和 product 表 model（型号）字段
+            conditions.append("(r.specification LIKE ? OR p.model LIKE ?)")
+            params.append(f"%{specification}%")
+            params.append(f"%{specification}%")
+        where_sql = "WHERE " + " AND ".join(conditions) if conditions else ""
+        return where_sql, params
+
+    @staticmethod
+    def search(scope, start_date=None, end_date=None, customer=None, product_name=None, specification=None):
+        """
+        跨表搜索订单明细。
+
+        Args:
+            scope: list[str] — 包含 'shipping' / 'inbound' / 'loading' 中的一个或多个
+            start_date, end_date: str 'YYYY-MM-DD'
+            customer, product_name, specification: str — 支持 % 模糊匹配
+
+        Returns:
+            list[dict] — 每条记录包含统一字段：type, order_id, date, customer, order_num,
+                         is_locked, record_id, product_name, specification, quantity, unit, remark, sort_order
+        """
+        conn = get_db()
+        cursor = conn.cursor()
+        results = []
+
+        # ── 出货 ──
+        if 'shipping' in scope:
+            where_sql, params = UnifiedSearch._build_where(
+                'so', start_date, end_date, customer, product_name, specification
+            )
+            cursor.execute(f'''
+                SELECT 'shipping' as type, so.id as order_id, so.date, so.customer, so.order_num, so.is_locked,
+                       r.id as record_id, r.product_name, r.specification, r.quantity, r.unit, r.remark, r.sort_order
+                FROM shipping_records r
+                JOIN shipping_orders so ON r.order_pk = so.id
+                LEFT JOIN product p ON r.product_name = p.product_name AND r.specification = p.specification
+                {where_sql}
+                ORDER BY so.date DESC, so.customer ASC, so.order_num ASC, r.sort_order
+            ''', params)
+            results.extend([dict(row) for row in cursor.fetchall()])
+
+        # ── 入库 ──
+        if 'inbound' in scope:
+            where_sql, params = UnifiedSearch._build_where(
+                'io', start_date, end_date, customer, product_name, specification
+            )
+            cursor.execute(f'''
+                SELECT 'inbound' as type, io.id as order_id, io.date, io.supplier as customer, io.order_num, io.is_locked,
+                       r.id as record_id, r.product_name, r.specification, r.quantity, r.unit, r.remark, r.sort_order
+                FROM inbound_records r
+                JOIN inbound_orders io ON r.order_pk = io.id
+                LEFT JOIN product p ON r.product_name = p.product_name AND r.specification = p.specification
+                {where_sql}
+                ORDER BY io.date DESC, io.supplier ASC, io.order_num ASC, r.sort_order
+            ''', params)
+            results.extend([dict(row) for row in cursor.fetchall()])
+
+        # ── 装柜 ──
+        if 'loading' in scope:
+            where_sql, params = UnifiedSearch._build_where(
+                'lo', start_date, end_date, customer, product_name, specification
+            )
+            cursor.execute(f'''
+                SELECT 'loading' as type, lo.id as order_id, lo.date, lo.customer, lo.order_num, lo.is_locked,
+                       r.id as record_id, r.product_name, r.specification, r.quantity, r.unit, r.remark, r.sort_order
+                FROM loading_order_records r
+                JOIN loading_orders lo ON r.order_pk = lo.id
+                LEFT JOIN product p ON r.product_name = p.product_name AND r.specification = p.specification
+                {where_sql}
+                ORDER BY lo.date DESC, lo.customer ASC, lo.order_num ASC, r.sort_order
+            ''', params)
+            results.extend([dict(row) for row in cursor.fetchall()])
+
+        conn.close()
+
+        # 全局排序：日期倒序 → 类型 → 客户 → 订单号 → 明细排序
+        results.sort(
+            key=lambda x: (x['date'], x['type'], x['customer'], x['order_num'], x['sort_order']),
+            reverse=True
+        )
+        return results
+
 
 

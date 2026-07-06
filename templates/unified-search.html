@@ -1,0 +1,235 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+.search-page .card-title { color: var(--color-purple); border-bottom-color: #e8e0ff; }
+.search-page .search-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-lg); }
+.search-page .search-form .form-group { margin-bottom: 0; }
+.search-page .search-form .form-group label { font-size: var(--font-sm); font-weight: 600; color: var(--gray-700); margin-bottom: var(--space-xs); display: block; }
+.search-page .search-form .form-group input,
+.search-page .search-form .form-group select { width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--gray-300); border-radius: var(--radius-md); font-size: var(--font-base); background: #fff; box-sizing: border-box; }
+.search-page .search-form .form-group input:focus { outline: none; border-color: var(--color-purple); box-shadow: 0 0 0 2px rgba(108,92,231,0.1); }
+.search-page .scope-group { display: flex; gap: var(--space-md); flex-wrap: wrap; align-items: center; }
+.search-page .scope-group label { display: flex; align-items: center; gap: var(--space-xs); cursor: pointer; font-size: var(--font-base); color: var(--gray-800); font-weight: 500; padding: 0.35rem 0.6rem; border-radius: var(--radius-md); border: 1px solid var(--gray-300); background: var(--gray-50); transition: all 0.15s; }
+.search-page .scope-group label:hover { border-color: var(--color-purple); background: #f0edff; }
+.search-page .scope-group input[type="checkbox"] { width: 1rem; height: 1rem; accent-color: var(--color-purple); cursor: pointer; }
+.search-page .scope-group input:checked + span { color: var(--color-purple); font-weight: 600; }
+.search-page .scope-group label:has(input:checked) { border-color: var(--color-purple); background: #f0edff; }
+.search-page .inline-row { display: flex; gap: var(--space-md); }
+.search-page .inline-row .form-group { flex: 1; min-width: 0; }
+.search-page .btn-search { background: var(--color-purple); color: white; border: none; border-radius: var(--radius-md); padding: 0.6rem 1.5rem; font-size: var(--font-base); font-weight: 600; cursor: pointer; transition: background 0.2s; display: inline-flex; align-items: center; gap: 0.5rem; }
+.search-page .btn-search:hover { background: #5b4bc4; }
+.search-page .btn-search:disabled { background: var(--gray-400); cursor: not-allowed; }
+.search-page .btn-reset { background: linear-gradient(135deg, #fff7ed, #fff1f2); color: #c2410c; border: 1px solid #fdba74; border-radius: var(--radius-md); padding: 0.6rem 1.2rem; font-size: var(--font-base); font-weight: 600; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; gap: 0.4rem; margin-left: 0.5rem; box-shadow: 0 1px 3px rgba(251,146,60,0.15); }
+.search-page .btn-reset:hover { background: linear-gradient(135deg, #ffedd5, #ffe4e6); color: #9a3412; border-color: #f97316; box-shadow: 0 3px 8px rgba(251,146,60,0.25); transform: translateY(-1px); }
+.search-page .btn-reset:active { transform: scale(0.97); box-shadow: none; }
+.search-page .btn-reset:focus-visible { outline: 2px solid var(--color-purple); outline-offset: 2px; }
+.search-page .results-area { margin-top: var(--space-2xl); }
+.search-page .results-summary { color: var(--gray-600); font-size: var(--font-sm); margin-bottom: var(--space-md); }
+.search-page .record-table { width: 100%; border-collapse: collapse; font-size: var(--font-base); }
+.search-page .record-table th { background: var(--gray-100); padding: 0.6rem 0.75rem; text-align: left; font-weight: 600; color: var(--gray-700); border-bottom: 2px solid var(--gray-300); white-space: nowrap; }
+.search-page .record-table td { padding: 0.55rem 0.75rem; border-bottom: 1px solid var(--gray-200); color: var(--gray-800); }
+.search-page .record-table tr:hover td { background: #f8f6ff; }
+.search-page .type-badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: var(--radius-sm); font-size: var(--font-xs); font-weight: 600; text-transform: uppercase; }
+.search-page .type-badge.shipping { background: #d4f5e9; color: #00b894; }
+.search-page .type-badge.inbound { background: #e3f2fd; color: #0984e3; }
+.search-page .type-badge.loading { background: #fff3e0; color: #e67e22; }
+.search-page .empty-state { text-align: center; padding: 3rem; color: var(--gray-500); }
+.search-page .empty-state .icon { font-size: 3rem; margin-bottom: 1rem; opacity: 0.5; }
+.search-page .no-results { text-align: center; padding: 2rem; color: var(--gray-600); background: var(--gray-50); border-radius: var(--radius-lg); margin-top: var(--space-lg); }
+.search-page .link-order { color: var(--color-purple); text-decoration: none; font-weight: 500; }
+.search-page .link-order:hover { text-decoration: underline; }
+.search-page .is-locked { color: var(--color-danger); font-size: var(--font-xs); }
+</style>
+
+<div class="search-page">
+    <div class="card">
+        <h2 class="card-title">🔍 综合查找</h2>
+        <div class="search-form">
+            <div class="form-group">
+                <label>查找范围</label>
+                <div class="scope-group">
+                    <label><input type="checkbox" name="scope" value="shipping" checked> <span>出货</span></label>
+                    <label><input type="checkbox" name="scope" value="inbound" checked> <span>入库</span></label>
+                    <label><input type="checkbox" name="scope" value="loading" checked> <span>装柜</span></label>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="start_date">开始日期</label>
+                <input type="date" id="start_date" name="start_date" value="{{ default_start }}">
+            </div>
+            <div class="form-group">
+                <label for="end_date">结束日期</label>
+                <input type="date" id="end_date" name="end_date" value="{{ default_end }}">
+            </div>
+            <div class="form-group">
+                <label for="customer">客户 / 供应商</label>
+                <input type="text" id="customer" name="customer" placeholder="输入客户或供应商名称">
+            </div>
+            <div style="grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-lg);">
+                <div class="form-group">
+                    <label for="product_name">商品名称</label>
+                    <input type="text" id="product_name" name="product_name" placeholder="输入商品名称">
+                </div>
+                <div class="form-group">
+                    <label for="specification">规格</label>
+                    <input type="text" id="specification" name="specification" placeholder="输入规格或型号">
+                </div>
+            </div>
+            <div class="form-group" style="display:flex;align-items:flex-end;">
+                <button type="button" class="btn-search" onclick="performSearch()">
+                    🔍 搜索
+                </button>
+                <button type="button" class="btn-reset" onclick="resetForm()">
+                    ↻ 重置
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="results-area" id="resultsArea" style="display:none;">
+        <div class="card">
+            <h3 class="card-title">📋 搜索结果</h3>
+            <div class="results-summary" id="resultsSummary"></div>
+            <div id="resultsTableContainer"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+function performSearch() {
+    const scopeEls = document.querySelectorAll('input[name="scope"]:checked');
+    const scope = Array.from(scopeEls).map(el => el.value);
+    if (scope.length === 0) {
+        alert('请至少选择一个查找范围');
+        return;
+    }
+
+    const startDate = document.getElementById('start_date').value.trim();
+    const endDate = document.getElementById('end_date').value.trim();
+    const customer = document.getElementById('customer').value.trim();
+    const productName = document.getElementById('product_name').value.trim();
+    const specification = document.getElementById('specification').value.trim();
+
+    if (startDate && endDate && startDate > endDate) {
+        alert('开始日期不能晚于结束日期');
+        return;
+    }
+
+    const btn = document.querySelector('.btn-search');
+    btn.disabled = true;
+    btn.textContent = '搜索中...';
+
+    fetch('/api/v1/unified-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            scope: scope,
+            start_date: startDate || null,
+            end_date: endDate || null,
+            customer: customer || null,
+            product_name: productName || null,
+            specification: specification || null,
+        })
+    })
+    .then(r => r.json())
+    .then(data => {
+        btn.disabled = false;
+        btn.innerHTML = '🔍 搜索';
+        if (!data.success) {
+            alert(data.error || '搜索失败');
+            return;
+        }
+        renderResults(data.results, data.count);
+    })
+    .catch(err => {
+        btn.disabled = false;
+        btn.innerHTML = '🔍 搜索';
+        alert('请求出错: ' + err.message);
+    });
+}
+
+function renderResults(results, count) {
+    const area = document.getElementById('resultsArea');
+    const summary = document.getElementById('resultsSummary');
+    const container = document.getElementById('resultsTableContainer');
+
+    area.style.display = 'block';
+    summary.textContent = `共找到 ${count} 条记录`;
+
+    if (count === 0) {
+        container.innerHTML = '<div class="no-results">😕 没有找到匹配的记录，请尝试调整搜索条件</div>';
+        return;
+    }
+
+    const typeLabels = { shipping: '出货', inbound: '入库', loading: '装柜' };
+    const typeLink = {
+        shipping: '/shipping-records',
+        inbound: '/inbound-records',
+        loading: '/loading-orders'
+    };
+
+    let html = '<table class="record-table"><thead><tr>';
+    html += '<th>类型</th>';
+    html += '<th>日期</th>';
+    html += '<th>客户/供应商</th>';
+    html += '<th>单号</th>';
+    html += '<th>商品名称</th>';
+    html += '<th>规格</th>';
+    html += '<th>数量</th>';
+    html += '<th>单位</th>';
+    html += '<th>备注</th>';
+    html += '</tr></thead><tbody>';
+
+    for (const row of results) {
+        const type = row.type;
+        const label = typeLabels[type] || type;
+        const link = typeLink[type] || '#';
+        const lockIcon = row.is_locked ? ' <span class="is-locked">🔒</span>' : '';
+        html += '<tr>';
+        html += `<td><span class="type-badge ${type}">${label}</span></td>`;
+        html += `<td>${escapeHtml(row.date)}</td>`;
+        html += `<td>${escapeHtml(row.customer || '')}${lockIcon}</td>`;
+        html += `<td><a href="${link}?start_date=${encodeURIComponent(row.date)}&end_date=${encodeURIComponent(row.date)}" class="link-order">#${row.order_num}</a></td>`;
+        html += `<td>${escapeHtml(row.product_name || '')}</td>`;
+        html += `<td>${escapeHtml(row.specification || '')}</td>`;
+        html += `<td>${escapeHtml(row.quantity || '')}</td>`;
+        html += `<td>${escapeHtml(row.unit || '')}</td>`;
+        html += `<td>${escapeHtml(row.remark || '')}</td>`;
+        html += '</tr>';
+    }
+
+    html += '</tbody></table>';
+    container.innerHTML = html;
+
+    // 滚动到结果区域
+    area.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// 回车触发搜索
+document.querySelectorAll('.search-form input').forEach(input => {
+    input.addEventListener('keypress', e => {
+        if (e.key === 'Enter') performSearch();
+    });
+});
+
+// 重置表单：清空输入条件，保留3个库勾选
+function resetForm() {
+    document.getElementById('start_date').value = '';
+    document.getElementById('end_date').value = '';
+    document.getElementById('customer').value = '';
+    document.getElementById('product_name').value = '';
+    document.getElementById('specification').value = '';
+    // 保留勾选项不变
+    document.getElementById('resultsArea').style.display = 'none';
+    document.getElementById('resultsTableContainer').innerHTML = '';
+}
+</script>
+{% endblock %}
