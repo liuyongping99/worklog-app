@@ -15,6 +15,7 @@ from .orders import (
 )
 from .stock import StockOutItem
 from .products import ProductUnit, ProductCategory, Product
+from .piece_conversion import PieceConversion
 from .audit import AuditLog
 
 __all__ = [
@@ -27,5 +28,6 @@ __all__ = [
     'UnifiedSearch',
     'StockOutItem',
     'ProductUnit', 'ProductCategory', 'Product',
+    'PieceConversion',
     'AuditLog',
 ]
