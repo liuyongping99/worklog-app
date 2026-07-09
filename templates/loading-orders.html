@@ -215,7 +215,7 @@
                 </thead>
                 <tbody>
                     {% for record in group.records %}
-                    <tr class="{% if record.mismatch == 'warn' %}row-warn{% elif record.mismatch == 'info' %}row-info{% endif %}">
+                    <tr class="{% if record.mismatch == 'warn' or record.piece_mismatch == 'warn' %}row-warn{% elif record.mismatch == 'info' or record.piece_mismatch == 'info' %}row-info{% endif %}">
                         <td style="width:40px; text-align:center; color:#868e96; font-size:0.85rem;">{% if record.mismatch == 'warn' %}❌ {% elif record.mismatch == 'info' %}💡 {% endif %}{{ loop.index }}</td>
                         <td>{{ record.product_name }}</td>
                         <td>{{ record.specification or '-' }}</td>
@@ -224,7 +224,7 @@
                         <td class="remark-cell {{ 'has-content' if record.remark }}">
                             {{ record.remark or '-' }}
                         </td>
-                        <td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">{{ record.unit_hint or '—' }}</td>
+                        <td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">{{ record.unit_hint or '—' }}{% if record.piece_hint %}<br><span style="color:#0984e3;">{{ record.piece_hint }}</span>{% endif %}</td>
                         <td style="white-space: nowrap;">
                             <button type="button" class="move-up-btn lock-hide" data-id="{{ record.id }}" onclick="moveRecord({{ record.id }}, 'up', this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;" title="上移">▲</button>
                             <button type="button" class="move-down-btn lock-hide" data-id="{{ record.id }}" onclick="moveRecord({{ record.id }}, 'down', this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;margin-right:0.3rem;" title="下移">▼</button>
@@ -261,9 +261,12 @@
                                     <option value="桶">桶</option>
                                     <option value="张">张</option>
                                     <option value="件">件</option>
+                                    <option value="箱">箱</option>
+                                    <option value="卷">卷</option>
                                     <option value="块">块</option>
+                                    <option value="令">令</option>
                                 </select>
-                                <input type="text" name="remark" placeholder="备注">
+                                <input type="text" name="remark" placeholder="备注" oninput="autoFillQtyFromRemark(this)">
                                 <button type="submit" class="btn btn-primary btn-sm">添加</button>
                             </form>
                         </td>
@@ -368,6 +371,8 @@
 <script>
 var LOADING_UNIT_LIST = {{ unit_list | default([]) | tojson }};
 
+var PIECE_CONVERSIONS = {{ piece_conversions | tojson }};
+
 function findLoadingUnit(productName, spec) {
     if (spec) {
         for (var i = 0; i < LOADING_UNIT_LIST.length; i++) {
@@ -384,6 +389,59 @@ function findLoadingUnit(productName, spec) {
         }
     }
     return null;
+}
+
+// ── 件数换算（件 → 张/只/令）──
+function findPieceConversion(productName, spec) {
+    if (spec) {
+        for (var i = 0; i < PIECE_CONVERSIONS.length; i++) {
+            var pc = PIECE_CONVERSIONS[i];
+            if (pc.product_name === productName && pc.spec_keyword && spec.indexOf(pc.spec_keyword) !== -1) {
+                return pc;
+            }
+        }
+    }
+    for (var i = 0; i < PIECE_CONVERSIONS.length; i++) {
+        var pc = PIECE_CONVERSIONS[i];
+        if (pc.product_name === productName && !pc.spec_keyword) {
+            return pc;
+        }
+    }
+    return null;
+}
+
+function extractPiecesFromRemark(remark) {
+    if (!remark) return null;
+    var m = remark.match(/(\d+)件/);
+    return m ? parseInt(m[1]) : null;
+}
+
+function getPieceHint(productName, spec) {
+    var pc = findPieceConversion(productName, spec);
+    if (pc) {
+        return pc.units_per_piece + pc.target_unit + '/件';
+    }
+    return '';
+}
+
+function calcPieceQuantity(remark, productName, spec) {
+    var pieces = extractPiecesFromRemark(remark);
+    if (pieces === null) return null;
+    var pc = findPieceConversion(productName, spec);
+    if (!pc) return null;
+    return pieces * pc.units_per_piece;
+}
+
+function checkPieceMismatch(remark, qty, productName, spec) {
+    var pieces = extractPiecesFromRemark(remark);
+    if (pieces === null) return '';
+    var pc = findPieceConversion(productName, spec);
+    if (!pc) return '';
+    var expected = pieces * pc.units_per_piece;
+    var actual = parseFloat(qty);
+    if (isNaN(actual)) return '';
+    if (Math.abs(expected - actual) <= 0.01) return '';
+    return pieces === 1 ? 'info' : 'warn';
 }
 
 function getLoadingUnitHint(productName, spec, quantity, unit, remark) {
@@ -462,6 +520,36 @@ function applyLoadingMismatch(tr, level) {
     tr.classList.remove('row-warn', 'row-info');
     if (level) tr.classList.add(level === 'warn' ? 'row-warn' : 'row-info');
 }
+
+// 备注件数自动填充数量
+function autoFillQtyFromRemark(inputEl) {
+    var row = inputEl.closest('tr');
+    var remark = inputEl.value.trim();
+    var pieces = extractPiecesFromRemark(remark);
+    if (pieces === null) return;
+    if (/[+*]/.test(remark)) return;
+    var tds = row.querySelectorAll('td');
+    var productName = (tds[1] && tds[1].textContent || '').trim();
+    var spec = (tds[2] && tds[2].textContent || '').trim();
+    // 编辑模式下从 input 读取
+    var nameInput = row.querySelector('input[name="name"]');
+    var specInput = row.querySelector('input[name="spec"]');
+    if (nameInput) productName = nameInput.value.trim();
+    if (specInput) spec = specInput.value.trim();
+    var pc = findPieceConversion(productName, spec);
+    if (!pc) return;
+    var qtyInput = row.querySelector('input[name="qty"]') || row.querySelector('input[name="quantity"]');
+    if (!qtyInput) return;
+    if (!qtyInput.dataset.userEdited) {
+        qtyInput.value = pieces * pc.units_per_piece;
+    }
+}
+
+document.addEventListener('input', function(e) {
+    if (e.target.name === 'qty') {
+        e.target.dataset.userEdited = '1';
+    }
+});
 
 document.addEventListener('DOMContentLoaded', function() {
     // === 全局变量 ===
@@ -925,21 +1013,22 @@ document.addEventListener('DOMContentLoaded', function() {
         tr.dataset.seq = seq;
         tr.dataset.editId = recordId;
 
-        var units = ['支','kg','y','桶','张','件','块'];
+        var units = ['支','kg','y','桶','张','件','箱','卷','块','令'];
         var unitOptions = units.map(function(u) {
             return u === unit ? "<option value='"+u+"' selected>"+u+"</option>" : "<option value='"+u+"'>"+u+"</option>";
         }).join('');
 
         // 编辑模式下的辅助单位提示：根据当前输入值实时计算
         var editingHint = getLoadingUnitHint(name, spec, qty, unit, remark) || '—';
+        var editingPieceHint = getPieceHint(name, spec) || '';
 
         tr.innerHTML = '<td style="width:36px; text-align:center; color:#868e96; font-size:0.85rem;">'+seq+'</td>' +
             '<td><input type="text" name="name" value="'+name+'" style="width:100%;padding:0.65rem;border:1px solid #dfe6e9;border-radius:4px;font-size:1.1rem;box-sizing:border-box;"></td>' +
             '<td><input type="text" name="spec" value="'+spec+'" style="width:100%;padding:0.65rem;border:1px solid #dfe6e9;border-radius:4px;font-size:1.1rem;box-sizing:border-box;"></td>' +
             '<td><input type="number" name="qty" value="'+qty+'" style="width:100%;padding:0.65rem;border:1px solid #dfe6e9;border-radius:4px;font-size:1.1rem;box-sizing:border-box;"></td>' +
             '<td><select name="unit" style="padding:0.65rem;border:1px solid #dfe6e9;border-radius:4px;font-size:1.1rem;box-sizing:border-box;">'+unitOptions+'</select></td>' +
-            '<td><input type="text" name="remark" value="'+remark+'" style="width:100%;padding:0.65rem;border:1px solid #dfe6e9;border-radius:4px;font-size:1.1rem;box-sizing:border-box;"></td>' +
-            '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">'+editingHint+'</td>' +
+            '<td><input type="text" name="remark" value="'+remark+'" oninput="autoFillQtyFromRemark(this)" style="width:100%;padding:0.65rem;border:1px solid #dfe6e9;border-radius:4px;font-size:1.1rem;box-sizing:border-box;"></td>' +
+            '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">'+editingHint+(editingPieceHint ? '<br><span style="color:#0984e3;">'+editingPieceHint+'</span>' : '')+'</td>' +
             '<td style="white-space:nowrap;">' +
                 "<button type='button' onclick='saveEdit(this)' style='background:#00b894;color:white;border:none;border-radius:4px;padding:0.2rem 0.5rem;font-size:0.75rem;cursor:pointer;margin-right:0.25rem;'>保存</button>" +
                 "<button type='button' onclick='cancelEdit(this)' style='background:#b2bec3;color:white;border:none;border-radius:4px;padding:0.2rem 0.5rem;font-size:0.75rem;cursor:pointer;'>取消</button></td>";
@@ -969,20 +1058,24 @@ document.addEventListener('DOMContentLoaded', function() {
                 var remarkClass = r.remark ? 'remark-cell has-content' : 'remark-cell';
                 var unitHint = getLoadingUnitHint(r.product_name, r.specification || '', r.quantity, r.unit, r.remark) || '—';
                 var mismatch = checkLoadingMismatch(r.remark || '', r.quantity, r.product_name, r.specification || '');
+                var pieceHint = getPieceHint(r.product_name, r.specification || '');
+                var pieceMismatch = checkPieceMismatch(r.remark || '', r.quantity, r.product_name, r.specification || '');
                 tr.innerHTML = '<td style="width:36px; text-align:center; color:#868e96; font-size:0.85rem;">' + loadingMismatchIcon(mismatch) + seq + '</td>' +
                     '<td>' + r.product_name + '</td>' +
                     '<td>' + (r.specification || '-') + '</td>' +
                     '<td><span class="qty-badge">' + r.quantity + '</span></td>' +
                     '<td><span class="unit-badge">' + r.unit + '</span></td>' +
                     '<td class="' + remarkClass + '">' + (r.remark || '-') + '</td>' +
-                    '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">' + unitHint + '</td>' +
+                    '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">' + unitHint + (pieceHint ? '<br><span style="color:#0984e3;">' + pieceHint + '</span>' : '') + '</td>' +
                     '<td style="white-space:nowrap;">' +
                         '<button type="button" class="move-up-btn lock-hide" data-id="' + r.id + '" onclick="moveRecord(' + r.id + ',\'up\',this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;" title="上移">▲</button>' +
                         '<button type="button" class="move-down-btn lock-hide" data-id="' + r.id + '" onclick="moveRecord(' + r.id + ',\'down\',this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;margin-right:0.3rem;" title="下移">▼</button>' +
                         '<button type="button" class="edit-record-btn lock-hide" data-id="' + r.id + '" onclick="editRecord(' + r.id + ', this)" style="background:none;border:none;color:#00b894;cursor:pointer;font-size:0.85rem;margin-right:0.4rem;" title="修改">✏️</button>' +
                         '<button type="button" class="del-record-btn lock-hide" data-id="' + r.id + '" onclick="deleteRecord(' + r.id + ', this)" style="background:none;border:none;color:#ff7675;cursor:pointer;font-size:0.85rem;" title="删除">🗑️</button>' +
                     '</td>';
-                applyLoadingMismatch(tr, mismatch);
+                if (mismatch === 'warn' || pieceMismatch === 'warn') { applyLoadingMismatch(tr, 'warn'); }
+                else if (mismatch === 'info' || pieceMismatch === 'info') { applyLoadingMismatch(tr, 'info'); }
+                else { applyLoadingMismatch(tr, ''); }
                 recalcLoadingSummary(tr.closest('.date-group'));
             } else {
                 alert('保存失败：' + (res.error || '未知错误'));
@@ -993,18 +1086,19 @@ document.addEventListener('DOMContentLoaded', function() {
     window.cancelEdit = function(btn) {
         var tr = btn.closest('tr');
         var orig = JSON.parse(tr.dataset.orig);
-        var units = ['支','kg','y','桶','张','件','块'];
+        var units = ['支','kg','y','桶','张','件','箱','卷','块','令'];
         var unitOptions = units.map(function(u) {
             return u === orig.unit ? "<option value='"+u+"' selected>"+u+"</option>" : "<option value='"+u+"'>"+u+"</option>";
         }).join('');
         var unitHint = getLoadingUnitHint(orig.name, orig.spec, orig.qty, orig.unit, orig.remark) || '—';
+        var pieceHint = getPieceHint(orig.name, orig.spec) || '';
         tr.innerHTML = '<td style="width:36px; text-align:center; color:#868e96; font-size:0.85rem;">'+tr.dataset.seq+'</td>' +
             '<td>'+orig.name+'</td>' +
             '<td>'+orig.spec+'</td>' +
             '<td>'+orig.qty+'</td>' +
             '<td>'+orig.unit+'</td>' +
             '<td class="remark-cell '+(orig.remark ? 'has-content' : '')+'">'+orig.remark+'</td>' +
-            '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">'+unitHint+'</td>' +
+            '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">'+unitHint+(pieceHint ? '<br><span style="color:#0984e3;">'+pieceHint+'</span>' : '')+'</td>' +
             '<td class="lock-hide" style="white-space:nowrap;">' +
                 "<button type='button' class='move-up-btn lock-hide' data-id='"+tr.dataset.editId+"' onclick='moveRecord("+tr.dataset.editId+",\"up\",this)' style='background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;' title='上移'>▲</button>" +
                 "<button type='button' class='move-down-btn lock-hide' data-id='"+tr.dataset.editId+"' onclick='moveRecord("+tr.dataset.editId+",\"down\",this)' style='background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;margin-right:0.3rem;' title='下移'>▼</button>" +
@@ -1139,7 +1233,10 @@ document.addEventListener('DOMContentLoaded', function() {
         var tr = document.createElement('tr');
         var unitHint = getLoadingUnitHint(rec.product_name, rec.specification || '', rec.quantity, rec.unit, rec.remark) || '—';
         var mismatch = checkLoadingMismatch(rec.remark || '', rec.quantity, rec.product_name, rec.specification || '');
-        if (mismatch) tr.classList.add(mismatch === 'warn' ? 'row-warn' : 'row-info');
+        var pieceHint = getPieceHint(rec.product_name, rec.specification || '');
+        var pieceMismatch = checkPieceMismatch(rec.remark || '', rec.quantity, rec.product_name, rec.specification || '');
+        if (mismatch === 'warn' || pieceMismatch === 'warn') { tr.classList.add('row-warn'); }
+        else if (mismatch === 'info' || pieceMismatch === 'info') { tr.classList.add('row-info'); }
         tr.innerHTML =
             '<td style="width:40px;text-align:center;color:#868e96;font-size:0.85rem;">' + loadingMismatchIcon(mismatch) + (existingRows + 1) + '</td>' +
             '<td>' + rec.product_name + '</td>' +
@@ -1147,7 +1244,7 @@ document.addEventListener('DOMContentLoaded', function() {
             '<td><span class="qty-badge">' + rec.quantity + '</span></td>' +
             '<td><span class="unit-badge">' + rec.unit + '</span></td>' +
             '<td class="remark-cell' + (rec.remark ? ' has-content' : '') + '">' + (rec.remark || '-') + '</td>' +
-            '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">' + unitHint + '</td>' +
+            '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">' + unitHint + (pieceHint ? '<br><span style="color:#0984e3;">' + pieceHint + '</span>' : '') + '</td>' +
             '<td style="white-space:nowrap;">' +
                 '<button type="button" class="move-up-btn lock-hide" data-id="' + rec.id + '" onclick="moveRecord(' + rec.id + ',\'up\',this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;" title="上移">▲</button>' +
                 '<button type="button" class="move-down-btn lock-hide" data-id="' + rec.id + '" onclick="moveRecord(' + rec.id + ',\'down\',this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;margin-right:0.3rem;" title="下移">▼</button>' +

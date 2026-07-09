@@ -322,8 +322,8 @@
         var errEl = document.getElementById('dateError');
         var labelEl = document.getElementById('dateRangeLabel');
         function openModal() {
-            startEl.value = currentStart || new Date().toISOString().split('T')[0];
-            endEl.value = currentEnd || new Date().toISOString().split('T')[0];
+            startEl.value = '';
+            endEl.value = '';
             errEl.style.display = 'none';
             modal.style.display = 'flex';
         }
@@ -427,14 +427,14 @@
                 </thead>
                 <tbody>
                 {% for item in group.records %}
-                <tr class="{% if item.qty_invalid %}row-out-of-stock{% elif item.mismatch == 'warn' %}row-warn{% elif item.mismatch == 'info' %}row-info{% endif %}">
+                <tr class="{% if item.qty_invalid %}row-out-of-stock{% elif item.mismatch == 'warn' or item.piece_mismatch == 'warn' %}row-warn{% elif item.mismatch == 'info' or item.piece_mismatch == 'info' %}row-info{% endif %}">
                     <td style="text-align:center; color:#868e96; font-size:0.85rem;">{% if item.qty_invalid %}<span class="stock-icon" title="数量异常">❌</span>{% elif item.mismatch == 'warn' %}❌ {% elif item.mismatch == 'info' %}💡 {% endif %}{{ loop.index }}</td>
                     <td style="font-size:0.9rem;">{{ item.product_name }}</td>
                     <td style="color:#636e72; font-size:0.9rem;">{{ item.specification }}</td>
                     <td><span class="qty-badge">{{ item.quantity }}</span></td>
                     <td><span class="unit-badge">{{ item.unit }}</span></td>
                     <td class="remark-cell {% if item.remark %}has-content{% endif %}">{{ item.remark or '—' }}</td>
-                    <td class="unit-hint-cell" style="font-size:0.85rem;color:#e17055;">{{ item.unit_hint or '—' }}</td>
+                    <td class="unit-hint-cell" style="font-size:0.85rem;color:#e17055;">{{ item.unit_hint or '—' }}{% if item.piece_hint %}<br><span style="color:#0984e3;">{{ item.piece_hint }}</span>{% endif %}</td>
                     <td style="white-space:nowrap;">
                         <button type="button" class="btn btn-sm move-up-btn lock-hide" data-id="{{ item.id }}" title="上移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.1rem 0.35rem;font-size:0.75rem;">▲</button>
                         <button type="button" class="btn btn-sm move-down-btn lock-hide" data-id="{{ item.id }}" title="下移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.1rem 0.35rem;font-size:0.75rem;">▼</button>
@@ -619,6 +619,9 @@
     // 商品辅助单位列表（含规格匹配，由后端传入）
     var UNIT_LIST = {{ unit_list | tojson }};
 
+    // 件数换算规则（由后端传入）
+    var PIECE_CONVERSIONS = {{ piece_conversions | tojson }};
+
     // 查找最匹配的单位配置：先按规格包含匹配，未命中取默认
     function findUnit(productName, spec) {
         if (spec) {
@@ -637,6 +640,86 @@
         }
         return null;
     }
+
+    // ── 件数换算（件 → 张/只/令）──
+    function findPieceConversion(productName, spec) {
+        if (spec) {
+            for (var i = 0; i < PIECE_CONVERSIONS.length; i++) {
+                var pc = PIECE_CONVERSIONS[i];
+                if (pc.product_name === productName && pc.spec_keyword && spec.indexOf(pc.spec_keyword) !== -1) {
+                    return pc;
+                }
+            }
+        }
+        for (var i = 0; i < PIECE_CONVERSIONS.length; i++) {
+            var pc = PIECE_CONVERSIONS[i];
+            if (pc.product_name === productName && !pc.spec_keyword) {
+                return pc;
+            }
+        }
+        return null;
+    }
+
+    function extractPiecesFromRemark(remark) {
+        if (!remark) return null;
+        var m = remark.match(/(\d+)件/);
+        return m ? parseInt(m[1]) : null;
+    }
+
+    function getPieceHint(productName, spec) {
+        var pc = findPieceConversion(productName, spec);
+        if (pc) {
+            return pc.units_per_piece + pc.target_unit + '/件';
+        }
+        return '';
+    }
+
+    function calcPieceQuantity(remark, productName, spec) {
+        var pieces = extractPiecesFromRemark(remark);
+        if (pieces === null) return null;
+        var pc = findPieceConversion(productName, spec);
+        if (!pc) return null;
+        return pieces * pc.units_per_piece;
+    }
+
+    function checkPieceMismatch(remark, qty, productName, spec) {
+        var pieces = extractPiecesFromRemark(remark);
+        if (pieces === null) return '';
+        var pc = findPieceConversion(productName, spec);
+        if (!pc) return '';
+        var expected = pieces * pc.units_per_piece;
+        var actual = parseFloat(qty);
+        if (isNaN(actual)) return '';
+        if (Math.abs(expected - actual) <= 0.01) return '';
+        return pieces === 1 ? 'info' : 'warn';
+    }
+
+    // 备注件数自动填充数量
+    function autoFillQtyFromRemark(inputEl) {
+        var row = inputEl.closest('tr');
+        var remark = inputEl.value.trim();
+        var pieces = extractPiecesFromRemark(remark);
+        if (pieces === null) return;
+        // 仅当备注为纯件数（不含 +/* 运算语义）时自动填充
+        if (/[+*]/.test(remark)) return;
+        var productName = (row.querySelector('[data-field="product_name"]') || {}).value || '';
+        var spec = (row.querySelector('[data-field="specification"]') || {}).value || '';
+        var pc = findPieceConversion(productName, spec);
+        if (!pc) return;
+        var qtyInput = row.querySelector('[data-field="quantity"]');
+        if (!qtyInput) return;
+        // 仅当数量为空或未被手动修改时才自动填充
+        if (!qtyInput.dataset.userEdited) {
+            qtyInput.value = pieces * pc.units_per_piece;
+        }
+    }
+
+    // 标记数量框被手动修改
+    document.addEventListener('input', function(e) {
+        if (e.target.dataset && e.target.dataset.field === 'quantity') {
+            e.target.dataset.userEdited = '1';
+        }
+    });
 
     // 计算辅助单位提示
     function getUnitHint(productName, spec, quantity, unit, remark) {
@@ -1131,12 +1214,15 @@
                     '<option value="支"' + (item.unit === '支' ? ' selected' : '') + '>支</option>' +
                     '<option value="kg"' + (item.unit === 'kg' ? ' selected' : '') + '>kg</option>' +
                     '<option value="y"' + (item.unit === 'y' ? ' selected' : '') + '>y</option>' +
-                    '<option value="张"' + (item.unit === '张' ? ' selected' : '') + '>张</option>' +
                     '<option value="桶"' + (item.unit === '桶' ? ' selected' : '') + '>桶</option>' +
+                    '<option value="张"' + (item.unit === '张' ? ' selected' : '') + '>张</option>' +
                     '<option value="件"' + (item.unit === '件' ? ' selected' : '') + '>件</option>' +
                     '<option value="箱"' + (item.unit === '箱' ? ' selected' : '') + '>箱</option>' +
+                    '<option value="卷"' + (item.unit === '卷' ? ' selected' : '') + '>卷</option>' +
+                    '<option value="块"' + (item.unit === '块' ? ' selected' : '') + '>块</option>' +
+                    '<option value="令"' + (item.unit === '令' ? ' selected' : '') + '>令</option>' +
                 '</select></td>' +
-                '<td><input type="text" value="' + escHtml(item.remark || '') + '" data-field="remark"></td>';
+                '<td><input type="text" value="' + escHtml(item.remark || '') + '" data-field="remark" oninput="autoFillQtyFromRemark(this)"></td>';
             tbody.appendChild(tr);
         }
     }
@@ -1194,6 +1280,8 @@
                             var tr = document.createElement('tr');
                             var hint = getUnitHint(item.product_name, item.specification || '', item.quantity, item.unit, item.remark);
                             var mismatch = checkMismatch(item.remark || '', item.quantity, item.product_name, item.specification || '');
+                            var pieceHint = getPieceHint(item.product_name, item.specification || '');
+                            var pieceMismatch = checkPieceMismatch(item.remark || '', item.quantity, item.product_name, item.specification || '');
                             var bad = isInvalidQty(item.quantity);
                             var prefix = bad ? invalidQtyIcon() : mismatchIcon(mismatch);
                             tr.innerHTML = '<td style="text-align:center;color:#868e96;font-size:0.85rem;">' + prefix + (tbody.children.length + 1) + '</td>' +
@@ -1202,7 +1290,7 @@
                                 '<td><span class="qty-badge">' + item.quantity + '</span></td>' +
                                 '<td><span class="unit-badge">' + item.unit + '</span></td>' +
                                 '<td class="remark-cell">' + (item.remark || '—') + '</td>' +
-                                '<td class="unit-hint-cell" style="font-size:0.85rem;color:#e17055;">' + (hint || '—') + '</td>' +
+                                '<td class="unit-hint-cell" style="font-size:0.85rem;color:#e17055;">' + (hint || '—') + (pieceHint ? '<br><span style="color:#0984e3;">' + pieceHint + '</span>' : '') + '</td>' +
                                 '<td style="white-space:nowrap;">' +
                                 '<button type="button" class="btn btn-sm move-up-btn lock-hide" data-id="' + item.id + '" title="上移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.1rem 0.35rem;font-size:0.75rem;">▲</button> ' +
                                 '<button type="button" class="btn btn-sm move-down-btn lock-hide" data-id="' + item.id + '" title="下移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.1rem 0.35rem;font-size:0.75rem;">▼</button> ' +
@@ -1210,6 +1298,8 @@
                                 '<button type="button" class="btn btn-danger btn-sm delete-record-btn lock-hide" data-id="' + item.id + '">🗑️</button>' +
                                 '</td>';
                             applyMismatchClass(tr, mismatch);
+                            if (!bad && (mismatch === 'warn' || pieceMismatch === 'warn')) { tr.className = ''; applyMismatchClass(tr, 'warn'); }
+                            else if (!bad && (mismatch === 'info' || pieceMismatch === 'info')) { tr.className = ''; applyMismatchClass(tr, 'info'); }
                             if (bad) tr.classList.add('row-out-of-stock');
                             tbody.appendChild(tr);
                         });
@@ -1288,6 +1378,8 @@
                             var tr = document.createElement('tr');
                             var hint = getUnitHint(item.product_name, item.specification || '', item.quantity, item.unit, item.remark);
                             var mismatch = checkMismatch(item.remark || '', item.quantity, item.product_name, item.specification || '');
+                            var pieceHint = getPieceHint(item.product_name, item.specification || '');
+                            var pieceMismatch = checkPieceMismatch(item.remark || '', item.quantity, item.product_name, item.specification || '');
                             var bad = isInvalidQty(item.quantity);
                             var prefix = bad ? invalidQtyIcon() : mismatchIcon(mismatch);
                             tr.innerHTML = '<td style="text-align:center;color:#868e96;font-size:0.85rem;">' + prefix + (tbody.children.length + 1) + '</td>' +
@@ -1296,7 +1388,7 @@
                                 '<td><span class="qty-badge">' + item.quantity + '</span></td>' +
                                 '<td><span class="unit-badge">' + item.unit + '</span></td>' +
                                 '<td class="remark-cell">' + (item.remark || '—') + '</td>' +
-                                '<td class="unit-hint-cell" style="font-size:0.85rem;color:#e17055;">' + (hint || '—') + '</td>' +
+                                '<td class="unit-hint-cell" style="font-size:0.85rem;color:#e17055;">' + (hint || '—') + (pieceHint ? '<br><span style="color:#0984e3;">' + pieceHint + '</span>' : '') + '</td>' +
                                 '<td style="white-space:nowrap;">' +
                                 '<button type="button" class="btn btn-sm move-up-btn lock-hide" data-id="' + item.id + '" title="上移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.1rem 0.35rem;font-size:0.75rem;">▲</button> ' +
                                 '<button type="button" class="btn btn-sm move-down-btn lock-hide" data-id="' + item.id + '" title="下移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.1rem 0.35rem;font-size:0.75rem;">▼</button> ' +
@@ -1304,6 +1396,8 @@
                                 '<button type="button" class="btn btn-danger btn-sm delete-record-btn lock-hide" data-id="' + item.id + '">🗑️</button>' +
                                 '</td>';
                             applyMismatchClass(tr, mismatch);
+                            if (!bad && (mismatch === 'warn' || pieceMismatch === 'warn')) { tr.className = ''; applyMismatchClass(tr, 'warn'); }
+                            else if (!bad && (mismatch === 'info' || pieceMismatch === 'info')) { tr.className = ''; applyMismatchClass(tr, 'info'); }
                             if (bad) tr.classList.add('row-out-of-stock');
                             tbody.appendChild(tr);
                         });
@@ -1687,7 +1781,7 @@ function bindEditDeleteButtons() {
                 tds[1].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:100px;" value="' + vals[0] + '">';
                 tds[2].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:80px;" value="' + vals[1] + '">';
                 tds[3].innerHTML = '<input type="number" class="form-control form-control-sm edit-input" style="min-width:70px;" value="' + vals[2] + '">';
-                var unitOpts = ['支','kg','y','桶','张','件','箱','卷','块'];
+                var unitOpts = ['支','kg','y','桶','张','件','箱','卷','块','令'];
                 var unitHtml = '<select class="form-control form-control-sm edit-input" style="width:70px;">';
                 unitOpts.forEach(function(u) { unitHtml += '<option value="' + u + '"' + (u === vals[3] ? ' selected' : '') + '>' + u + '</option>'; });
                 unitHtml += '</select>';

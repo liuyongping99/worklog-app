@@ -555,13 +555,13 @@
             </thead>
             <tbody>
                 {% for record in group.records %}
-                <tr data-record-id="{{ record.id }}" class="{% if record.mismatch == 'warn' %}row-warn{% elif record.mismatch == 'info' %}row-info{% endif %}">
+                <tr data-record-id="{{ record.id }}" class="{% if record.mismatch == 'warn' or record.piece_mismatch == 'warn' %}row-warn{% elif record.mismatch == 'info' or record.piece_mismatch == 'info' %}row-info{% endif %}">
                     <td class="product-name" style="max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ record.product_name }}">{% if record.mismatch == 'warn' %}❌ {% elif record.mismatch == 'info' %}💡 {% endif %}{{ record.product_name }}</td>
                     <td class="spec">{{ record.specification }}</td>
                     <td><span class="qty-badge">{{ record.quantity }}</span></td>
                     <td><span class="unit-badge">{{ record.unit }}</span></td>
                     <td class="remark-cell{% if record.remark %} has-content{% endif %}">{{ record.remark or '-' }}</td>
-                    <td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">{{ record.unit_hint or '—' }}</td>
+                    <td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">{{ record.unit_hint or '—' }}{% if record.piece_hint %}<br><span style="color:#0984e3;">{{ record.piece_hint }}</span>{% endif %}</td>
                     <td style="white-space: nowrap;">
                         <button type="button" class="btn btn-sm move-up-btn lock-hide" data-id="{{ record.id }}" title="上移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.2rem 0.4rem;font-size:0.75rem;">▲</button>
                         <button type="button" class="btn btn-sm move-down-btn lock-hide" data-id="{{ record.id }}" title="下移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.2rem 0.4rem;font-size:0.75rem;">▼</button>
@@ -603,7 +603,7 @@
                     <option value="箱">箱</option><option value="卷">卷</option><option value="块">块</option>
                     <option value="令">令</option>
                 </select>
-                <input type="text" name="remark" placeholder="备注" style="flex:14;min-width:0;padding:0.4rem 0.5rem;border:1px solid #dfe6e9;border-radius:4px;font-size:0.85rem;">
+                <input type="text" name="remark" placeholder="备注" oninput="autoFillQtyFromRemark(this)" style="flex:14;min-width:0;padding:0.4rem 0.5rem;border:1px solid #dfe6e9;border-radius:4px;font-size:0.85rem;">
                 <button type="submit" style="margin-left:auto;flex-shrink:0;background:#00b894;color:#fff;border:none;padding:0.4rem 1.2rem;border-radius:4px;cursor:pointer;font-size:0.85rem;font-weight:600;">➕ 添加</button>
             </form>
         </div>
@@ -728,6 +728,8 @@
 <script>
 var INBOUND_UNIT_LIST = {{ unit_list | default([]) | tojson }};
 
+var PIECE_CONVERSIONS = {{ piece_conversions | tojson }};
+
 function findInboundUnit(productName, spec) {
     if (spec) {
         for (var i = 0; i < INBOUND_UNIT_LIST.length; i++) {
@@ -744,6 +746,59 @@ function findInboundUnit(productName, spec) {
         }
     }
     return null;
+}
+
+// ── 件数换算（件 → 张/只/令）──
+function findPieceConversion(productName, spec) {
+    if (spec) {
+        for (var i = 0; i < PIECE_CONVERSIONS.length; i++) {
+            var pc = PIECE_CONVERSIONS[i];
+            if (pc.product_name === productName && pc.spec_keyword && spec.indexOf(pc.spec_keyword) !== -1) {
+                return pc;
+            }
+        }
+    }
+    for (var i = 0; i < PIECE_CONVERSIONS.length; i++) {
+        var pc = PIECE_CONVERSIONS[i];
+        if (pc.product_name === productName && !pc.spec_keyword) {
+            return pc;
+        }
+    }
+    return null;
+}
+
+function extractPiecesFromRemark(remark) {
+    if (!remark) return null;
+    var m = remark.match(/(\d+)件/);
+    return m ? parseInt(m[1]) : null;
+}
+
+function getPieceHint(productName, spec) {
+    var pc = findPieceConversion(productName, spec);
+    if (pc) {
+        return pc.units_per_piece + pc.target_unit + '/件';
+    }
+    return '';
+}
+
+function calcPieceQuantity(remark, productName, spec) {
+    var pieces = extractPiecesFromRemark(remark);
+    if (pieces === null) return null;
+    var pc = findPieceConversion(productName, spec);
+    if (!pc) return null;
+    return pieces * pc.units_per_piece;
+}
+
+function checkPieceMismatch(remark, qty, productName, spec) {
+    var pieces = extractPiecesFromRemark(remark);
+    if (pieces === null) return '';
+    var pc = findPieceConversion(productName, spec);
+    if (!pc) return '';
+    var expected = pieces * pc.units_per_piece;
+    var actual = parseFloat(qty);
+    if (isNaN(actual)) return '';
+    if (Math.abs(expected - actual) <= 0.01) return '';
+    return pieces === 1 ? 'info' : 'warn';
 }
 
 function getInboundUnitHint(productName, spec, quantity, unit, remark) {
@@ -820,6 +875,38 @@ function applyInboundMismatch(tr, level) {
     tr.classList.remove('row-warn', 'row-info');
     if (level) tr.classList.add(level === 'warn' ? 'row-warn' : 'row-info');
 }
+
+// 备注件数自动填充数量
+function autoFillQtyFromRemark(inputEl) {
+    var row = inputEl.closest('tr');
+    var remark = inputEl.value.trim();
+    var pieces = extractPiecesFromRemark(remark);
+    if (pieces === null) return;
+    if (/[+*]/.test(remark)) return;
+    var productName = '';
+    var spec = '';
+    var productCell = row.querySelector('.product-name');
+    if (productCell) {
+        productName = productCell.textContent.replace('❌ ', '').replace('💡 ', '').trim();
+    }
+    var specCell = row.querySelector('.spec');
+    if (specCell) {
+        spec = specCell.textContent.trim();
+    }
+    var pc = findPieceConversion(productName, spec);
+    if (!pc) return;
+    var qtyInput = row.querySelector('input[name="qty"]') || row.querySelector('input[name="quantity"]') || row.querySelector('input.edit-input[type="number"]');
+    if (!qtyInput) return;
+    if (!qtyInput.dataset.userEdited) {
+        qtyInput.value = pieces * pc.units_per_piece;
+    }
+}
+
+document.addEventListener('input', function(e) {
+    if (e.target.name === 'qty' || (e.target.type === 'number' && e.target.closest('.edit-input'))) {
+        e.target.dataset.userEdited = '1';
+    }
+});
 
 // 批量添加弹框
 function openBatchModal(orderPk) {
@@ -1306,8 +1393,12 @@ setTimeout(() => {
                         tds[3].innerHTML = '<span class="unit-badge">' + r.unit + '</span>';
                         tds[4].textContent = r.remark || '-';
                         tds[4].className = 'remark-cell' + (r.remark ? ' has-content' : '');
-                        tds[5].textContent = getInboundUnitHint(r.product_name, r.specification || '', r.quantity, r.unit, r.remark) || '—';
-                        applyInboundMismatch(tr, newMismatch);
+                        var newPieceHint = getPieceHint(r.product_name, r.specification || '');
+                        tds[5].innerHTML = (getInboundUnitHint(r.product_name, r.specification || '', r.quantity, r.unit, r.remark) || '—') + (newPieceHint ? '<br><span style="color:#0984e3;">' + newPieceHint + '</span>' : '');
+                        var newPieceMismatch = checkPieceMismatch(r.remark || '', r.quantity, r.product_name, r.specification || '');
+                        if (newMismatch === 'warn' || newPieceMismatch === 'warn') { applyInboundMismatch(tr, 'warn'); }
+                        else if (newMismatch === 'info' || newPieceMismatch === 'info') { applyInboundMismatch(tr, 'info'); }
+                        else { applyInboundMismatch(tr, ''); }
                         // 恢复按钮
                         btn.textContent = '✏️';
                         btn.classList.remove('btn-success');
@@ -1336,7 +1427,7 @@ setTimeout(() => {
             // 规格
             tds[1].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + vals[1].replace(/"/g, '&quot;') + '">';
             // 数量
-            tds[2].innerHTML = '<input type="number" class="form-control form-control-sm edit-input" style="width:100px;" value="' + vals[2] + '">';
+            tds[2].innerHTML = '<input type="number" name="qty" class="form-control form-control-sm edit-input" style="width:100px;" value="' + vals[2] + '">';
             // 单位（下拉框）
             var unitOpts = ['支','kg','y','桶','张','件','箱','卷','块','令'];
             var unitHtml = '<select class="form-control form-control-sm edit-input" style="width:70px;">';
@@ -1346,7 +1437,7 @@ setTimeout(() => {
             unitHtml += '</select>';
             tds[3].innerHTML = unitHtml;
             // 备注
-            tds[4].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + vals[4].replace(/"/g, '&quot;') + '">';
+            tds[4].innerHTML = '<input type="text" name="remark" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + vals[4].replace(/"/g, '&quot;') + '" oninput="autoFillQtyFromRemark(this)">';
             // 按钮变为保存
             btn.textContent = '💾';
             btn.classList.remove('btn-primary');
@@ -1544,7 +1635,10 @@ setTimeout(() => {
         tr.setAttribute('data-record-id', rec.id);
         var unitHint = getInboundUnitHint(rec.product_name, rec.specification || '', rec.quantity, rec.unit, rec.remark) || '—';
         var mismatch = checkInboundMismatch(rec.remark || '', rec.quantity, rec.product_name, rec.specification || '');
-        if (mismatch) tr.classList.add(mismatch === 'warn' ? 'row-warn' : 'row-info');
+        var pieceHint = getPieceHint(rec.product_name, rec.specification || '');
+        var pieceMismatch = checkPieceMismatch(rec.remark || '', rec.quantity, rec.product_name, rec.specification || '');
+        if (mismatch === 'warn' || pieceMismatch === 'warn') { tr.classList.add('row-warn'); }
+        else if (mismatch === 'info' || pieceMismatch === 'info') { tr.classList.add('row-info'); }
         var escapedName = rec.product_name.replace(/"/g, '&quot;');
         tr.innerHTML =
             '<td class="product-name" style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapedName + '">' + mismatchIcon(mismatch) + rec.product_name + '</td>' +
@@ -1552,7 +1646,7 @@ setTimeout(() => {
             '<td><span class="qty-badge">' + rec.quantity + '</span></td>' +
             '<td><span class="unit-badge">' + rec.unit + '</span></td>' +
             '<td class="remark-cell' + (rec.remark ? ' has-content' : '') + '">' + (rec.remark || '-') + '</td>' +
-            '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">' + unitHint + '</td>' +
+            '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">' + unitHint + (pieceHint ? '<br><span style="color:#0984e3;">' + pieceHint + '</span>' : '') + '</td>' +
             '<td style="white-space:nowrap;">' +
                 '<button type="button" class="btn btn-sm move-up-btn lock-hide" data-id="' + rec.id + '" title="上移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.2rem 0.4rem;font-size:0.75rem;">▲</button> ' +
                 '<button type="button" class="btn btn-sm move-down-btn lock-hide" data-id="' + rec.id + '" title="下移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.2rem 0.4rem;font-size:0.75rem;">▼</button> ' +
@@ -1631,8 +1725,12 @@ setTimeout(() => {
                         tds[3].innerHTML = '<span class="unit-badge">' + r.unit + '</span>';
                         tds[4].textContent = r.remark || '-';
                         tds[4].className = 'remark-cell' + (r.remark ? ' has-content' : '');
-                        tds[5].textContent = getInboundUnitHint(r.product_name, r.specification || '', r.quantity, r.unit, r.remark) || '—';
-                        applyInboundMismatch(tr, newMismatch);
+                        var newPieceHint = getPieceHint(r.product_name, r.specification || '');
+                        tds[5].innerHTML = (getInboundUnitHint(r.product_name, r.specification || '', r.quantity, r.unit, r.remark) || '—') + (newPieceHint ? '<br><span style="color:#0984e3;">' + newPieceHint + '</span>' : '');
+                        var newPieceMismatch = checkPieceMismatch(r.remark || '', r.quantity, r.product_name, r.specification || '');
+                        if (newMismatch === 'warn' || newPieceMismatch === 'warn') { applyInboundMismatch(tr, 'warn'); }
+                        else if (newMismatch === 'info' || newPieceMismatch === 'info') { applyInboundMismatch(tr, 'info'); }
+                        else { applyInboundMismatch(tr, ''); }
                         tr.setAttribute('data-record-id', r.id);
                         btn.textContent = '✏️';
                         btn.classList.remove('btn-success');
@@ -1651,13 +1749,13 @@ setTimeout(() => {
                 ];
                 tds[0].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:80px;" value="' + vals[0].replace(/"/g, '&quot;') + '">';
                 tds[1].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + vals[1].replace(/"/g, '&quot;') + '">';
-                tds[2].innerHTML = '<input type="number" class="form-control form-control-sm edit-input" style="width:100px;" value="' + vals[2] + '">';
+                tds[2].innerHTML = '<input type="number" name="qty" class="form-control form-control-sm edit-input" style="width:100px;" value="' + vals[2] + '">';
                 var unitOpts = ['支','kg','y','桶','张','件','箱','卷','块','令'];
                 var unitHtml = '<select class="form-control form-control-sm edit-input" style="width:70px;">';
                 unitOpts.forEach(function(u) { unitHtml += '<option value="' + u + '"' + (u === vals[3] ? ' selected' : '') + '>' + u + '</option>'; });
                 unitHtml += '</select>';
                 tds[3].innerHTML = unitHtml;
-                tds[4].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + vals[4].replace(/"/g, '&quot;') + '">';
+                tds[4].innerHTML = '<input type="text" name="remark" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + vals[4].replace(/"/g, '&quot;') + '" oninput="autoFillQtyFromRemark(this)">';
                 btn.textContent = '💾';
                 btn.classList.remove('btn-primary');
                 btn.classList.add('btn-success');
