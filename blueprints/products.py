@@ -238,3 +238,65 @@ def api_v1_products_delete(product_id):
         return jsonify({'success': False, 'error': '产品不存在'}), 404
     Product.delete(product_id)
     return jsonify({'success': True})
+
+
+# ── 件数换算 ──────────────────────────────────────────────
+@bp.route('/piece-conversions')
+def piece_conversions():
+    """件数换算管理页面"""
+    from models import PieceConversion
+    conversions = PieceConversion.get_all()
+    return render_template('piece-conversions.html',
+                           conversions=conversions,
+                           page_title='件数换算')
+
+
+@bp.route('/piece-conversions/add', methods=['POST'])
+def piece_conversions_add():
+    from models import PieceConversion
+    product_name = request.form.get('product_name', '').strip()
+    units_str = request.form.get('units_per_piece', '').strip()
+    target_unit = request.form.get('target_unit', '').strip()
+    spec_kw = request.form.get('spec_keyword', '').strip() or None
+    model = request.form.get('model', '').strip() or None
+    if not product_name or not units_str or not target_unit:
+        flash('商品名、每件单位数和目标单位不能为空', 'error')
+        return redirect(url_for('products.piece_conversions'))
+    try:
+        units_val = float(units_str)
+        PieceConversion.create(product_name, units_val, target_unit, spec_kw, model)
+        label = f'{product_name}' + (f'（{spec_kw}）' if spec_kw else '')
+        flash(f'已添加件数换算: {label}（1件={units_val}{target_unit}）', 'success')
+    except (ValueError, TypeError):
+        flash('请输入有效的每件单位数', 'error')
+    return redirect(url_for('products.piece_conversions'))
+
+
+@bp.route('/piece-conversions/edit/<int:id>', methods=['POST'])
+def piece_conversions_edit(id):
+    from models import PieceConversion
+    units_str = request.form.get('units_per_piece', '').strip()
+    target_unit = request.form.get('target_unit', '').strip()
+    if not units_str or not target_unit:
+        flash('每件单位数和目标单位不能为空', 'error')
+        return redirect(url_for('products.piece_conversions'))
+    try:
+        units_val = float(units_str)
+        PieceConversion.update(id,
+                               units_per_piece=units_val,
+                               target_unit=target_unit,
+                               product_name=request.form.get('product_name', '').strip(),
+                               spec_keyword=request.form.get('spec_keyword', '').strip() or None,
+                               model=request.form.get('model', '').strip() or None)
+        flash(f'已更新件数换算 #{id}', 'success')
+    except (ValueError, TypeError):
+        flash('请输入有效的每件单位数', 'error')
+    return redirect(url_for('products.piece_conversions'))
+
+
+@bp.route('/piece-conversions/delete/<int:id>', methods=['POST'])
+def piece_conversions_delete(id):
+    from models import PieceConversion
+    PieceConversion.delete(id)
+    flash(f'已删除件数换算 #{id}', 'success')
+    return redirect(url_for('products.piece_conversions'))
