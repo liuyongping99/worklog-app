@@ -556,7 +556,7 @@
             <tbody>
                 {% for record in group.records %}
                 <tr data-record-id="{{ record.id }}" class="{% if record.mismatch == 'warn' or record.piece_mismatch == 'warn' %}row-warn{% elif record.mismatch == 'info' or record.piece_mismatch == 'info' %}row-info{% endif %}">
-                    <td class="product-name" style="max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ record.product_name }}">{% if record.mismatch == 'warn' %}❌ {% elif record.mismatch == 'info' %}💡 {% endif %}{{ record.product_name }}</td>
+                    <td class="product-name" style="max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ record.product_name }}">{% if record.mismatch == 'warn' or record.piece_mismatch == 'warn' %}❌ {% elif record.mismatch == 'info' or record.piece_mismatch == 'info' %}💡 {% endif %}{{ record.product_name }}</td>
                     <td class="spec">{{ record.specification }}</td>
                     <td><span class="qty-badge">{{ record.quantity }}</span></td>
                     <td><span class="unit-badge">{{ record.unit }}</span></td>

@@ -322,8 +322,8 @@
         var errEl = document.getElementById('dateError');
         var labelEl = document.getElementById('dateRangeLabel');
         function openModal() {
-            startEl.value = '';
-            endEl.value = '';
+            startEl.value = currentStart || new Date().toISOString().split('T')[0];
+            endEl.value = currentEnd || new Date().toISOString().split('T')[0];
             errEl.style.display = 'none';
             modal.style.display = 'flex';
         }
@@ -428,7 +428,7 @@
                 <tbody>
                 {% for item in group.records %}
                 <tr class="{% if item.qty_invalid %}row-out-of-stock{% elif item.mismatch == 'warn' or item.piece_mismatch == 'warn' %}row-warn{% elif item.mismatch == 'info' or item.piece_mismatch == 'info' %}row-info{% endif %}">
-                    <td style="text-align:center; color:#868e96; font-size:0.85rem;">{% if item.qty_invalid %}<span class="stock-icon" title="数量异常">❌</span>{% elif item.mismatch == 'warn' %}❌ {% elif item.mismatch == 'info' %}💡 {% endif %}{{ loop.index }}</td>
+                    <td style="text-align:center; color:#868e96; font-size:0.85rem;">{% if item.qty_invalid %}<span class="stock-icon" title="数量异常">❌</span>{% elif item.mismatch == 'warn' or item.piece_mismatch == 'warn' %}❌ {% elif item.mismatch == 'info' or item.piece_mismatch == 'info' %}💡 {% endif %}{{ loop.index }}</td>
                     <td style="font-size:0.9rem;">{{ item.product_name }}</td>
                     <td style="color:#636e72; font-size:0.9rem;">{{ item.specification }}</td>
                     <td><span class="qty-badge">{{ item.quantity }}</span></td>
@@ -1283,7 +1283,10 @@
                             var pieceHint = getPieceHint(item.product_name, item.specification || '');
                             var pieceMismatch = checkPieceMismatch(item.remark || '', item.quantity, item.product_name, item.specification || '');
                             var bad = isInvalidQty(item.quantity);
-                            var prefix = bad ? invalidQtyIcon() : mismatchIcon(mismatch);
+                            var combinedMismatch = '';
+                            if (mismatch === 'warn' || pieceMismatch === 'warn') combinedMismatch = 'warn';
+                            else if (mismatch === 'info' || pieceMismatch === 'info') combinedMismatch = 'info';
+                            var prefix = bad ? invalidQtyIcon() : mismatchIcon(combinedMismatch);
                             tr.innerHTML = '<td style="text-align:center;color:#868e96;font-size:0.85rem;">' + prefix + (tbody.children.length + 1) + '</td>' +
                                 '<td style="font-size:0.9rem;">' + item.product_name + '</td>' +
                                 '<td style="color:#636e72;font-size:0.9rem;">' + (item.specification || '') + '</td>' +
@@ -1297,9 +1300,7 @@
                                 '<button type="button" class="btn btn-primary btn-sm edit-record-btn lock-hide" data-id="' + item.id + '">✏️</button> ' +
                                 '<button type="button" class="btn btn-danger btn-sm delete-record-btn lock-hide" data-id="' + item.id + '">🗑️</button>' +
                                 '</td>';
-                            applyMismatchClass(tr, mismatch);
-                            if (!bad && (mismatch === 'warn' || pieceMismatch === 'warn')) { tr.className = ''; applyMismatchClass(tr, 'warn'); }
-                            else if (!bad && (mismatch === 'info' || pieceMismatch === 'info')) { tr.className = ''; applyMismatchClass(tr, 'info'); }
+                            applyMismatchClass(tr, combinedMismatch);
                             if (bad) tr.classList.add('row-out-of-stock');
                             tbody.appendChild(tr);
                         });
@@ -1381,7 +1382,10 @@
                             var pieceHint = getPieceHint(item.product_name, item.specification || '');
                             var pieceMismatch = checkPieceMismatch(item.remark || '', item.quantity, item.product_name, item.specification || '');
                             var bad = isInvalidQty(item.quantity);
-                            var prefix = bad ? invalidQtyIcon() : mismatchIcon(mismatch);
+                            var combinedMismatch2 = '';
+                            if (mismatch === 'warn' || pieceMismatch === 'warn') combinedMismatch2 = 'warn';
+                            else if (mismatch === 'info' || pieceMismatch === 'info') combinedMismatch2 = 'info';
+                            var prefix = bad ? invalidQtyIcon() : mismatchIcon(combinedMismatch2);
                             tr.innerHTML = '<td style="text-align:center;color:#868e96;font-size:0.85rem;">' + prefix + (tbody.children.length + 1) + '</td>' +
                                 '<td style="font-size:0.9rem;">' + item.product_name + '</td>' +
                                 '<td style="color:#636e72;font-size:0.9rem;">' + (item.specification || '') + '</td>' +
@@ -1395,9 +1399,7 @@
                                 '<button type="button" class="btn btn-primary btn-sm edit-record-btn lock-hide" data-id="' + item.id + '">✏️</button> ' +
                                 '<button type="button" class="btn btn-danger btn-sm delete-record-btn lock-hide" data-id="' + item.id + '">🗑️</button>' +
                                 '</td>';
-                            applyMismatchClass(tr, mismatch);
-                            if (!bad && (mismatch === 'warn' || pieceMismatch === 'warn')) { tr.className = ''; applyMismatchClass(tr, 'warn'); }
-                            else if (!bad && (mismatch === 'info' || pieceMismatch === 'info')) { tr.className = ''; applyMismatchClass(tr, 'info'); }
+                            applyMismatchClass(tr, combinedMismatch2);
                             if (bad) tr.classList.add('row-out-of-stock');
                             tbody.appendChild(tr);
                         });
@@ -1758,15 +1760,22 @@ function bindEditDeleteButtons() {
                         var bad = isInvalidQty(r.quantity);
                         // 保留原序号数字，替换图标前缀
                         var rowNum = (tds[0].textContent || '').replace(/^[\s\S]*?(?=\d)/, '');
-                        tds[0].innerHTML = (bad ? invalidQtyIcon() : mismatchIcon(newMismatch)) + rowNum;
+                        var newPieceHint = getPieceHint(r.product_name, r.specification || '');
+                        var newPieceMismatch = checkPieceMismatch(r.remark || '', r.quantity, r.product_name, r.specification || '');
+                        var combinedMismatch = '';
+                        if (newMismatch === 'warn' || newPieceMismatch === 'warn') combinedMismatch = 'warn';
+                        else if (newMismatch === 'info' || newPieceMismatch === 'info') combinedMismatch = 'info';
+                        tds[0].innerHTML = (bad ? invalidQtyIcon() : mismatchIcon(combinedMismatch)) + rowNum;
                         tds[1].textContent = r.product_name;
                         tds[2].textContent = r.specification || '';
                         tds[3].innerHTML = '<span class="qty-badge">' + r.quantity + '</span>';
                         tds[4].innerHTML = '<span class="unit-badge">' + r.unit + '</span>';
                         tds[5].textContent = r.remark || '—';
                         var hint = getUnitHint(r.product_name, r.specification || '', r.quantity, r.unit, r.remark) || '—';
-                        tds[6].textContent = hint;
-                        applyMismatchClass(tr, newMismatch);
+                        tds[6].innerHTML = hint + (newPieceHint ? '<br><span style="color:#0984e3;">' + newPieceHint + '</span>' : '');
+                        if (newMismatch === 'warn' || newPieceMismatch === 'warn') { applyMismatchClass(tr, 'warn'); }
+                        else if (newMismatch === 'info' || newPieceMismatch === 'info') { applyMismatchClass(tr, 'info'); }
+                        else { applyMismatchClass(tr, ''); }
                         applyInvalidQtyClass(tr, r.quantity);
                         btn.textContent = '✏️';
                         btn.classList.remove('btn-success');
@@ -1786,7 +1795,7 @@ function bindEditDeleteButtons() {
                 unitOpts.forEach(function(u) { unitHtml += '<option value="' + u + '"' + (u === vals[3] ? ' selected' : '') + '>' + u + '</option>'; });
                 unitHtml += '</select>';
                 tds[4].innerHTML = unitHtml;
-                tds[5].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + vals[4].replace(/"/g, '&quot;') + '">';
+                tds[5].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + vals[4].replace(/"/g, '&quot;') + '" oninput="autoFillQtyFromRemark(this)">';
                 btn.textContent = '💾';
                 btn.classList.remove('btn-primary');
                 btn.classList.add('btn-success');

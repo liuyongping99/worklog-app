@@ -69,9 +69,6 @@ def inbound_records():
     def _get_piece_conv(product_name, spec):
         return get_piece_conversion(product_name, spec, cache=piece_convs)
 
-    def _calc_piece_qty(remark, conv):
-        return calc_piece_quantity(remark, conv)
-
     def _check_piece(remark, quantity_str, conv):
         return check_piece_mismatch(remark, quantity_str, conv)
 
