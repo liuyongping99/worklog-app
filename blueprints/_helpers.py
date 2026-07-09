@@ -265,3 +265,96 @@ def summarize_remarks(records):
         'summary_loose_pieces': total_loose,
         'summary_unit_pieces': total_unit_pieces,
     }
+
+
+# =====================================================================
+#  件数换算（件 → 张/只/令）
+# =====================================================================
+
+def extract_pieces_from_remark(remark):
+    """从备注提取件数，如 '3件' → 3，无则返回 None。"""
+    if not remark:
+        return None
+    m = re.search(r'(\d+)件', remark)
+    return int(m.group(1)) if m else None
+
+
+def _match_piece_in_cache(product_name, spec, cache):
+    """在预加载的 piece_conversions 列表中两轮匹配。
+
+    与 _match_unit_in_cache 行为一致：
+    1. 优先匹配 spec_keyword 在 spec 中出现的行
+    2. 兜底取 spec_keyword 为空的默认行
+    """
+    spec_lower = (spec or '').lower()
+    if spec_lower:
+        for pc in cache:
+            if pc['product_name'] != product_name:
+                continue
+            kw = pc['spec_keyword']
+            if kw and kw.lower() in spec_lower:
+                return pc
+    for pc in cache:
+        if pc['product_name'] != product_name:
+            continue
+        if not pc['spec_keyword']:
+            return pc
+    return None
+
+
+def get_piece_conversion(product_name, spec, cache=None):
+    """查询件数换算规则。
+
+    Args:
+        product_name: 商品名
+        spec: 规格字符串
+        cache: 预加载的 piece_conversions 列表（避免循环查 DB），
+               元素需有 product_name / spec_keyword / units_per_piece / target_unit 字段
+
+    Returns:
+        dict 或 None
+    """
+    from models import PieceConversion
+    if cache is not None:
+        return _match_piece_in_cache(product_name, spec, cache)
+    return PieceConversion.get_match(product_name, spec)
+
+
+def calc_piece_quantity(remark, conversion):
+    """备注'X件' → 期望数量 X × units_per_piece。
+
+    Args:
+        remark: 备注字符串
+        conversion: get_piece_conversion 返回的 dict
+
+    Returns:
+        float 期望数量，或 None（备注无件数或无换算规则）
+    """
+    pieces = extract_pieces_from_remark(remark)
+    if pieces is None or conversion is None:
+        return None
+    return pieces * conversion['units_per_piece']
+
+
+def check_piece_mismatch(remark, quantity_str, conversion):
+    """校验备注件数 vs 实际数量。
+
+    规则（与 check_remark 一致）：
+    - 偏差 ≤ 0.01 → ''
+    - 1 件偏差 → 'info'（粉色）
+    - 多件偏差 → 'warn'（红色）
+
+    Returns:
+        '' / 'info' / 'warn'
+    """
+    pieces = extract_pieces_from_remark(remark)
+    if pieces is None or conversion is None:
+        return ''
+    expected = pieces * conversion['units_per_piece']
+    try:
+        actual = float(quantity_str)
+    except (ValueError, TypeError):
+        return ''
+    if abs(expected - actual) <= 0.01:
+        return ''
+    return 'info' if pieces == 1 else 'warn'
