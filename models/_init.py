@@ -299,6 +299,23 @@ def init_db():
         )
     ''')
 
+    # 件数换算规则表（件→张/只/令 等）
+    # model 字段仅描述用途，不参与匹配，不在唯一约束中
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS piece_conversions (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_name    TEXT NOT NULL,
+            spec_keyword    TEXT DEFAULT NULL,
+            model           TEXT DEFAULT NULL,
+            units_per_piece REAL NOT NULL,
+            target_unit     TEXT NOT NULL,
+            is_active       INTEGER DEFAULT 1,
+            created_at      TEXT DEFAULT (datetime('now','localtime')),
+            updated_at      TEXT DEFAULT (datetime('now','localtime')),
+            UNIQUE(product_name, spec_keyword)
+        )
+    ''')
+
     # 迁移：为旧表添加 spec_keyword 列并重建唯一约束
     cursor.execute("PRAGMA table_info(product_units)")
     cols = [r[1] for r in cursor.fetchall()]
