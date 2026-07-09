@@ -12,9 +12,13 @@ import base64
 from datetime import date as date_cls, timedelta, datetime
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
 from models import (
-    InboundOrder, InboundRecord, InboundImage, ProductUnit, get_db, AuditLog
+    InboundOrder, InboundRecord, InboundImage, ProductUnit, PieceConversion, get_db, AuditLog
 )
-from blueprints._helpers import get_upload_dir as get_helpers_upload_dir, get_ypp, calc_hint, check_remark, summarize_remarks
+from blueprints._helpers import (
+    get_upload_dir as get_helpers_upload_dir,
+    get_ypp, calc_hint, check_remark, summarize_remarks,
+    get_piece_conversion, calc_piece_quantity, check_piece_mismatch,
+)
 
 bp = Blueprint('inbound', __name__)
 
@@ -53,6 +57,24 @@ def inbound_records():
     def _check_remark(remark, quantity_str, ypp):
         return check_remark(remark, quantity_str, ypp)
 
+    # 件数换算规则
+    piece_convs = PieceConversion.get_all()
+    piece_conv_list = [{
+        'product_name': pc['product_name'],
+        'spec_keyword': pc['spec_keyword'] or '',
+        'units_per_piece': pc['units_per_piece'],
+        'target_unit': pc['target_unit'],
+    } for pc in piece_convs]
+
+    def _get_piece_conv(product_name, spec):
+        return get_piece_conversion(product_name, spec, cache=piece_convs)
+
+    def _calc_piece_qty(remark, conv):
+        return calc_piece_quantity(remark, conv)
+
+    def _check_piece(remark, quantity_str, conv):
+        return check_piece_mismatch(remark, quantity_str, conv)
+
     for group in groups:
         for item in group['records']:
             ypp = _get_ypp(item['product_name'], item.get('specification', ''))
@@ -62,6 +84,19 @@ def inbound_records():
                 item['quantity'],
                 ypp
             )
+
+            # 件数换算
+            pc = _get_piece_conv(item['product_name'], item.get('specification', ''))
+            if pc:
+                item['piece_hint'] = f"{pc['units_per_piece']}{pc['target_unit']}/件"
+                item['piece_mismatch'] = _check_piece(
+                    item.get('remark', ''),
+                    item['quantity'],
+                    pc
+                )
+            else:
+                item['piece_hint'] = ''
+                item['piece_mismatch'] = ''
         group.update(summarize_remarks(group['records']))
 
     return render_template(
@@ -72,6 +107,7 @@ def inbound_records():
         start_date=start_date,
         end_date=end_date,
         unit_list=unit_list,
+        piece_conversions=piece_conv_list,
     )
 
 
