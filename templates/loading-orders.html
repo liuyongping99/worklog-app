@@ -30,6 +30,7 @@
 .loading-page .record-table td { font-size: var(--font-lg); }
 .loading-page .img-area .img-item { position: relative; overflow: hidden; border-radius: var(--radius-lg); }
 .loading-page .img-area .img-item:hover .del-img-btn { opacity: 1; }
+.loading-page .ai-images-area .ai-img-wrap:hover .del-img-btn { opacity: 1 !important; }
 .loading-page .del-img-btn { position: absolute; top: 8px; right: 8px; background: rgba(200,30,30,0.85); color: white; border: none; border-radius: var(--radius-md); padding: 0.35rem 0.75rem; font-size: var(--font-sm); cursor: pointer; font-weight: 600; opacity: 0; transition: opacity 0.2s; z-index: 5; }
 .loading-page .img-area { display: grid; margin: var(--space-sm) 0; gap: var(--space-sm); }
 .loading-page .img-area.cols-1 { grid-template-columns: 1fr; }
@@ -63,10 +64,6 @@
 .smart-add-content textarea { width: 100%; min-height: 200px; padding: 0.5rem; border: 1px solid #dfe6e9; border-radius: 6px; font-family: monospace; font-size: 0.85rem; resize: vertical; }
 .smart-add-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem; }
 
-/* 图片上传弹框 */
-.loading-image-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1020; justify-content: center; align-items: center; }
-.loading-image-modal.show { display: flex; }
-.loading-image-modal .modal-content { background: white; padding: 1.5rem; border-radius: 12px; min-width: 400px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
 /* 订单备注弹框 */
 .note-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1020; justify-content: center; align-items: center; }
 .note-modal.show { display: flex; }
@@ -76,15 +73,7 @@
 .note-modal .note-dialog textarea { width: 100%; min-height: 120px; padding: 0.6rem; border: 1px solid #dfe6e9; border-radius: 6px; font-size: 0.9rem; font-family: inherit; box-sizing: border-box; resize: vertical; }
 .note-modal .note-dialog textarea:focus { outline: none; border-color: #6c5ce7; }
 .note-modal .note-dialog .actions { display: flex; gap: 0.75rem; justify-content: flex-end; margin-top: 1rem; }
-.upload-options { display: flex; gap: 1rem; margin: 1rem 0; }
-.upload-box { flex: 1; text-align: center; padding: 1.5rem; border: 2px dashed #dfe6e9; border-radius: 8px; cursor: pointer; transition: all 0.2s; }
-.upload-box:hover { border-color: #00b894; background: #d4f5e9; }
-.upload-box .icon { font-size: 2rem; margin-bottom: 0.5rem; }
-.upload-box .text { font-weight: 600; color: #2d3436; margin-bottom: 0.25rem; }
-.upload-box .hint { font-size: 0.75rem; color: #636e72; }
-.modal-img-preview { text-align: center; margin: 1rem 0; }
 .modal-img-preview img { max-width: 100%; max-height: 300px; border-radius: 6px; }
-.preview-actions { display: flex; gap: 0.5rem; justify-content: center; }
 
 /* 图片预览弹框 */
 .image-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 1030; justify-content: center; align-items: center; cursor: pointer; }
@@ -119,7 +108,7 @@
 
     <!-- 新建装柜单 -->
     <div style="background: #f8f9fa; padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem;">
-        <form id="addOrderForm" style="display: flex; gap: 1rem; align-items: flex-end;">
+        <div id="addOrderForm" style="display: flex; gap: 1rem; align-items: flex-end;">
             <div>
                 <label style="display: block; font-weight: 600; font-size: 0.85rem; margin-bottom: 0.25rem;">日期</label>
                 <input type="date" name="date" value="{{ today }}" required style="padding: 0.4rem 0.6rem; border: 1px solid #dfe6e9; border-radius: 6px; font-size: 0.9rem;">
@@ -129,9 +118,9 @@
                 <input type="text" name="customer" value="央士" placeholder="客户名称（可选）" style="padding: 0.4rem 0.6rem; border: 1px solid #dfe6e9; border-radius: 6px; font-size: 0.9rem; width: 240px;">
             </div>
             <div style="display: flex; align-items: flex-end;">
-                <button type="submit" class="btn btn-primary">创建订单</button>
+                <button type="button" id="addOrderBtn" class="btn btn-primary">创建订单</button>
             </div>
-        </form>
+        </div>
     </div>
 
     <!-- 订单列表 -->
@@ -167,6 +156,7 @@
                     <span class="group-customer">{{ group.customer }}</span>
                     {% endif %}
                     <span class="order-num">订单 #{{ group.order_num }}</span>
+                    {% if group.doc_number %}<span id="docNumber{{ group.order_pk }}" style="font-size:0.75rem;color:#0984e3;background:#e8f4fd;padding:0.15rem 0.5rem;border-radius:10px;margin-left:0.25rem;">{{ group.doc_number }}</span>{% endif %}
                     {% set img_count = order_images.get(group.order_pk, []) | length %}
                     {% if img_count > 0 %}
                     <span class="img-count-badge">{{ img_count }}张图片</span>
@@ -187,6 +177,21 @@
             <div class="order-note-row" id="orderNote{{ group.order_pk }}" style="background:linear-gradient(90deg, #fff5e1 0%, #ffeaa7 100%); border-left:4px solid #fdcb6e; padding:0.5rem 0.75rem; margin:0.25rem 0; border-radius:6px; font-size:0.9rem; color:#2d3436; display:flex; align-items:flex-start; gap:0.5rem;">
                 <span style="font-weight:600; flex-shrink:0;">📝 备注：</span>
                 <span class="note-text" style="flex:1; white-space:pre-wrap; word-break:break-word;">{{ group.order_note }}</span>
+            </div>
+            {% endif %}
+
+            <!-- AI 识别图片 -->
+            {% set grp_imgs = order_images.get(group.order_pk, []) %}
+            {% set ai_imgs = grp_imgs | selectattr('source', 'equalto', 'ai') | list %}
+            {% if ai_imgs %}
+            <div class="ai-images-area" data-order-id="{{ group.order_pk }}">
+                <h4>🤖 AI 识别图片 ({{ ai_imgs|length }}张)</h4>
+                {% for img in ai_imgs %}
+                <div class="ai-img-wrap">
+                    <img src="/upload/{{ img.relative_path }}" alt="AI识别图片" onclick="showImgPreview('/upload/{{ img.relative_path }}')">
+                    <button class="del-img-btn" data-image-id="{{ img.id }}" style="position:absolute;top:4px;right:4px;background:rgba(200,30,30,0.85);color:#fff;border:none;border-radius:3px;padding:2px 6px;cursor:pointer;font-size:12px;opacity:0;transition:opacity 0.2s;">✕ 删除</button>
+                </div>
+                {% endfor %}
             </div>
             {% endif %}
 
@@ -250,7 +255,7 @@
                     {% endif %}
                     <tr class="quick-add-row lock-hide">
                         <td colspan="8" style="padding: 0; background: #fafafa;">
-                            <form class="quick-add" data-order-pk="{{ group.order_pk }}">
+                            <div class="quick-add" data-order-pk="{{ group.order_pk }}">
                                 <input type="text" name="product_name" placeholder="品名" required>
                                 <input type="text" name="specification" placeholder="规格">
                                 <input type="text" name="quantity" placeholder="数量" required>
@@ -265,17 +270,18 @@
                                     <option value="卷">卷</option>
                                     <option value="块">块</option>
                                     <option value="令">令</option>
+                                    <option value="斤">斤</option>
                                 </select>
                                 <input type="text" name="remark" placeholder="备注" oninput="autoFillQtyFromRemark(this)">
-                                <button type="submit" class="btn btn-primary btn-sm">添加</button>
-                            </form>
+                                <button type="button" class="btn btn-primary btn-sm quick-add-btn">添加</button>
+                            </div>
                         </td>
                     </tr>
                 </tbody>
             </table>
             
             <!-- 图片区域 -->
-            {% set imgs = order_images.get(group.order_pk, []) %}
+            {% set imgs = order_images.get(group.order_pk, []) | selectattr('source', 'ne', 'ai') | list %}
             {% if imgs %}
             <div class="img-area cols-{{ current_img_cols | default('3') }}" id="imgArea{{ group.order_pk }}">
                 <div style="display: flex; gap: 0.25rem; margin-bottom: 0.5rem; grid-column: 1 / -1;">
@@ -305,18 +311,8 @@
     {% endif %}
 </div>
 
-<!-- 智能添加弹框 -->
-<div class="smart-add-modal" id="smartAddModal">
-    <div class="smart-add-content">
-        <h3>🧠 智能添加商品</h3>
-        <div id="smartAddOrderInfo" style="font-size: 0.9rem; color: #636e72; margin-bottom: 0.5rem;"></div>
-        <textarea id="smartAddText" placeholder="每行一个商品，格式：品名 规格 单位 数量 备注（空格/逗号/分号分隔）&#10;示例：&#10;产品A 规格1 支 100 备注1&#10;产品B 规格2 kg 200 备注2"></textarea>
-        <div class="smart-add-actions">
-            <button class="btn btn-cancel" onclick="closeSmartAdd()">取消</button>
-            <button class="btn btn-primary" onclick="submitSmartAdd()">确认添加</button>
-        </div>
-    </div>
-</div>
+{% with smart_add_api="/api/v1/loading-orders" %}{% include "_smart_add_modal.html" %}{% endwith %}
+{% with image_api="/api/v1/loading-orders" %}{% include "_image_upload_modal.html" %}{% endwith %}
 
 <!-- 备注弹框 -->
 <div class="note-modal" id="noteModal">
@@ -324,7 +320,7 @@
         <h3 id="noteModalTitle">📝 订单备注</h3>
         <p id="noteModalOrderInfo" class="order-info"></p>
         <div style="margin-bottom:0.6rem;">
-            <label style="display:block; font-size:0.85rem; color:#636e72; margin-bottom:0.25rem; font-weight:600;">客户名称</label>
+            <label style="display:block; font-size:0.85rem; color:#636e72; margin-bottom:0.25rem; font-weight:600;">客户</label>
             <input type="text" id="noteCustomerInput" placeholder="客户名称" style="width:100%; padding:0.5rem; border:1px solid #dfe6e9; border-radius:6px; font-size:0.9rem; box-sizing:border-box;">
         </div>
         <div>
@@ -335,35 +331,6 @@
             <button type="button" class="btn" onclick="closeNoteModal()" style="background:#868e96;color:#fff;">取消</button>
             <button type="button" class="btn" onclick="clearNote()" style="background:#fab1a0;color:#fff;">清空备注</button>
             <button type="button" class="btn" onclick="saveNote()" style="background:#6c5ce7;color:#fff;">保存</button>
-        </div>
-    </div>
-</div>
-
-<!-- 图片上传弹框 -->
-<div class="loading-image-modal" id="imageModal">
-    <div class="modal-content">
-        <button class="modal-close" onclick="closeImageModal()">&times;</button>
-        <div class="modal-title">上传图片</div>
-        <div class="upload-options">
-            <div class="upload-box" id="pasteBox" onclick="activatePaste()">
-                <div class="icon">📋</div>
-                <div class="text">粘贴图片</div>
-                <div class="hint">Ctrl+V 粘贴</div>
-            </div>
-            <div class="upload-box" onclick="document.getElementById('fileInput').click()">
-                <div class="icon">📁</div>
-                <div class="text">选择文件</div>
-                <div class="hint">支持 jpg/png</div>
-            </div>
-        </div>
-        <input type="file" id="fileInput" accept="image/*" style="display: none;" onchange="handleFileSelect(this)">
-        <div id="modalImgPreview" class="modal-img-preview"></div>
-        <div style="text-align:center;">
-            <button type="button" id="rotateUploadBtn" onclick="rotateUploadImage();" style="display:none; padding:0.5rem 1rem; background:#f1f3f5; color:#333; border:1px solid #dfe6e9; border-radius:6px; cursor:pointer; font-size:0.85rem; font-weight:600;">🔄 旋转90°</button>
-        </div>
-        <div class="preview-actions" id="previewActions" style="display: none;">
-            <button class="btn btn-cancel" onclick="clearPreview()">取消</button>
-            <button class="btn btn-confirm" onclick="confirmUpload()">确认上传</button>
         </div>
     </div>
 </div>
@@ -474,7 +441,18 @@ function checkLoadingMismatch(remark, quantity, productName, spec) {
     if (!u || !u.is_usingyardforcounting || u.yards_per_piece <= 0) return '';
     if (!remark) return '';
     var m = remark.match(/(\d+)支/);
-    if (!m) return '';
+    if (!m) {
+        var yardVals = remark.match(/(\d+(?:\.\d+)?)\s*[yY码]/g);
+        if (yardVals) {
+            var sumYards = 0;
+            for (var j = 0; j < yardVals.length; j++) {
+                sumYards += parseFloat(yardVals[j].match(/[\d.]+/)[0]);
+            }
+            var actualYards = parseFloat(quantity);
+            if (!isNaN(actualYards) && Math.abs(sumYards - actualYards) > 0.01) return 'warn';
+        }
+        return '';
+    }
     var pieces = parseInt(m[1]);
     var ypp = u.yards_per_piece;
 
@@ -552,11 +530,15 @@ document.addEventListener('input', function(e) {
 });
 
 document.addEventListener('DOMContentLoaded', function() {
-    // === 全局变量 ===
-    var currentSmartOrderPk = null;
-    var currentOrderPk = null;
-    var pendingFile = null;
-    var uploadImageRotation = 0;
+    // === 智能添加按钮 ===
+    document.querySelectorAll('.smart-add-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var pk = this.getAttribute('data-pk');
+            var date = this.getAttribute('data-date');
+            var customer = this.getAttribute('data-customer') || '';
+            openSmartFill(pk, date, customer);
+        });
+    });
 
     // === 公共错误处理函数 ===
     function handleApiError(err, context) {
@@ -659,27 +641,22 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     // === 创建订单表单 ===
-    var addOrderForm = document.getElementById('addOrderForm');
-    if (addOrderForm) {
-        addOrderForm.addEventListener('submit', async function(e) {
-            e.preventDefault();
-            var form = e.target;
+    var addOrderBtn = document.getElementById('addOrderBtn');
+    if (addOrderBtn) {
+        addOrderBtn.addEventListener('click', async function() {
+            var form = document.getElementById('addOrderForm');
             var data = {
-                date: form.date.value,
-                customer: form.customer.value
+                date: form.querySelector('input[name=date]').value,
+                customer: form.querySelector('input[name=customer]').value
             };
-            console.log('提交创建订单:', data);
             try {
                 var res = await fetch('/api/v1/loading-orders', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(data)
                 });
-                console.log('响应状态:', res.status);
                 var result = await res.json();
-                console.log('响应结果:', result);
                 if (result.success) {
-                    console.log('订单创建成功, ID:', result.id);
                     location.reload();
                 } else {
                     alert('添加失败: ' + (result.error || '未知错误'));
@@ -690,252 +667,30 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
-
-    // === 智能添加功能 ===
-    document.querySelectorAll('.smart-add-btn').forEach(function(btn) {
-        btn.addEventListener('click', function() {
-            var pk = this.getAttribute('data-pk');
-            var date = this.getAttribute('data-date');
-            var customer = this.getAttribute('data-customer');
-            openSmartAdd(pk, date, customer);
-        });
-    });
-
-    window.openSmartAdd = function(orderPk, orderDate, orderCustomer) {
-        currentSmartOrderPk = orderPk;
-        var modal = document.getElementById('smartAddModal');
-        if (modal) modal.classList.add('show');
-        var textarea = document.getElementById('smartAddText');
-        if (textarea) textarea.value = '';
-        var info = document.getElementById('smartAddOrderInfo');
-        if (info) info.textContent = '📦 ' + orderDate + ' ' + orderCustomer;
-        if (textarea) textarea.focus();
-    };
-
-    window.closeSmartAdd = function() {
-        var modal = document.getElementById('smartAddModal');
-        if (modal) modal.classList.remove('show');
-        var textarea = document.getElementById('smartAddText');
-        if (textarea) textarea.value = '';
-        currentSmartOrderPk = null;
-    };
-
-    document.getElementById('smartAddModal').addEventListener('click', function(e) {
-        if (e.target === this) window.closeSmartAdd();
-    });
-
-    // 统一处理 Escape 键关闭弹框
-    document.addEventListener('keydown', function(e) {
-        if (e.key !== 'Escape') return;
-        if (document.getElementById('smartAddModal').classList.contains('show')) {
-            window.closeSmartAdd();
-        } else if (dateRangeModal.classList.contains('show')) {
-            closeDateRangeModal();
+    // === 图片上传成功回调（局部插入图片，弹框逻辑见 _image_upload_modal.html）===
+    window.onImageUploaded = function(data, orderPk) {
+        var dateGroup = document.querySelector('.date-group[data-order-pk="' + orderPk + '"]');
+        if (!dateGroup) { location.reload(); return; }
+        var imgArea = dateGroup.querySelector('.img-area');
+        if (!imgArea) {
+            var savedCols = localStorage.getItem('loading-img-cols') || '5';
+            imgArea = document.createElement('div');
+            imgArea.className = 'img-area cols-' + savedCols;
+            imgArea.id = 'imgArea' + orderPk;
+            imgArea.dataset.cols = savedCols;
+            imgArea.innerHTML = '<div style="display:flex;gap:0.25rem;margin-bottom:0.5rem;grid-column:1/-1;">' +
+                '<button class="img-col-btn' + (savedCols === '1' ? ' active' : '') + '" onclick="setImgCols(this,1)">1</button>' +
+                '<button class="img-col-btn' + (savedCols === '2' ? ' active' : '') + '" onclick="setImgCols(this,2)">2</button>' +
+                '<button class="img-col-btn' + (savedCols === '3' ? ' active' : '') + '" onclick="setImgCols(this,3)">3</button>' +
+                '<button class="img-col-btn' + (savedCols === '4' ? ' active' : '') + '" onclick="setImgCols(this,4)">4</button>' +
+                '<button class="img-col-btn' + (savedCols === '5' ? ' active' : '') + '" onclick="setImgCols(this,5)">5</button></div>';
+            dateGroup.appendChild(imgArea);
         }
-    });
-
-    window.submitSmartAdd = function() {
-        var text = document.getElementById('smartAddText').value.trim();
-        if (!text) { alert('请输入要添加的商品信息'); return; }
-        var lines = text.split('\n').filter(function(l) { return l.trim(); });
-        var items = [];
-        for (var i = 0; i < lines.length; i++) {
-            var parts = lines[i].trim().split(/[\s,;\t]+/).filter(function(p) { return p; });
-            if (parts.length >= 4) {
-                var unit = parts[2];
-                if (unit === '码') unit = 'y';
-                items.push({
-                    product_name: parts[0],
-                    specification: parts[1],
-                    quantity: parts[3],
-                    unit: unit,
-                    remark: parts.slice(4).join(' ')
-                });
-            }
-        }
-        if (items.length === 0) { alert('未识别到有效数据'); return; }
-        fetch('/api/v1/loading-orders/' + currentSmartOrderPk + '/records/batch', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({records: items})
-        }).then(checkResponse)
-        .then(function(data) {
-            if (data.success) {
-                // 插入所有新行（不先关闭弹框，避免变量被清空）
-                var dateGroup = document.querySelector('.date-group[data-order-pk="' + currentSmartOrderPk + '"]');
-                if (!dateGroup) {
-                    alert('未找到订单区域，请刷新页面。');
-                    window.closeSmartAdd();
-                    return;
-                }
-                var tbody = dateGroup.querySelector('.record-table tbody');
-                if (!tbody) {
-                    alert('未找到明细表，请刷新页面。');
-                    window.closeSmartAdd();
-                    return;
-                }
-                var quickAddRow = tbody.querySelector('.quick-add-row');
-                var firstNewTr = null;
-                data.records.forEach(function(rec) {
-                    var tr = buildLoadingRecordRow(rec, tbody);
-                    tbody.insertBefore(tr, quickAddRow);
-                    if (!firstNewTr) firstNewTr = tr;
-                });
-                recalcLoadingSummary(dateGroup);
-                window.closeSmartAdd();
-                if (firstNewTr) firstNewTr.scrollIntoView({behavior: 'smooth', block: 'center'});
-            } else {
-                alert('添加失败：' + (data.error || '未知错误'));
-            }
-        }).catch(function(err) { handleApiError(err, '智能添加'); });
-    };
-
-    // === 图片上传功能 ===
-    window.openImageModal = function(orderPk) {
-        currentOrderPk = orderPk;
-        document.getElementById('imageModal').classList.add('show');
-        clearPreview();
-    };
-
-    window.closeImageModal = function() {
-        document.getElementById('imageModal').classList.remove('show');
-        currentOrderPk = null;
-        pendingFile = null;
-        uploadImageRotation = 0;
-        clearPreview();
-    };
-
-    var pasteTimeout = null;
-    window.activatePaste = function() {
-        document.removeEventListener('paste', handlePaste);  // 防止重复注册
-        if (pasteTimeout) clearTimeout(pasteTimeout);
-        document.getElementById('pasteBox').classList.add('active');
-        document.addEventListener('paste', handlePaste);
-        pasteTimeout = setTimeout(function() {
-            document.getElementById('pasteBox').classList.remove('active');
-            document.removeEventListener('paste', handlePaste);
-            pasteTimeout = null;
-        }, 30000);
-    };
-
-    function handlePaste(e) {
-        var items = e.clipboardData.items;
-        for (var i = 0; i < items.length; i++) {
-            if (items[i].type.startsWith('image/')) {
-                var file = items[i].getAsFile();
-                showPreview(file);
-                break;
-            }
-        }
-    }
-
-    window.handleFileSelect = function(input) {
-        if (input.files && input.files[0]) {
-            showPreview(input.files[0]);
-        }
-    };
-
-    function showPreview(file) {
-        pendingFile = file;
-        uploadImageRotation = 0;
-        var reader = new FileReader();
-        reader.onload = function(e) {
-            var preview = document.getElementById('modalImgPreview');
-            preview.innerHTML = '<img src="' + e.target.result + '" style="max-width:100%; max-height:300px; border-radius:6px;">';
-            document.getElementById('previewActions').style.display = 'block';
-            document.getElementById('rotateUploadBtn').style.display = 'inline-block';
-        };
-        reader.readAsDataURL(file);
-    }
-
-    window.clearPreview = function() {
-        pendingFile = null;
-        uploadImageRotation = 0;
-        document.getElementById('modalImgPreview').innerHTML = '';
-        document.getElementById('previewActions').style.display = 'none';
-        document.getElementById('rotateUploadBtn').style.display = 'none';
-        document.getElementById('fileInput').value = '';
-    };
-
-    window.rotateUploadImage = function() {
-        if (!pendingFile) return;
-        uploadImageRotation = (uploadImageRotation + 90) % 360;
-        var img = document.getElementById('modalImgPreview').querySelector('img');
-        if (img) img.style.transform = 'rotate(' + uploadImageRotation + 'deg)';
-    };
-
-    window.confirmUpload = function() {
-        if (!pendingFile || !currentOrderPk) { alert('未选择图片或订单'); return; }
-
-        var canvas = document.createElement('canvas');
-        var ctx = canvas.getContext('2d');
-        var img = new Image();
-        var objectUrl = URL.createObjectURL(pendingFile);
-        img.onload = function() {
-            // 释放 object URL，避免内存泄漏
-            URL.revokeObjectURL(objectUrl);
-
-            if (uploadImageRotation % 180 === 90) {
-                canvas.width = img.height;
-                canvas.height = img.width;
-            } else {
-                canvas.width = img.width;
-                canvas.height = img.height;
-            }
-            ctx.save();
-            ctx.translate(canvas.width/2, canvas.height/2);
-            ctx.rotate(uploadImageRotation * Math.PI / 180);
-            ctx.drawImage(img, -img.width/2, -img.height/2);
-            ctx.restore();
-
-            canvas.toBlob(function(blob) {
-                var formData = new FormData();
-                formData.append('image', blob, pendingFile.name || 'image.png');
-                formData.append('order_pk', currentOrderPk);
-
-                fetch('/api/v1/loading-orders/' + currentOrderPk + '/images', {
-                    method: 'POST',
-                    body: formData
-                }).then(checkResponse)
-                .then(function(data) {
-                    if (data.success) {
-                        var orderPkSaved = currentOrderPk;
-                        closeImageModal();
-                        // 追加图片到 DOM
-                        var dateGroup = document.querySelector('.date-group[data-order-pk="' + orderPkSaved + '"]');
-                        var imgArea = dateGroup ? dateGroup.querySelector('.img-area') : null;
-                        if (!imgArea) {
-                            // 创建图片区域
-                            imgArea = document.createElement('div');
-                            imgArea.className = 'img-area cols-3';
-                            imgArea.id = 'imgArea' + orderPkSaved;
-                            var savedCols = localStorage.getItem('loading-img-cols') || '5';
-                            imgArea.className = 'img-area cols-' + savedCols;
-                            imgArea.dataset.cols = savedCols;
-                            imgArea.innerHTML = '<div style="display:flex;gap:0.25rem;margin-bottom:0.5rem;grid-column:1/-1;">' +
-                                '<button class="img-col-btn' + (savedCols === '1' ? ' active' : '') + '" onclick="setImgCols(this,1)">1</button>' +
-                                '<button class="img-col-btn' + (savedCols === '2' ? ' active' : '') + '" onclick="setImgCols(this,2)">2</button>' +
-                                '<button class="img-col-btn' + (savedCols === '3' ? ' active' : '') + '" onclick="setImgCols(this,3)">3</button>' +
-                                '<button class="img-col-btn' + (savedCols === '4' ? ' active' : '') + '" onclick="setImgCols(this,4)">4</button>' +
-                                '<button class="img-col-btn' + (savedCols === '5' ? ' active' : '') + '" onclick="setImgCols(this,5)">5</button></div>';
-                            dateGroup.appendChild(imgArea);
-                        }
-                        var imgItem = document.createElement('div');
-                        imgItem.className = 'img-item';
-                        imgItem.innerHTML = '<img src="/upload/' + data.image + '" alt="图片" onclick="showImgPreview(\'/upload/' + data.image + '\')">' +
-                            '<button class="del-img-btn" onclick="deleteImage(' + data.image_id + ', this)">删除</button>';
-                        imgArea.appendChild(imgItem);
-                    } else {
-                        alert('上传失败：' + (data.error || '未知错误'));
-                    }
-                }).catch(function(err) { handleApiError(err, '图片上传'); });
-            }, 'image/png');
-        };
-        img.onerror = function() {
-            URL.revokeObjectURL(objectUrl);
-            alert('图片加载失败');
-        };
-        img.src = objectUrl;
+        var imgItem = document.createElement('div');
+        imgItem.className = 'img-item';
+        imgItem.innerHTML = '<img src="/upload/' + escAttr(data.image) + '" alt="图片" onclick="showImgPreview(\'/upload/' + escAttr(data.image) + '\')">' +
+            '<button class="del-img-btn" onclick="deleteImage(' + Number(data.image_id) + ', this)">删除</button>';
+        imgArea.appendChild(imgItem);
     };
 
     window.deleteImage = function(imageId, btn) {
@@ -1013,7 +768,7 @@ document.addEventListener('DOMContentLoaded', function() {
         tr.dataset.seq = seq;
         tr.dataset.editId = recordId;
 
-        var units = ['支','kg','y','桶','张','件','箱','卷','块','令'];
+        var units = ['支','kg','y','桶','张','件','箱','卷','块','令','斤'];
         var unitOptions = units.map(function(u) {
             return u === unit ? "<option value='"+u+"' selected>"+u+"</option>" : "<option value='"+u+"'>"+u+"</option>";
         }).join('');
@@ -1023,11 +778,11 @@ document.addEventListener('DOMContentLoaded', function() {
         var editingPieceHint = getPieceHint(name, spec) || '';
 
         tr.innerHTML = '<td style="width:36px; text-align:center; color:#868e96; font-size:0.85rem;">'+seq+'</td>' +
-            '<td><input type="text" name="name" value="'+name+'" style="width:100%;padding:0.65rem;border:1px solid #dfe6e9;border-radius:4px;font-size:1.1rem;box-sizing:border-box;"></td>' +
-            '<td><input type="text" name="spec" value="'+spec+'" style="width:100%;padding:0.65rem;border:1px solid #dfe6e9;border-radius:4px;font-size:1.1rem;box-sizing:border-box;"></td>' +
-            '<td><input type="number" name="qty" value="'+qty+'" style="width:100%;padding:0.65rem;border:1px solid #dfe6e9;border-radius:4px;font-size:1.1rem;box-sizing:border-box;"></td>' +
+            '<td><input type="text" name="name" value="'+escAttr(name)+'" style="width:100%;padding:0.65rem;border:1px solid #dfe6e9;border-radius:4px;font-size:1.1rem;box-sizing:border-box;"></td>' +
+            '<td><input type="text" name="spec" value="'+escAttr(spec)+'" style="width:100%;padding:0.65rem;border:1px solid #dfe6e9;border-radius:4px;font-size:1.1rem;box-sizing:border-box;"></td>' +
+            '<td><input type="number" name="qty" value="'+escAttr(qty)+'" style="width:100%;padding:0.65rem;border:1px solid #dfe6e9;border-radius:4px;font-size:1.1rem;box-sizing:border-box;"></td>' +
             '<td><select name="unit" style="padding:0.65rem;border:1px solid #dfe6e9;border-radius:4px;font-size:1.1rem;box-sizing:border-box;">'+unitOptions+'</select></td>' +
-            '<td><input type="text" name="remark" value="'+remark+'" oninput="autoFillQtyFromRemark(this)" style="width:100%;padding:0.65rem;border:1px solid #dfe6e9;border-radius:4px;font-size:1.1rem;box-sizing:border-box;"></td>' +
+            '<td><input type="text" name="remark" value="'+escAttr(remark)+'" oninput="autoFillQtyFromRemark(this)" style="width:100%;padding:0.65rem;border:1px solid #dfe6e9;border-radius:4px;font-size:1.1rem;box-sizing:border-box;"></td>' +
             '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">'+editingHint+(editingPieceHint ? '<br><span style="color:#0984e3;">'+editingPieceHint+'</span>' : '')+'</td>' +
             '<td style="white-space:nowrap;">' +
                 "<button type='button' onclick='saveEdit(this)' style='background:#00b894;color:white;border:none;border-radius:4px;padding:0.2rem 0.5rem;font-size:0.75rem;cursor:pointer;margin-right:0.25rem;'>保存</button>" +
@@ -1045,6 +800,8 @@ document.addEventListener('DOMContentLoaded', function() {
             unit: tr.querySelector('select[name=unit]').value,
             remark: tr.querySelector('input[name=remark]').value
         };
+        // 三层防御：前端编辑保存也做 码→y 归一化（与批加、单条 add、PUT 端点一致）
+        if (data.unit === '码') data.unit = 'y';
         showBtnLoading(btn, '保存中...');
         fetch('/api/v1/loading-orders/records/' + recordId, {
             method: 'PUT',
@@ -1061,12 +818,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 var pieceHint = getPieceHint(r.product_name, r.specification || '');
                 var pieceMismatch = checkPieceMismatch(r.remark || '', r.quantity, r.product_name, r.specification || '');
                 tr.innerHTML = '<td style="width:36px; text-align:center; color:#868e96; font-size:0.85rem;">' + loadingMismatchIcon(mismatch) + seq + '</td>' +
-                    '<td>' + r.product_name + '</td>' +
-                    '<td>' + (r.specification || '-') + '</td>' +
-                    '<td><span class="qty-badge">' + r.quantity + '</span></td>' +
-                    '<td><span class="unit-badge">' + r.unit + '</span></td>' +
-                    '<td class="' + remarkClass + '">' + (r.remark || '-') + '</td>' +
-                    '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">' + unitHint + (pieceHint ? '<br><span style="color:#0984e3;">' + pieceHint + '</span>' : '') + '</td>' +
+                    '<td>' + escHtml(r.product_name) + '</td>' +
+                    '<td>' + escHtml(r.specification || '-') + '</td>' +
+                    '<td><span class="qty-badge">' + escHtml(r.quantity) + '</span></td>' +
+                    '<td><span class="unit-badge">' + escHtml(r.unit) + '</span></td>' +
+                    '<td class="' + remarkClass + '">' + escHtml(r.remark || '-') + '</td>' +
+                    '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">' + escHtml(unitHint) + (pieceHint ? '<br><span style="color:#0984e3;">' + escHtml(pieceHint) + '</span>' : '') + '</td>' +
                     '<td style="white-space:nowrap;">' +
                         '<button type="button" class="move-up-btn lock-hide" data-id="' + r.id + '" onclick="moveRecord(' + r.id + ',\'up\',this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;" title="上移">▲</button>' +
                         '<button type="button" class="move-down-btn lock-hide" data-id="' + r.id + '" onclick="moveRecord(' + r.id + ',\'down\',this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;margin-right:0.3rem;" title="下移">▼</button>' +
@@ -1086,19 +843,19 @@ document.addEventListener('DOMContentLoaded', function() {
     window.cancelEdit = function(btn) {
         var tr = btn.closest('tr');
         var orig = JSON.parse(tr.dataset.orig);
-        var units = ['支','kg','y','桶','张','件','箱','卷','块','令'];
+        var units = ['支','kg','y','桶','张','件','箱','卷','块','令','斤'];
         var unitOptions = units.map(function(u) {
             return u === orig.unit ? "<option value='"+u+"' selected>"+u+"</option>" : "<option value='"+u+"'>"+u+"</option>";
         }).join('');
         var unitHint = getLoadingUnitHint(orig.name, orig.spec, orig.qty, orig.unit, orig.remark) || '—';
         var pieceHint = getPieceHint(orig.name, orig.spec) || '';
         tr.innerHTML = '<td style="width:36px; text-align:center; color:#868e96; font-size:0.85rem;">'+tr.dataset.seq+'</td>' +
-            '<td>'+orig.name+'</td>' +
-            '<td>'+orig.spec+'</td>' +
-            '<td>'+orig.qty+'</td>' +
-            '<td>'+orig.unit+'</td>' +
-            '<td class="remark-cell '+(orig.remark ? 'has-content' : '')+'">'+orig.remark+'</td>' +
-            '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">'+unitHint+(pieceHint ? '<br><span style="color:#0984e3;">'+pieceHint+'</span>' : '')+'</td>' +
+            '<td>'+escHtml(orig.name)+'</td>' +
+            '<td>'+escHtml(orig.spec)+'</td>' +
+            '<td>'+escHtml(orig.qty)+'</td>' +
+            '<td>'+escHtml(orig.unit)+'</td>' +
+            '<td class="remark-cell '+(orig.remark ? 'has-content' : '')+'">'+escHtml(orig.remark)+'</td>' +
+            '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">'+escHtml(unitHint)+(pieceHint ? '<br><span style="color:#0984e3;">'+escHtml(pieceHint)+'</span>' : '')+'</td>' +
             '<td class="lock-hide" style="white-space:nowrap;">' +
                 "<button type='button' class='move-up-btn lock-hide' data-id='"+tr.dataset.editId+"' onclick='moveRecord("+tr.dataset.editId+",\"up\",this)' style='background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;' title='上移'>▲</button>" +
                 "<button type='button' class='move-down-btn lock-hide' data-id='"+tr.dataset.editId+"' onclick='moveRecord("+tr.dataset.editId+",\"down\",this)' style='background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;margin-right:0.3rem;' title='下移'>▼</button>" +
@@ -1153,7 +910,6 @@ document.addEventListener('DOMContentLoaded', function() {
         // 只修改当前按钮所在的 .img-area 区域（按 order_pk 隔离）
         var area = btn.closest('.img-area');
         if (!area) return;
-        var orderPk = area.closest('.date-group')?.dataset.orderPk;
         // 取消所有按钮的 active 状态
         document.querySelectorAll('.img-area .img-col-btn').forEach(function(b) {
             b.classList.remove('active');
@@ -1163,14 +919,11 @@ document.addEventListener('DOMContentLoaded', function() {
         area.classList.remove('cols-1','cols-2','cols-3','cols-4','cols-5');
         area.classList.add('cols-' + n);
         area.dataset.cols = n;
-        // 持久化到后端（每个订单独立记忆）
-        if (orderPk) {
-            fetch('/api/v1/loading-orders/' + orderPk, {
-                method: 'PATCH',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({img_cols: parseInt(n)})
-            });
-        }
+        // 装柜无 img_cols 字段（旧 PATCH 后端无分支 + 表无列 = 静默 400）
+        // 改走 localStorage（页面级全局偏好），不写后端
+        try { localStorage.setItem('loading-img-cols', String(n)); } catch (e) {}
+        // 同步 cookie（后端当前请求会读取，刷新时保持）
+        try { document.cookie = 'loadingImgCols=' + n + '; path=/; max-age=31536000'; } catch (e) {}
     };
 
     var savedCols = localStorage.getItem('loading-img-cols') || '5';
@@ -1189,17 +942,18 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // 快速添加表单提交
+    // 快速添加按钮提交（已去 form 化，纯 div + click）
     document.querySelectorAll('.quick-add').forEach(function(form) {
-        form.addEventListener('submit', function(e) {
-            e.preventDefault();
-            var orderPk = this.getAttribute('data-order-pk');
+        var btn = form.querySelector('.quick-add-btn');
+        if (!btn) return;
+        btn.addEventListener('click', function() {
+            var orderPk = form.getAttribute('data-order-pk');
             var data = {
-                product_name: this.product_name.value,
-                specification: this.specification.value,
-                quantity: this.quantity.value,
-                unit: this.unit.value,
-                remark: this.remark.value
+                product_name: form.querySelector('input[name=product_name]').value,
+                specification: form.querySelector('input[name=specification]').value,
+                quantity: form.querySelector('input[name=quantity]').value,
+                unit: form.querySelector('select[name=unit]').value,
+                remark: form.querySelector('input[name=remark]').value
             };
             fetch('/api/v1/loading-orders/' + orderPk + '/records', {
                 method: 'POST',
@@ -1208,14 +962,14 @@ document.addEventListener('DOMContentLoaded', function() {
             }).then(checkResponse)
             .then(function(res) {
                 if (res.success && res.record) {
-                    // 构建新行并插入
                     var dateGroup = document.querySelector('.date-group[data-order-pk="' + orderPk + '"]');
                     var tbody = dateGroup.querySelector('.record-table tbody');
                     var quickAddRow = tbody.querySelector('.quick-add-row');
                     var newTr = buildLoadingRecordRow(res.record, tbody);
                     tbody.insertBefore(newTr, quickAddRow);
                     recalcLoadingSummary(dateGroup);
-                    form.reset();
+                    // 清空 inputs（div 无 form.reset()）
+                    form.querySelectorAll('input[type=text]').forEach(function(i) { i.value = ''; });
                     // 高亮新行
                     newTr.style.backgroundColor = '#d4f5e9';
                     setTimeout(function() { newTr.style.backgroundColor = ''; }, 1500);
@@ -1239,12 +993,12 @@ document.addEventListener('DOMContentLoaded', function() {
         else if (mismatch === 'info' || pieceMismatch === 'info') { tr.classList.add('row-info'); }
         tr.innerHTML =
             '<td style="width:40px;text-align:center;color:#868e96;font-size:0.85rem;">' + loadingMismatchIcon(mismatch) + (existingRows + 1) + '</td>' +
-            '<td>' + rec.product_name + '</td>' +
-            '<td>' + (rec.specification || '-') + '</td>' +
-            '<td><span class="qty-badge">' + rec.quantity + '</span></td>' +
-            '<td><span class="unit-badge">' + rec.unit + '</span></td>' +
-            '<td class="remark-cell' + (rec.remark ? ' has-content' : '') + '">' + (rec.remark || '-') + '</td>' +
-            '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">' + unitHint + (pieceHint ? '<br><span style="color:#0984e3;">' + pieceHint + '</span>' : '') + '</td>' +
+            '<td>' + escHtml(rec.product_name) + '</td>' +
+            '<td>' + escHtml(rec.specification || '-') + '</td>' +
+            '<td><span class="qty-badge">' + escHtml(rec.quantity) + '</span></td>' +
+            '<td><span class="unit-badge">' + escHtml(rec.unit) + '</span></td>' +
+            '<td class="remark-cell' + (rec.remark ? ' has-content' : '') + '">' + escHtml(rec.remark || '-') + '</td>' +
+            '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">' + escHtml(unitHint) + (pieceHint ? '<br><span style="color:#0984e3;">' + escHtml(pieceHint) + '</span>' : '') + '</td>' +
             '<td style="white-space:nowrap;">' +
                 '<button type="button" class="move-up-btn lock-hide" data-id="' + rec.id + '" onclick="moveRecord(' + rec.id + ',\'up\',this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;" title="上移">▲</button>' +
                 '<button type="button" class="move-down-btn lock-hide" data-id="' + rec.id + '" onclick="moveRecord(' + rec.id + ',\'down\',this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;margin-right:0.3rem;" title="下移">▼</button>' +
@@ -1305,6 +1059,86 @@ document.addEventListener('DOMContentLoaded', function() {
             '<td style="padding:0.6rem 0.75rem;"></td>';
         tbody.appendChild(summaryRow);
     }
+
+    // ── 覆盖共享 _smart_add_modal.html 的 submitAiResults ──
+    // 原因：共享模板发送 {items} 但装柜 API 需要 {records}；行格式也需匹配装柜页面
+    window.submitAiResults = function() {
+        if (_smartFillOrderPk === null) { alert('缺少订单信息'); return; }
+        var rows = document.querySelectorAll('#aiResultBody tr'), items = [], i, row, pn, sp, qt, un, rm;
+        for (i = 0; i < rows.length; i++) {
+            row = rows[i];
+            pn = row.querySelector('[data-field="product_name"]').value.trim();
+            sp = row.querySelector('[data-field="specification"]').value.trim();
+            qt = row.querySelector('[data-field="quantity"]').value.trim();
+            un = row.querySelector('[data-field="unit"]').value;
+            rm = row.querySelector('[data-field="remark"]').value.trim();
+            if (pn && qt) items.push({product_name:pn, specification:sp, quantity:qt, unit:un, remark:rm});
+        }
+        if (items.length === 0) { alert('没有有效的数据可添加'); return; }
+
+        var doBatchAdd = function(imgData) {
+            if (typeof showLoading === 'function') showLoading('批量添加中...');
+            fetch(_smartAddApi + '/' + _smartFillOrderPk + '/records/batch', {
+                method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({records: items})
+            }).then(function(r){return r.json();}).then(function(data){
+                if (typeof hideLoading === 'function') hideLoading();
+                if (data.success) {
+                    updateOrderDocNumber(); closeSmartFill();
+                    if (data.records && data.records.length > 0) {
+                        var dateGroup = document.querySelector('.date-group[data-order-pk="' + _smartFillOrderId + '"]');
+                        var tbody = dateGroup ? dateGroup.querySelector('.record-table tbody') : null;
+                        if (tbody) {
+                            data.records.forEach(function(item){
+                                var tr = buildLoadingRecordRow(item, tbody);
+                                tbody.appendChild(tr);
+                            });
+                            recalcLoadingSummary(dateGroup);
+                            if (imgData && imgData.success && imgData.image) insertAiImage(imgData, dateGroup);
+                        }
+                    }
+                } else { alert('添加失败：' + (data.error || '未知错误')); }
+            }).catch(function(err){ alert('请求失败：'+err); });
+        };
+
+        if (_smartAiImageFile) {
+            if (typeof showLoading === 'function') showLoading('上传图片中...');
+            var fd = new FormData(); fd.append('image', _smartAiImageFile); fd.append('source', 'ai');
+            fetch(_smartAddApi + '/' + _smartFillOrderPk + '/images', { method:'POST', body:fd })
+            .then(function(r){return r.json();}).then(function(d){doBatchAdd(d);}).catch(function(){doBatchAdd(null);});
+        } else { doBatchAdd(null); }
+    };
+});
+
+// ── AI 图片删除按钮绑定（供 _smart_add_modal.html 的 insertAiImage 调用）──
+function bindDeleteImageButtons() {
+    document.querySelectorAll('.del-img-btn:not([data-bound])').forEach(function(btn) {
+        btn.setAttribute('data-bound', '1');
+        btn.addEventListener('click', function() {
+            var imageId = this.getAttribute('data-image-id');
+            if (!imageId) return;
+            if (!confirm('确定删除这张AI识别图片吗？')) return;
+            fetch('/api/v1/loading-orders/images/' + imageId, { method: 'DELETE' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.success) {
+                    var wrap = this.closest('.ai-img-wrap');
+                    var area = this.closest('.ai-images-area');
+                    if (wrap) wrap.remove();
+                    if (area) {
+                        var remaining = area.querySelectorAll('.ai-img-wrap').length;
+                        var h4 = area.querySelector('h4');
+                        if (h4) h4.textContent = '🤖 AI 识别图片 (' + remaining + '张)';
+                        if (remaining === 0) area.remove();
+                    }
+                } else { alert('删除失败: ' + (data.error || '未知错误')); }
+            }.bind(this)).catch(function(err) { alert('请求失败: ' + err.message); });
+        });
+    });
+}
+
+// 页面加载时绑定已有的 AI 图片删除按钮
+document.addEventListener('DOMContentLoaded', function() {
+    bindDeleteImageButtons();
 });
 
 // === 订单备注功能 ===
@@ -1352,6 +1186,9 @@ function saveNote() {
             if (data.customer) {
                 updateCustomerRow(currentNoteOrderPk, data.customer);
             }
+            if (data.order_num) {
+                updateOrderNumRow(currentNoteOrderPk, data.order_num);
+            }
             closeNoteModal();
         } else {
             alert('保存失败：' + (data.error || '未知错误'));
@@ -1375,6 +1212,15 @@ function updateCustomerRow(orderPk, newCustomer) {
             newEl.textContent = newCustomer;
             dateEl.parentNode.insertBefore(newEl, dateEl.nextSibling);
         }
+    }
+}
+
+function updateOrderNumRow(orderPk, newOrderNum) {
+    var dateGroup = document.querySelector('.date-group[data-order-pk="' + orderPk + '"]');
+    if (!dateGroup) { location.reload(); return; }
+    var numEl = dateGroup.querySelector('.order-num');
+    if (numEl) {
+        numEl.textContent = '订单 #' + newOrderNum;
     }
 }
 
@@ -1436,6 +1282,15 @@ document.getElementById('noteModal').addEventListener('click', function(e) {
 document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape' && document.getElementById('noteModal').classList.contains('show')) {
         closeNoteModal();
+    }
+});
+// ESC 关闭智能填充弹框 + 日期范围弹框
+document.addEventListener('keydown', function(e) {
+    if (e.key !== 'Escape') return;
+    if (document.getElementById('smartFillModal').classList.contains('show')) {
+        closeSmartFill();
+    } else if (dateRangeModal.classList.contains('show')) {
+        closeDateRangeModal();
     }
 });
 </script>

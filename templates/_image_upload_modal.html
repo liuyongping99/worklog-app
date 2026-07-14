@@ -1,0 +1,344 @@
+{# 图片上传弹框 - 共享模板
+   调用方式: {% with image_api='/api/v1/shipping-orders' %}{% include '_image_upload_modal.html' %}{% endwith %}
+   参数: image_api - API 基础路径 (如 /api/v1/shipping-orders)
+
+   上传成功后回调页面钩子 onImageUploaded(data, orderPk)，data = {success, image, image_id}。
+   页面未定义该钩子时回退到 location.reload()。
+   依赖: 共享灯箱 showImgPreview（base.html + static/js/common.js）。
+#}
+<style>
+/* 图片上传弹框（三套订单共享，类名 .img-upload-modal 避免与 .image-modal 灯箱撞名） */
+.img-upload-modal {
+    display: none;
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(0,0,0,0.5);
+    z-index: 1500;
+    align-items: center;
+    justify-content: center;
+}
+.img-upload-modal.show { display: flex; }
+.img-upload-modal .modal-dialog {
+    background: #fff;
+    border-radius: 12px;
+    padding: 1.5rem;
+    width: 500px;
+    max-width: 90%;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    position: relative;
+}
+.img-upload-modal .modal-title {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: #2d3436;
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.img-upload-modal .modal-close {
+    float: right;
+    cursor: pointer;
+    font-size: 1.5rem;
+    color: #999;
+    line-height: 1;
+    background: none;
+    border: none;
+}
+.img-upload-modal .modal-close:hover { color: #333; }
+.img-upload-modal .upload-options {
+    display: flex;
+    flex-direction: row;
+    gap: 0.75rem;
+    border-radius: 10px;
+    padding: 4px;
+    transition: background 0.2s, box-shadow 0.2s;
+}
+.img-upload-modal .upload-options.drag-over {
+    background: rgba(0,184,148,0.08);
+    box-shadow: inset 0 0 0 2px #00b894;
+}
+.img-upload-modal .upload-options::after {
+    content: '松手即可上传';
+    position: absolute;
+    inset: 50% 0 auto 0;
+    transform: translateY(-50%);
+    text-align: center;
+    color: #00b894;
+    font-weight: 600;
+    font-size: 0.9rem;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+    z-index: 1;
+}
+.img-upload-modal .upload-options.drag-over::after { opacity: 1; }
+.img-upload-modal .upload-box {
+    flex: 1;
+    border: 2px dashed #dfe6e9;
+    border-radius: 8px;
+    padding: 1rem;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+}
+.img-upload-modal .upload-box:hover {
+    border-color: #6c5ce7;
+    background: rgba(108,92,231,0.05);
+}
+.img-upload-modal .upload-box.active {
+    border-color: #00b894;
+    background: rgba(0,184,148,0.1);
+}
+.img-upload-modal .upload-box .icon { font-size: 1.5rem; margin-bottom: 0.25rem; }
+.img-upload-modal .upload-box .text { font-size: 0.85rem; color: #555; }
+.img-upload-modal .upload-box .hint { font-size: 0.72rem; color: #868e96; margin-top: 0.15rem; }
+.img-upload-modal .file-input { display: none; }
+.img-upload-modal .modal-img-preview {
+    max-width: 100%;
+    border-radius: 8px;
+    margin: 1rem 0;
+    display: none;
+    text-align: center;
+    overflow: hidden;
+}
+.img-upload-modal .modal-img-preview img {
+    max-width: 100%;
+    max-height: 300px;
+    border-radius: 8px;
+    transition: transform 0.3s ease;
+    transform-origin: center center;
+}
+.img-upload-modal .preview-actions {
+    display: none;
+    gap: 0.5rem;
+    justify-content: center;
+    margin-top: 0.5rem;
+}
+.img-upload-modal .preview-actions .btn {
+    padding: 0.4rem 1rem;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    font-size: 0.85rem;
+}
+.img-upload-modal .preview-actions .btn-cancel { background: #e9ecef; color: #333; }
+.img-upload-modal .preview-actions .btn-confirm { background: #6c5ce7; color: #fff; }
+</style>
+
+<div id="imageModal" class="img-upload-modal">
+    <div class="modal-dialog">
+        <button type="button" class="modal-close" onclick="closeImageModal()">&times;</button>
+        <div class="modal-title">📷 上传图片</div>
+        <div class="upload-options" id="uploadOptions">
+            <div class="upload-box" id="pasteBox" onclick="activatePaste()">
+                <div class="icon">📋</div>
+                <div class="text">点击此处后按 Ctrl+V 粘贴</div>
+                <div class="hint">支持从剪贴板粘贴截图</div>
+            </div>
+            <div class="upload-box" onclick="document.getElementById('fileInput').click()">
+                <div class="icon">📁</div>
+                <div class="text">点击选择图片文件</div>
+                <div class="hint">支持 jpg/png/gif/webp</div>
+                <input type="file" id="fileInput" class="file-input" accept="image/*" onchange="handleFileSelect(this.files)">
+            </div>
+        </div>
+        <div id="modalImgPreview" class="modal-img-preview"></div>
+        <div style="text-align:center;">
+            <button type="button" id="rotateUploadBtn" onclick="rotateUploadImage();" style="display:none; padding:0.5rem 1rem; background:#f1f3f5; color:#333; border:1px solid #dfe6e9; border-radius:6px; cursor:pointer; font-size:0.85rem; font-weight:600;">🔄 旋转90°</button>
+        </div>
+        <div class="preview-actions" id="previewActions">
+            <button class="btn btn-cancel" onclick="clearPreview()">取消</button>
+            <button class="btn btn-confirm" onclick="confirmUpload()">确认上传</button>
+        </div>
+    </div>
+</div>
+
+<script>
+// ── 图片上传弹框（共享）──
+var IMAGE_API = '{{ image_api }}';
+var currentImageOrderPk = null;
+var pasteActive = false;
+var pendingFile = null;
+var uploadImageRotation = 0;
+
+window.openImageModal = function(orderPk) {
+    currentImageOrderPk = orderPk;
+    pasteActive = false;
+    pendingFile = null;
+    uploadImageRotation = 0;
+    document.getElementById('imageModal').classList.add('show');
+    document.getElementById('pasteBox').classList.remove('active');
+    clearPreview();
+};
+
+window.closeImageModal = function() {
+    currentImageOrderPk = null;
+    pasteActive = false;
+    pendingFile = null;
+    uploadImageRotation = 0;
+    document.getElementById('imageModal').classList.remove('show');
+    document.getElementById('pasteBox').classList.remove('active');
+    clearPreview();
+};
+
+window.activatePaste = function() {
+    pasteActive = true;
+    document.getElementById('pasteBox').classList.add('active');
+    var t = document.querySelector('#pasteBox .text');
+    if (t) t.textContent = '请按 Ctrl+V 粘贴图片...';
+};
+
+// 全局粘贴：仅当弹框打开且已激活粘贴时才拦截
+document.addEventListener('paste', function(e) {
+    if (!pasteActive || !currentImageOrderPk) return;
+    var items = e.clipboardData.items;
+    for (var i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image/') === 0) {
+            showPreview(items[i].getAsFile());
+            break;
+        }
+    }
+});
+
+window.handleFileSelect = function(files) {
+    if (!currentImageOrderPk || !files || files.length === 0) return;
+    showPreview(files[0]);
+};
+
+function showPreview(file) {
+    if (!file) return;
+    if (!file.type || file.type.indexOf('image/') !== 0) { alert('请选择图片文件！'); return; }
+    if (file.size > 20 * 1024 * 1024) { alert('图片大小不能超过 20MB！'); return; }
+    pendingFile = file;
+    uploadImageRotation = 0;
+    var reader = new FileReader();
+    reader.onload = function(e) {
+        var preview = document.getElementById('modalImgPreview');
+        preview.innerHTML = '<img src="' + e.target.result + '">';
+        preview.style.display = 'block';
+        document.getElementById('rotateUploadBtn').style.display = 'inline-block';
+        document.getElementById('previewActions').style.display = 'flex';
+    };
+    reader.readAsDataURL(file);
+}
+
+window.clearPreview = function() {
+    pendingFile = null;
+    uploadImageRotation = 0;
+    var preview = document.getElementById('modalImgPreview');
+    preview.innerHTML = '';
+    preview.style.display = 'none';
+    document.getElementById('rotateUploadBtn').style.display = 'none';
+    document.getElementById('previewActions').style.display = 'none';
+    document.getElementById('fileInput').value = '';
+};
+
+window.rotateUploadImage = function() {
+    if (!pendingFile) return;
+    uploadImageRotation = (uploadImageRotation + 90) % 360;
+    var img = document.querySelector('#modalImgPreview img');
+    if (img) img.style.transform = 'rotate(' + uploadImageRotation + 'deg)';
+};
+
+// 用 Canvas 把旋转烧进图片，返回新的 File（rotation===0 时原样返回）
+function getRotatedImageFile(file, rotation) {
+    return new Promise(function(resolve, reject) {
+        if (rotation === 0) { resolve(file); return; }
+        var img = new Image();
+        var objectUrl = URL.createObjectURL(file);
+        img.onload = function() {
+            URL.revokeObjectURL(objectUrl);
+            var canvas = document.createElement('canvas');
+            var ctx = canvas.getContext('2d');
+            var radians = rotation * Math.PI / 180;
+            var sin = Math.abs(Math.sin(radians));
+            var cos = Math.abs(Math.cos(radians));
+            var newWidth = img.width * cos + img.height * sin;
+            var newHeight = img.width * sin + img.height * cos;
+            canvas.width = newWidth;
+            canvas.height = newHeight;
+            ctx.translate(newWidth / 2, newHeight / 2);
+            ctx.rotate(radians);
+            ctx.drawImage(img, -img.width / 2, -img.height / 2);
+            canvas.toBlob(function(blob) {
+                resolve(new File([blob], file.name || 'image.png', { type: file.type || 'image/png' }));
+            }, file.type || 'image/png', 0.92);
+        };
+        img.onerror = function() { URL.revokeObjectURL(objectUrl); reject(new Error('图片加载失败')); };
+        img.src = objectUrl;
+    });
+}
+
+window.confirmUpload = function() {
+    if (!pendingFile || !currentImageOrderPk) { alert('请先选择图片'); return; }
+    var savedOrderPk = currentImageOrderPk;
+    getRotatedImageFile(pendingFile, uploadImageRotation).then(function(fileToUpload) {
+        var formData = new FormData();
+        formData.append('image', fileToUpload);
+        return fetch(IMAGE_API + '/' + savedOrderPk + '/images', { method: 'POST', body: formData });
+    }).then(function(res) { return res.json(); })
+    .then(function(data) {
+        if (data.success) {
+            closeImageModal();
+            if (typeof onImageUploaded === 'function') onImageUploaded(data, savedOrderPk);
+            else location.reload();
+        } else {
+            alert('上传失败：' + (data.error || '未知错误'));
+        }
+    }).catch(function(err) {
+        console.error('图片上传 error:', err);
+        alert('图片上传失败：' + (err && err.message ? err.message : err));
+    });
+};
+
+// 点击遮罩关闭
+document.getElementById('imageModal').addEventListener('click', function(e) {
+    if (e.target === this) closeImageModal();
+});
+
+// ── 拖拽上传：把图片拖入弹框内即可填充预览 ──
+// 1) 阻止整页默认拖入行为（避免浏览器直接把图片打开覆盖弹框）
+['dragenter','dragover','drop'].forEach(function(ev) {
+    window.addEventListener(ev, function(e) {
+        if (document.getElementById('imageModal').classList.contains('show')) e.preventDefault();
+    });
+});
+// 2) upload-options 区域作为放置目标
+(function() {
+    var dropZone = document.getElementById('uploadOptions');
+    if (!dropZone) return;
+    var dragCounter = 0;  // 避免 dragenter/dragleave 在子元素上误触
+    dropZone.addEventListener('dragenter', function(e) {
+        if (!e.dataTransfer || !e.dataTransfer.types || e.dataTransfer.types.indexOf('Files') === -1) return;
+        e.preventDefault();
+        dragCounter++;
+        dropZone.classList.add('drag-over');
+    });
+    dropZone.addEventListener('dragover', function(e) {
+        if (!e.dataTransfer || !e.dataTransfer.types || e.dataTransfer.types.indexOf('Files') === -1) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+    });
+    dropZone.addEventListener('dragleave', function(e) {
+        dragCounter--;
+        if (dragCounter <= 0) { dragCounter = 0; dropZone.classList.remove('drag-over'); }
+    });
+    dropZone.addEventListener('drop', function(e) {
+        e.preventDefault();
+        dragCounter = 0;
+        dropZone.classList.remove('drag-over');
+        if (!e.dataTransfer || !e.dataTransfer.files || e.dataTransfer.files.length === 0) return;
+        // 取第一张图片（showPreview 内部会做 MIME 校验）
+        for (var i = 0; i < e.dataTransfer.files.length; i++) {
+            if (e.dataTransfer.files[i].type && e.dataTransfer.files[i].type.indexOf('image/') === 0) {
+                showPreview(e.dataTransfer.files[i]);
+                return;
+            }
+        }
+        alert('请拖入图片文件');
+    });
+})();
+</script>

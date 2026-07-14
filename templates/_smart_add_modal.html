@@ -1,0 +1,403 @@
+{# 智能添加弹框 - 共享模板
+   调用方式: {% with smart_add_api='/_smartAddApi/v1/shipping-orders' %}{% include '_smart_add_modal.html' %}{% endwith %}
+   参数: smart_add_api - API 基础路径 (如 /_smartAddApi/v1/shipping-orders)
+#}
+<script>
+// ── 智能添加弹框 ──
+var SMART_ADD_API = '{{ smart_add_api }}';
+var _smartAddApi = SMART_ADD_API;
+var _smartAiImageFile = null, _smartAiItems = [], _smartDocNumber = '';
+var _smartFillOrderPk = null, _smartFillOrderId = null;
+
+window.openSmartFill = function(orderPk, orderDate, orderCustomer) {
+    _smartFillOrderPk = orderPk; _smartFillOrderId = orderPk;
+    document.getElementById('smartFillModal').classList.add('show');
+    document.getElementById('smartFillText').value = '';
+    document.getElementById('smartFillOrderInfo').textContent = '📦 ' + orderDate + ' ' + orderCustomer;
+    resetAiState(); switchSmartFillTab('ai');
+};
+window.closeSmartFill = function() {
+    document.getElementById('smartFillModal').classList.remove('show');
+    document.getElementById('smartFillText').value = '';
+    resetAiState(); switchSmartFillTab('ai');
+};
+window.switchSmartFillTab = function(tab) {
+    document.getElementById('tabText').classList.toggle('active', tab === 'text');
+    document.getElementById('tabAI').classList.toggle('active', tab === 'ai');
+    document.getElementById('contentText').classList.toggle('active', tab === 'text');
+    document.getElementById('contentAI').classList.toggle('active', tab === 'ai');
+};
+window.onAiEngineChange = function() {
+    var e = document.getElementById('aiEngine').value;
+    var h = document.getElementById('aiEngineHint');
+    h.textContent = e === 'paddleocr' ? '纯本地 3-8 秒' : e === 'deepseek' ? '本地 OCR + DeepSeek' : '快速，需联网';
+};
+
+function resetAiState() {
+    _smartAiImageFile = null; _smartAiItems = []; _smartDocNumber = '';
+    var els = ['aiPreview','aiPreviewImg','aiImageFile','aiLoading','aiResultArea','aiResultBody','aiAddBtn','aiUploadArea'];
+    document.getElementById('aiPreview').classList.remove('show');
+    document.getElementById('aiPreviewImg').src = '';
+    document.getElementById('aiImageFile').value = '';
+    document.getElementById('aiLoading').classList.remove('show');
+    document.getElementById('aiResultArea').classList.remove('show');
+    document.getElementById('aiResultBody').innerHTML = '';
+    document.getElementById('aiAddBtn').disabled = true;
+    document.getElementById('aiUploadArea').style.display = 'block';
+    var p = document.querySelector('#aiLoading p'); if (p) p.textContent = 'AI 正在识别中，请稍候...';
+}
+
+function handleAiFileSelect(input) {
+    var file = input.files[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { alert('请选择图片文件！'); return; }
+    if (file.size > 10*1024*1024) { alert('图片大小不能超过 10MB！'); return; }
+    _smartAiImageFile = file;
+    var reader = new FileReader();
+    reader.onload = function(e) {
+        document.getElementById('aiPreviewImg').src = e.target.result;
+        document.getElementById('aiPreview').classList.add('show');
+        document.getElementById('aiUploadArea').style.display = 'none';
+        submitAiRecognize();
+    };
+    reader.readAsDataURL(file);
+}
+window.handleAiFileSelect = handleAiFileSelect;
+
+window.removeAiImage = function() {
+    _smartAiImageFile = null;
+    document.getElementById('aiImageFile').value = '';
+    document.getElementById('aiPreview').classList.remove('show');
+    document.getElementById('aiPreviewImg').src = '';
+    document.getElementById('aiUploadArea').style.display = 'block';
+    document.getElementById('aiResultArea').classList.remove('show');
+    document.getElementById('aiAddBtn').disabled = true;
+};
+
+// 拖拽支持
+document.addEventListener('DOMContentLoaded', function() {
+    var area = document.getElementById('aiUploadArea');
+    if (!area) return;
+    area.addEventListener('dragover', function(e) { e.preventDefault(); area.classList.add('drag-over'); });
+    area.addEventListener('dragleave', function(e) { e.preventDefault(); area.classList.remove('drag-over'); });
+    area.addEventListener('drop', function(e) {
+        e.preventDefault(); area.classList.remove('drag-over');
+        var file = e.dataTransfer.files[0];
+        if (file) { document.getElementById('aiImageFile').files = e.dataTransfer.files; handleAiFileSelect(document.getElementById('aiImageFile')); }
+    });
+    // 点击遮罩关闭
+    document.getElementById('smartFillModal').addEventListener('click', function(e) {
+        if (e.target === this) closeSmartFill();
+    });
+});
+
+function submitAiRecognize() {
+    if (!_smartAiImageFile) { alert('请先选择图片'); return; }
+    document.getElementById('aiLoading').classList.add('show');
+    document.getElementById('aiResultArea').classList.remove('show');
+    document.getElementById('aiAddBtn').disabled = true;
+    var engine = document.getElementById('aiEngine').value;
+    var msg = engine === 'paddleocr' ? 'PaddleOCR 本地识别中，首次约 5-12 秒...' :
+              engine === 'deepseek' ? 'PaddleOCR 提取文字 + DeepSeek 结构化中...' : 'AI 正在识别中，请稍候...';
+    document.querySelector('#aiLoading p').textContent = msg;
+    var fd = new FormData(); fd.append('image', _smartAiImageFile); fd.append('engine', engine);
+    fetch(_smartAddApi + '/ai-recognize', { method: 'POST', body: fd })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        document.getElementById('aiLoading').classList.remove('show');
+        if (data.success && data.items && data.items.length > 0) {
+            _smartAiItems = data.items; _smartDocNumber = data.doc_number || '';
+            renderAiResults(data.items);
+            document.getElementById('aiResultArea').classList.add('show');
+            document.getElementById('aiAddBtn').disabled = false;
+        } else if (data.success && data.items && data.items.length === 0) {
+            alert('AI 未能从图片中识别到商品信息，请尝试其他图片或手动输入。');
+        } else {
+            var m = data.hint ? data.error + '\n\n💡 ' + data.hint : (data.error || '未知错误');
+            alert('识别失败：' + m);
+        }
+    }).catch(function(err) { document.getElementById('aiLoading').classList.remove('show'); alert('请求失败：' + err); });
+}
+
+function renderAiResults(items) {
+    var tbody = document.getElementById('aiResultBody'), i, item, tr;
+    tbody.innerHTML = '';
+    for (i = 0; i < items.length; i++) {
+        item = items[i]; tr = document.createElement('tr');
+        tr.innerHTML = '<td><input type="text" value="' + escHtml(item.product_name||'') + '" data-field="product_name"></td>' +
+            '<td><input type="text" value="' + escHtml(item.specification||'') + '" data-field="specification"></td>' +
+            '<td><input type="text" value="' + escHtml(item.quantity||'') + '" data-field="quantity"></td>' +
+            '<td><select data-field="unit" style="width:100%;padding:0.25rem;border:1px solid #dfe6e9;border-radius:4px;font-size:0.85rem;box-sizing:border-box;">' +
+            '<option value="支"'+(item.unit==='支'?' selected':'')+'>支</option><option value="kg"'+(item.unit==='kg'?' selected':'')+'>kg</option>' +
+            '<option value="y"'+(item.unit==='y'?' selected':'')+'>y</option><option value="桶"'+(item.unit==='桶'?' selected':'')+'>桶</option>' +
+            '<option value="张"'+(item.unit==='张'?' selected':'')+'>张</option><option value="件"'+(item.unit==='件'?' selected':'')+'>件</option>' +
+            '<option value="箱"'+(item.unit==='箱'?' selected':'')+'>箱</option><option value="卷"'+(item.unit==='卷'?' selected':'')+'>卷</option>' +
+            '<option value="块"'+(item.unit==='块'?' selected':'')+'>块</option><option value="令"'+(item.unit==='令'?' selected':'')+'>令</option>' +
+            '<option value="斤"'+(item.unit==='斤'?' selected':'')+'>斤</option>' +
+            '</select></td>' +
+            '<td><input type="text" value="' + escHtml(item.remark||'') + '" data-field="remark" oninput="autoFillQtyFromRemark(this)" style="width:100%;"></td>' +
+            '<td style="width:35px;text-align:center;"><button onclick="this.closest(\'tr\').remove()" style="background:#ffeaa7;border:1px solid #fdcb6e;color:#d63031;cursor:pointer;font-size:1.1rem;padding:0 4px;border-radius:3px;line-height:1;" title="删除此行">&times;</button></td>';
+        tbody.appendChild(tr);
+    }
+}
+
+// escHtml() 由 static/js/common.js 提供（base.html 统一加载），此处不再重复定义。
+
+function insertAiImage(imgData, dateGroup) {
+    var aiArea = dateGroup.querySelector('.ai-images-area');
+    if (!aiArea) {
+        aiArea = document.createElement('div'); aiArea.className = 'ai-images-area'; aiArea.dataset.orderId = _smartFillOrderId;
+        aiArea.innerHTML = '<h4>🤖 AI 识别图片 (0张)</h4>';
+        var table = dateGroup.querySelector('.record-table');
+        if (table) table.parentNode.insertBefore(aiArea, table); else dateGroup.appendChild(aiArea);
+    }
+    var wrap = document.createElement('div'); wrap.style.cssText = 'display:inline-block;position:relative;width:70%;'; wrap.className = 'ai-img-wrap';
+    wrap.innerHTML = '<img src="/upload/' + escAttr(imgData.image) + '" alt="AI识别图片" onclick="showImgPreview(\'/upload/' + escAttr(imgData.image) + '\')" style="display:block;width:100%;height:auto;">' +
+        '<button class="del-img-btn" data-image-id="' + escAttr(imgData.image_id) + '" style="position:absolute;top:4px;right:4px;background:rgba(200,30,30,0.85);color:#fff;border:none;border-radius:3px;padding:2px 6px;cursor:pointer;font-size:12px;opacity:0;transition:opacity 0.2s;">✕ 删除</button>';
+    aiArea.appendChild(wrap);
+    var h4 = aiArea.querySelector('h4'); if (h4) h4.textContent = h4.textContent.replace(/\d+张/, aiArea.querySelectorAll('.ai-img-wrap').length + '张');
+    if (typeof bindDeleteImageButtons === 'function') bindDeleteImageButtons();
+}
+
+window.submitAiResults = function() {
+    if (_smartFillOrderPk === null) { alert('缺少订单信息'); return; }
+    var rows = document.querySelectorAll('#aiResultBody tr'), items = [], i, row, pn, sp, qt, un, rm;
+    for (i = 0; i < rows.length; i++) {
+        row = rows[i];
+        pn = row.querySelector('[data-field="product_name"]').value.trim();
+        sp = row.querySelector('[data-field="specification"]').value.trim();
+        qt = row.querySelector('[data-field="quantity"]').value.trim();
+        un = row.querySelector('[data-field="unit"]').value;
+        rm = row.querySelector('[data-field="remark"]').value.trim();
+        if (pn && qt) items.push({product_name:pn, specification:sp, quantity:qt, unit:un, remark:rm});
+    }
+    if (items.length === 0) { alert('没有有效的数据可添加'); return; }
+
+    var doBatchAdd = function(imgData) {
+        if (typeof showLoading === 'function') showLoading('批量添加中...');
+        fetch(_smartAddApi + '/' + _smartFillOrderPk + '/records/batch', {
+            method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({items:items, records:items})
+        }).then(function(r){return r.json();}).then(function(data){
+            if (typeof hideLoading === 'function') hideLoading();
+            if (data.success) {
+                updateOrderDocNumber(); closeSmartFill();
+                if (data.records && data.records.length > 0) {
+                    var tbody = document.querySelector('.date-group[data-order-id="' + _smartFillOrderId + '"] .record-table tbody');
+                    if (tbody) {
+                        data.records.forEach(function(item){
+                            var tr = document.createElement('tr');
+                            var hint = (typeof getUnitHint === 'function') ? getUnitHint(item.product_name, item.specification||'', item.quantity, item.unit, item.remark) : '';
+                            var mismatch = (typeof checkMismatch === 'function') ? checkMismatch(item.remark||'', item.quantity, item.product_name, item.specification||'') : '';
+                            var pieceHint = (typeof getPieceHint === 'function') ? getPieceHint(item.product_name, item.specification||'') : '';
+                            var pieceMismatch = (typeof checkPieceMismatch === 'function') ? checkPieceMismatch(item.remark||'', item.quantity, item.product_name, item.specification||'') : '';
+                            var bad = typeof isInvalidQty === 'function' ? isInvalidQty(item.quantity) : false;
+                            var cm = ''; if (mismatch==='warn'||pieceMismatch==='warn') cm='warn'; else if (mismatch==='info'||pieceMismatch==='info') cm='info';
+                            var prefix = bad ? (typeof invalidQtyIcon === 'function' ? invalidQtyIcon() : '❌') : (typeof mismatchIcon === 'function' ? mismatchIcon(cm) : '');
+                            tr.innerHTML = '<td style="text-align:center;color:#868e96;font-size:0.85rem;">'+prefix+(tbody.children.length+1)+'</td>' +
+                                '<td style="font-size:0.9rem;">'+escHtml(item.product_name)+'</td>' +
+                                '<td style="color:#636e72;font-size:0.9rem;">'+escHtml(item.specification||'')+'</td>' +
+                                '<td><span class="qty-badge">'+escHtml(item.quantity)+'</span></td>' +
+                                '<td><span class="unit-badge">'+escHtml(item.unit)+'</span></td>' +
+                                '<td class="remark-cell">'+escHtml(item.remark||'—')+'</td>' +
+                                '<td class="unit-hint-cell" style="font-size:0.85rem;color:#e17055;">'+escHtml(hint||'—')+(pieceHint?'<br><span style="color:#0984e3;">'+escHtml(pieceHint)+'</span>':'')+'</td>' +
+                                '<td style="white-space:nowrap;">' +
+                                '<button type="button" class="btn btn-sm move-up-btn lock-hide" data-id="'+item.id+'" title="上移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.1rem 0.35rem;font-size:0.75rem;">▲</button> ' +
+                                '<button type="button" class="btn btn-sm move-down-btn lock-hide" data-id="'+item.id+'" title="下移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.1rem 0.35rem;font-size:0.75rem;">▼</button> ' +
+                                '<button type="button" class="btn btn-primary btn-sm edit-record-btn lock-hide" data-id="'+item.id+'">✏️</button> ' +
+                                '<button type="button" class="btn btn-danger btn-sm delete-record-btn lock-hide" data-id="'+item.id+'">🗑️</button></td>';
+                            if (typeof applyMismatchClass === 'function') applyMismatchClass(tr, cm);
+                            if (bad) tr.classList.add('row-out-of-stock');
+                            tbody.appendChild(tr);
+                        });
+                        if (typeof bindEditDeleteButtons === 'function') bindEditDeleteButtons();
+                        if (typeof refreshRemarkSummary === 'function') refreshRemarkSummary(tbody.closest('.date-group'));
+                        if (imgData && imgData.success && imgData.image) insertAiImage(imgData, tbody.closest('.date-group'));
+                    }
+                }
+            } else { alert('添加失败：' + (data.error || '未知错误')); }
+        }).catch(function(err){ alert('请求失败：'+err); });
+    };
+
+    if (_smartAiImageFile) {
+        if (typeof showLoading === 'function') showLoading('上传图片中...');
+        var fd = new FormData(); fd.append('image', _smartAiImageFile); fd.append('source', 'ai');
+        fetch(_smartAddApi + '/' + _smartFillOrderPk + '/images', { method:'POST', body:fd })
+        .then(function(r){return r.json();}).then(function(d){doBatchAdd(d);}).catch(function(){doBatchAdd(null);});
+    } else { doBatchAdd(null); }
+};
+
+function updateOrderDocNumber() {
+    if (!_smartDocNumber) return;
+    var el = document.getElementById('docNumber' + _smartFillOrderId);
+    if (el && el.textContent.trim() === _smartDocNumber) return;
+    fetch(_smartAddApi + '/' + _smartFillOrderPk, {
+        method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({doc_number:_smartDocNumber})
+    }).then(function(r){return r.json();}).then(function(data){
+        if (data.success) {
+            if (el) { el.textContent = data.doc_number; }
+            else {
+                // 兼容三种页面的 data 属性：出货/入库用 data-order-id，装柜用 data-order-pk
+                var hdr = document.querySelector('.date-group[data-order-id="'+_smartFillOrderId+'"] .group-header')
+                       || document.querySelector('.date-group[data-order-pk="'+_smartFillOrderId+'"] .group-header');
+                if (hdr) { var s = document.createElement('span'); s.id='docNumber'+_smartFillOrderId;
+                    s.style.cssText='font-size:0.75rem;color:#0984e3;background:#e8f4fd;padding:0.15rem 0.5rem;border-radius:10px;margin-left:0.5rem;';
+                    s.textContent=data.doc_number; hdr.appendChild(s); }
+            }
+        }
+    }).catch(function(e){console.error('doc_number update:',e);});
+}
+
+window.submitSmartFill = function() {
+    var text = document.getElementById('smartFillText').value.trim();
+    if (!text) { alert('请输入要解析的内容'); return; }
+    var lines = text.split('\n').filter(function(l){return l.trim();}), items=[], i, parts;
+    for (i=0;i<lines.length;i++) {
+        parts = lines[i].trim().split(/[,\s;\t]+/).filter(function(p){return p.length>0;});
+        if (parts.length>=4) {
+            var u = parts[2]; if (u==='码') u='y';
+            items.push({product_name:parts[0], specification:parts[1], unit:u, quantity:parts[3], remark:parts.slice(4).join(' ')||''});
+        } else { alert('第'+(i+1)+'行格式不正确，至少需：商品名称 规格 单位 数量'); return; }
+    }
+    if (items.length===0) { alert('没有有效数据'); return; }
+    if (_smartFillOrderPk===null) { alert('缺少订单信息'); return; }
+    if (typeof showLoading === 'function') showLoading('批量添加中...');
+    fetch(_smartAddApi + '/' + _smartFillOrderPk + '/records/batch', {
+        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({items:items, records:items})
+    }).then(function(r){return r.json();}).then(function(data){
+        if (typeof hideLoading === 'function') hideLoading();
+        if (data.success) { closeSmartFill(); location.reload(); }
+        else { alert('添加失败：'+(data.error||'未知错误')); }
+    }).catch(function(e){alert('请求失败：'+e);});
+};
+
+window.copyPrompt = function() {
+    var btn = document.getElementById('copyPromptBtn'), orig = btn.textContent;
+    var hint = '每行格式：商品名称 规格 单位 数量 [备注]\n分隔符支持：空格 / 逗号 / 分号 / Tab\n示例：PVC桌布 1.2×1.8m 支 50 红色款\n无纺布 2m y 30\n胶带 5cm, 支, 100; 红色';
+    navigator.clipboard.writeText(hint).then(function(){btn.textContent='✅ 已复制';setTimeout(function(){btn.textContent=orig;},1200);})
+    .catch(function(){btn.textContent='复制失败';setTimeout(function(){btn.textContent=orig;},1200);});
+};
+
+</script>
+
+<style>
+/* 智能填充弹框 */
+.smart-fill-modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1010; align-items: center; justify-content: center; }
+.smart-fill-modal.show { display: flex; }
+.smart-fill-dialog {
+    background: #fff; border-radius: 12px; padding: 1.5rem;
+    width: 90%; max-width: 700px; max-height: 92vh;
+    display: flex; flex-direction: column;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+}
+.smart-fill-dialog .smart-fill-tab-content.active { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.smart-fill-dialog .ai-result-area.show { flex: 1; min-height: 0; display: flex !important; flex-direction: column; overflow: hidden; }
+.ai-result-scroll { flex: 1; min-height: 0; overflow-y: auto; border: 1px solid #e9ecef; border-radius: 4px; max-height: 50vh; }
+.smart-fill-dialog h3 { margin: 0 0 0.5rem 0; color: #00b894; font-size: 1.1rem; }
+.smart-fill-dialog .hint { color: #868e96; font-size: 0.85rem; margin-bottom: 1rem; }
+.smart-fill-dialog textarea { width: 100%; height: 200px; padding: 0.75rem; border: 1px solid #dfe6e9; border-radius: 6px; font-size: 0.9rem; font-family: monospace; resize: vertical; box-sizing: border-box; }
+.smart-fill-dialog textarea:focus { outline: none; border-color: #00b894; }
+.smart-fill-dialog .actions { display: flex; gap: 0.75rem; justify-content: flex-end; margin-top: 1rem; }
+.smart-fill-tabs { display: flex; gap: 0; margin-bottom: 1rem; border-bottom: 2px solid #e9ecef; }
+.smart-fill-tab { padding: 0.5rem 1rem; cursor: pointer; border: none; background: none; font-size: 0.9rem; color: #868e96; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all 0.2s; border-radius: 4px 4px 0 0; }
+.smart-fill-tab:hover { color: #00b894; background: #f0fdf4; }
+.smart-fill-tab.active { color: #00b894; font-weight: 600; border-bottom-color: #00b894; }
+.smart-fill-tab-content { display: none; min-height: 400px; box-sizing: border-box; }
+.smart-fill-tab-content.active { display: flex; flex-direction: column; }
+.smart-fill-tab-content .actions { margin-top: auto; }
+.ai-upload-area { border: 2px dashed #dfe6e9; border-radius: 8px; padding: 2rem; text-align: center; cursor: pointer; transition: all 0.2s; background: #fafbfc; margin-bottom: 0.75rem; }
+.ai-upload-area:hover, .ai-upload-area.drag-over { border-color: #00b894; background: #f0fdf4; }
+.ai-upload-area .icon { font-size: 2.5rem; margin-bottom: 0.5rem; }
+.ai-upload-area p { margin: 0.25rem 0; color: #868e96; font-size: 0.85rem; }
+.ai-upload-area .browse { color: #00b894; font-weight: 600; }
+.ai-preview { display: none; margin-bottom: 0.75rem; text-align: center; position: relative; }
+.ai-preview.show { display: block; }
+.ai-preview img { max-width: 100%; max-height: 250px; border-radius: 6px; border: 1px solid #e9ecef; display: block; margin: 0 auto; }
+.ai-preview .remove-btn { position: absolute; top: 4px; right: 4px; background: rgba(0,0,0,0.5); color: #fff; border: none; border-radius: 50%; width: 24px; height: 24px; cursor: pointer; font-size: 0.8rem; line-height: 24px; }
+.ai-preview .remove-btn:hover { background: rgba(220,53,69,0.9); }
+.ai-result-area { display: none; }
+.ai-result-area.show { display: block; }
+.ai-result-area h4 { margin: 0 0 0.5rem 0; font-size: 0.9rem; color: #2d3436; }
+.ai-result-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-bottom: 0.5rem; }
+.ai-result-table th { background: #f8f9fa; padding: 0.4rem 0.5rem; text-align: left; color: #868e96; border-bottom: 1px solid #e9ecef; }
+.ai-result-table td { padding: 0.35rem 0.5rem; border-bottom: 1px solid #f1f3f5; }
+.ai-result-table input { width: 100%; padding: 0.25rem 0.4rem; border: 1px solid #dfe6e9; border-radius: 4px; font-size: 0.85rem; box-sizing: border-box; }
+.ai-result-table input:focus { border-color: #00b894; outline: none; }
+.ai-engine-toggle { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; padding: 0.35rem 0.5rem; background: #f8f9fa; border-radius: 6px; border: 1px solid #e9ecef; font-size: 0.8rem; }
+.ai-engine-toggle select { padding: 0.2rem 0.35rem; border: 1px solid #dfe6e9; border-radius: 4px; font-size: 0.8rem; color: #2d3436; background: #fff; cursor: pointer; }
+.ai-engine-toggle select:focus { outline: none; border-color: #00b894; }
+.ai-engine-hint { font-size: 0.73rem; color: #b2bec3; margin-left: auto; }
+.ai-loading { display: none; text-align: center; padding: 1.5rem; }
+.ai-loading.show { display: block; }
+.ai-loading .spinner { border: 3px solid #e9ecef; border-top-color: #00b894; border-radius: 50%; width: 32px; height: 32px; animation: spin 0.8s linear infinite; margin: 0 auto 0.75rem; }
+@keyframes spin { to { transform: rotate(360deg); } }
+/* AI 识别图片区域 */
+.ai-images-area { text-align: center; margin-bottom: 0.35rem; }
+.ai-images-area h4 { margin: 0 0 0.25rem 0; font-size: 0.8rem; color: #2d3436; }
+.ai-images-area img { width: 100%; height: auto; cursor: pointer; display: block; }
+.ai-img-wrap { display: inline-block; position: relative; width: 70%; }
+.ai-img-wrap:hover .del-img-btn { opacity: 1 !important; }
+</style>
+
+<div class="smart-fill-modal" id="smartFillModal">
+    <div class="smart-fill-dialog">
+        <h3>🧠 智能填充</h3>
+        <p id="smartFillOrderInfo" style="color:#e17055; font-size:0.85rem; margin-bottom:0.75rem;"></p>
+        <div class="smart-fill-tabs">
+            <button class="smart-fill-tab active" id="tabAI" onclick="switchSmartFillTab('ai')">📷 AI 图片识别</button>
+            <button class="smart-fill-tab" id="tabText" onclick="switchSmartFillTab('text')">📝 文本输入</button>
+        </div>
+        <div class="smart-fill-tab-content active" id="contentAI">
+            <p class="hint" style="margin-bottom:0.75rem;">上传图片，AI 自动识别商品列表</p>
+            <div class="ai-engine-toggle">
+                <span>识别引擎：</span>
+                <select id="aiEngine" onchange="onAiEngineChange()">
+                    <option value="moonshot">☁️ Moonshot（云端视觉）</option>
+                    <option value="deepseek" selected>🤖 PaddleOCR + DeepSeek（推荐）</option>
+                    <option value="paddleocr">💻 PaddleOCR（纯本地）</option>
+                </select>
+                <span class="ai-engine-hint" id="aiEngineHint">本地 OCR + DeepSeek</span>
+            </div>
+            <div class="ai-upload-area" id="aiUploadArea" onclick="document.getElementById('aiImageFile').click()">
+                <div class="icon">🖼️</div>
+                <p><span class="browse">点击选择图片</span> 或拖拽图片到这里</p>
+                <p style="font-size:0.78rem;">支持 JPG / PNG / WEBP / GIF，最大 10MB</p>
+            </div>
+            <input type="file" id="aiImageFile" accept="image/*" style="display:none;" onchange="handleAiFileSelect(this)">
+            <div class="ai-preview" id="aiPreview">
+                <img id="aiPreviewImg" src="" alt="预览">
+                <button class="remove-btn" onclick="removeAiImage()" title="移除图片">✕</button>
+            </div>
+            <div class="ai-loading" id="aiLoading">
+                <div class="spinner"></div>
+                <p style="color:#868e96; font-size:0.85rem;">AI 正在识别中，请稍候...</p>
+            </div>
+            <div class="ai-result-area" id="aiResultArea">
+                <h4>✅ 识别结果（请核对后可编辑）</h4>
+                <div class="ai-result-scroll">
+                <table class="ai-result-table">
+                    <thead><tr>
+                        <th>商品名称</th><th style="width:120px;">规格</th><th style="width:80px;">数量</th>
+                        <th style="width:65px;">单位</th><th style="width:80px;">备注</th><th style="width:35px;"></th>
+                    </tr></thead>
+                    <tbody id="aiResultBody"></tbody>
+                </table>
+                </div>
+            </div>
+            <div class="actions">
+                <button class="btn" onclick="closeSmartFill()">取消</button>
+                <button class="btn btn-primary" id="aiAddBtn" onclick="submitAiResults()" disabled>✅ 添加到订单</button>
+            </div>
+        </div>
+        <div class="smart-fill-tab-content" id="contentText">
+            <p class="hint" style="margin-bottom:0.5rem;">每行格式：商品名称 规格 单位 数量 [备注]<br>分隔符支持：空格 / 逗号 / 分号 / Tab<br>示例：PVC桌布 1.2×1.8m 支 50 红色款</p>
+            <button class="btn btn-sm" id="copyPromptBtn" style="background:#f8f9fa;color:#868e96;border:1px solid #dee2e6;margin-bottom:0.75rem;font-size:0.8rem;" onclick="copyPrompt()">📋 拷贝提示词</button>
+            <textarea id="smartFillText" placeholder="PVC桌布 1.2×1.8m 支 50 红色款
+无纺布 2m y 30
+胶带 5cm, 支, 100; 红色" style="height:180px;"></textarea>
+            <div class="actions">
+                <button class="btn" onclick="closeSmartFill()">取消</button>
+                <button class="btn btn-primary" onclick="submitSmartFill()">✅ 批量添加</button>
+            </div>
+        </div>
+    </div>
+</div>

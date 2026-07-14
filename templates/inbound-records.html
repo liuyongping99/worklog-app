@@ -105,36 +105,7 @@
     box-shadow: 0 0 0 2px rgba(0,184,148,0.1);
 }
 
-/* 批量添加弹框 */
-.batch-modal {
-    display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-    background: rgba(0,0,0,0.5); z-index: 1000;
-    align-items: center; justify-content: center;
-}
-.batch-modal.show { display: flex; }
-.batch-dialog {
-    background: #fff; border-radius: 12px; padding: 1.5rem;
-    width: 90%; max-width: 600px; max-height: 80vh;
-    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-}
-.batch-dialog h3 {
-    margin: 0 0 0.5rem 0; color: #00b894; font-size: 1.1rem;
-}
-.batch-dialog .hint {
-    color: #868e96; font-size: 0.85rem; margin-bottom: 1rem;
-}
-.batch-dialog textarea {
-    width: 100%; height: 200px; padding: 0.75rem;
-    border: 1px solid #dfe6e9; border-radius: 6px;
-    font-size: 0.9rem; font-family: monospace;
-    resize: vertical; box-sizing: border-box;
-}
-.batch-dialog textarea:focus {
-    outline: none; border-color: #00b894;
-}
-.batch-dialog .actions {
-    display: flex; gap: 0.75rem; justify-content: flex-end; margin-top: 1rem;
-}
+
 
 @media (max-width: 640px) {
     .inbound-page .quick-add { grid-template-columns: 1fr 1fr; }
@@ -248,123 +219,7 @@
 }
 
 
-/* 图片上传弹框 */
-.image-modal {
-    display: none;
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0,0,0,0.5);
-    z-index: 1500;
-    align-items: center;
-    justify-content: center;
-}
-.image-modal.show {
-    display: flex;
-}
-.image-modal .modal-dialog {
-    background: white;
-    border-radius: 12px;
-    padding: 1.5rem;
-    width: 500px;
-    max-width: 90%;
-    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-}
-.image-modal .modal-title {
-    font-size: 1.2rem;
-    font-weight: 600;
-    color: #2d3436;
-    margin-bottom: 1rem;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-}
-.image-modal .modal-close {
-    float: right;
-    cursor: pointer;
-    font-size: 1.5rem;
-    color: #999;
-    line-height: 1;
-}
-.image-modal .modal-close:hover {
-    color: #333;
-}
-.image-modal .upload-options {
-    display: flex;
-    flex-direction: row;
-    gap: 0.75rem;
-}
-.image-modal .upload-box {
-    flex: 1;
-    border: 2px dashed #dfe6e9;
-    border-radius: 8px;
-    padding: 1rem;
-    text-align: center;
-    cursor: pointer;
-    transition: all 0.2s;
-}
-.image-modal .upload-box:hover {
-    border-color: #6c5ce7;
-    background: rgba(108,92,231,0.05);
-}
-.image-modal .upload-box.active {
-    border-color: #00b894;
-    background: rgba(0,184,148,0.1);
-}
-.image-modal .upload-box .icon {
-    font-size: 1.5rem;
-    margin-bottom: 0.25rem;
-}
-.image-modal .upload-box .text {
-    font-size: 0.85rem;
-    color: #555;
-}
-.image-modal .upload-box .hint {
-    font-size: 0.72rem;
-    color: #868e96;
-    margin-top: 0.15rem;
-}
-.image-modal .file-input {
-    display: none;
-}
-.image-modal .modal-img-preview {
-    max-width: 100%;
-    border-radius: 8px;
-    margin: 1rem 0;
-    display: none;
-    text-align: center;
-    overflow: hidden;
-}
-.image-modal .modal-img-preview img {
-    max-width: 100%;
-    max-height: 300px;
-    border-radius: 8px;
-    transition: transform 0.3s ease;
-    transform-origin: center center;
-}
-.image-modal .preview-actions {
-    display: none;
-    gap: 0.5rem;
-    justify-content: center;
-    margin-top: 0.5rem;
-}
-.image-modal .preview-actions .btn {
-    padding: 0.4rem 1rem;
-    border-radius: 6px;
-    border: none;
-    cursor: pointer;
-    font-size: 0.85rem;
-}
-.image-modal .preview-actions .btn-cancel {
-    background: #e9ecef;
-    color: #333;
-}
-.image-modal .preview-actions .btn-confirm {
-    background: #6c5ce7;
-    color: white;
-}
+/* 图片上传弹框样式见共享 partial _image_upload_modal.html（.img-upload-modal） */
 
 </style>
 
@@ -519,9 +374,10 @@
             <span class="group-date">{{ group.date }}</span>
             <span class="group-supplier">{{ group.supplier }}</span>
             <span class="group-num">#{{ group.order_num }}</span>
+            {% if group.doc_number %}<span id="docNumber{{ group.id }}" style="font-size:0.75rem;color:#0984e3;background:#e8f4fd;padding:0.15rem 0.5rem;border-radius:10px;margin-left:0.25rem;">{{ group.doc_number }}</span>{% endif %}
             <!-- 紧邻订单号：批量添加 / 备注 / 上传图片 -->
             <div style="display: flex; gap: 0.5rem;" class="lock-hide">
-                <button class="btn btn-sm" style="background: linear-gradient(135deg, #00b894, #00cec9); color: #fff; font-weight: 600; border: none; box-shadow: 0 2px 6px rgba(0,184,148,.35);" onclick="openBatchModal({{ group.id }})">📋 批量添加</button>
+                <button class="btn btn-sm" style="background: linear-gradient(135deg, #00b894, #00cec9); color: #fff; font-weight: 600; border: none; box-shadow: 0 2px 6px rgba(0,184,148,.35);" onclick="openSmartFill({{ group.id }}, '{{ group.date }}', '{{ group.supplier }}')">🧠 智能添加</button>
                 <button type="button" class="btn btn-sm note-btn" style="background:#a29bfe; color:#fff;{% if group.order_note %} box-shadow: 0 0 0 2px #6c5ce7;{% endif %}" data-pk="{{ group.id }}" data-note="{{ group.order_note|e }}" title="{% if group.order_note %}修改备注{% else %}添加备注{% endif %}">📝 备注</button>
                 <button class="btn btn-sm lock-hide" style="background: #6c5ce7; color: white;" onclick="openImageModal({{ group.id }})">📷 上传图片</button>
             </div>
@@ -538,6 +394,20 @@
         <div class="order-note-row" id="orderNote{{ group.id }}" style="background:linear-gradient(90deg, #fff5e1 0%, #ffeaa7 100%); border-left:4px solid #fdcb6e; padding:0.5rem 0.75rem; margin:0.25rem 0; border-radius:6px; font-size:0.9rem; color:#2d3436; display:flex; align-items:flex-start; gap:0.5rem;">
             <span style="font-weight:600; flex-shrink:0;">📝 备注：</span>
             <span class="note-text" style="flex:1; white-space:pre-wrap; word-break:break-word;">{{ group.order_note }}</span>
+        </div>
+        {% endif %}
+
+        <!-- AI 识别图片 -->
+        {% set ai_imgs = group.images | selectattr('source', 'equalto', 'ai') | list %}
+        {% if ai_imgs %}
+        <div class="ai-images-area" data-order-id="{{ group.id }}">
+            <h4>🤖 AI 识别图片 ({{ ai_imgs|length }}张)</h4>
+            {% for img in ai_imgs %}
+            <div class="ai-img-wrap">
+                <img src="/upload/{{ img.relative_path }}" alt="AI识别图片" onclick="showImgPreview('/upload/{{ img.relative_path }}')">
+                <button class="del-img-btn" data-image-id="{{ img.id }}" style="position:absolute;top:4px;right:4px;background:rgba(200,30,30,0.85);color:#fff;border:none;border-radius:3px;padding:2px 6px;cursor:pointer;font-size:12px;opacity:0;transition:opacity 0.2s;">✕ 删除</button>
+            </div>
+            {% endfor %}
         </div>
         {% endif %}
 
@@ -601,7 +471,7 @@
                     <option value="支">支</option><option value="kg">kg</option><option value="y">y</option>
                     <option value="桶">桶</option><option value="张">张</option><option value="件">件</option>
                     <option value="箱">箱</option><option value="卷">卷</option><option value="块">块</option>
-                    <option value="令">令</option>
+                    <option value="令">令</option><option value="斤">斤</option>
                 </select>
                 <input type="text" name="remark" placeholder="备注" oninput="autoFillQtyFromRemark(this)" style="flex:14;min-width:0;padding:0.4rem 0.5rem;border:1px solid #dfe6e9;border-radius:4px;font-size:0.85rem;">
                 <button type="submit" style="margin-left:auto;flex-shrink:0;background:#00b894;color:#fff;border:none;padding:0.4rem 1.2rem;border-radius:4px;cursor:pointer;font-size:0.85rem;font-weight:600;">➕ 添加</button>
@@ -610,9 +480,10 @@
         {% endif %}
         
         <!-- 图片预览区域 -->
-        {% if group.images %}
+        {% set upload_imgs = group.images | selectattr('source', 'ne', 'ai') | list %}
+        {% if upload_imgs %}
         <div class="image-section" id="images-{{ group.id }}">
-            <h4>📷 单据图片 ({{ group.images|length }}张)</h4>
+            <h4>📷 单据图片 ({{ upload_imgs|length }}张)</h4>
             <div class="image-upload-area" data-cols="1">
                 <div style="grid-column: 1 / -1; display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.25rem;">
                     <span style="font-size:0.8rem;color:#888;">每行：</span>
@@ -622,7 +493,7 @@
                     <button class="img-col-btn" onclick="setImgCols(this, 4)">4</button>
                     <button class="img-col-btn" onclick="setImgCols(this, 5)">5</button>
                 </div>
-                {% for image in group.images %}
+                {% for image in upload_imgs %}
                 <div class="image-item">
                     <img src="/upload/{{ image.relative_path }}" alt="单据图片" onclick="showImgPreview('/upload/{{ image.relative_path }}')">
                     <button class="delete-btn lock-hide" onclick="deleteImage({{ image.id }}, {{ group.id }})">×</button>
@@ -661,24 +532,8 @@
         </div>
     </div>
 
-    <!-- 批量添加弹框 -->
-    <div id="batchModal" class="batch-modal">
-        <div class="batch-dialog">
-            <span class="modal-close" onclick="closeBatchModal()" style="float: right; cursor: pointer; font-size: 1.5rem; color: #999; line-height: 1;">&times;</span>
-            <h3>批量添加明细</h3>
-            <p class="hint">每行一个商品，格式：商品名称|规格|单位|数量|备注</p>
-            <div>
-                <input type="hidden" id="batchOrderPk" name="order_pk">
-                <textarea id="batchItemsText" placeholder="例如：&#10;PVC袋|1.2*1.8m|支|50|&#10;无纺布|2m|kg|30|"></textarea>
-                <div class="actions">
-                    <button type="button" class="btn" onclick="closeBatchModal()" style="background: #868e96;">取消</button>
-                    <button type="button" class="btn" onclick="submitBatchAdd()">批量添加</button>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <!-- Flash 消息 -->
+    {% with smart_add_api="/api/v1/inbound-orders" %}{% include "_smart_add_modal.html" %}{% endwith %}
+<!-- Flash 消息 -->
     {% with messages = get_flashed_messages() %}
     {% if messages %}
     <div style="position: fixed; top: 20px; right: 20px; z-index: 2000;">
@@ -693,35 +548,7 @@
 </div>
 
     <!-- 图片上传弹框 -->
-    <div id="imageModal" class="image-modal">
-        <div class="modal-dialog">
-            <span class="modal-close" onclick="closeImageModal()">&times;</span>
-            <div class="modal-title">📷 上传单据图片</div>
-            <div class="upload-options" id="uploadOptions">
-                <!-- 方式1：粘贴图片 -->
-                <div class="upload-box" id="pasteBox" onclick="activatePaste()">
-                    <div class="icon">📋</div>
-                    <div class="text">点击此处后按 Ctrl+V 粘贴图片</div>
-                    <div class="hint">支持从剪贴板粘贴截图</div>
-                </div>
-                <!-- 方式2：选择文件 -->
-                <div class="upload-box" onclick="document.getElementById('fileInput').click()">
-                    <div class="icon">📁</div>
-                    <div class="text">点击选择图片文件</div>
-                    <div class="hint">支持 jpg/png/gif/webp 格式</div>
-                    <input type="file" id="fileInput" class="file-input" accept="image/*" multiple onchange="handleFileSelect(this.files)">
-                </div>
-            </div>
-            <div id="modalImgPreview" class="modal-img-preview"></div>
-            <div style="text-align:center;">
-                <button type="button" id="rotateUploadBtn" onclick="rotateUploadImage();" style="display:none; padding:0.5rem 1rem; background:#f1f3f5; color:#333; border:1px solid #dfe6e9; border-radius:6px; cursor:pointer; font-size:0.85rem; font-weight:600;">🔄 旋转90°</button>
-            </div>
-            <div class="preview-actions" id="previewActions">
-                <button class="btn btn-cancel" onclick="clearPreview()">取消</button>
-                <button class="btn btn-confirm" onclick="confirmUpload()">确认上传</button>
-            </div>
-        </div>
-    </div>
+    {% with image_api="/api/v1/inbound-orders" %}{% include "_image_upload_modal.html" %}{% endwith %}
 
 
 
@@ -831,7 +658,18 @@ function checkInboundMismatch(remark, quantity, productName, spec) {
     if (!u || !u.is_usingyardforcounting || u.yards_per_piece <= 0) return '';
     if (!remark) return '';
     var m = remark.match(/(\d+)支/);
-    if (!m) return '';
+    if (!m) {
+        var yardVals = remark.match(/(\d+(?:\.\d+)?)\s*[yY码]/g);
+        if (yardVals) {
+            var sumYards = 0;
+            for (var j = 0; j < yardVals.length; j++) {
+                sumYards += parseFloat(yardVals[j].match(/[\d.]+/)[0]);
+            }
+            var actualYards = parseFloat(quantity);
+            if (!isNaN(actualYards) && Math.abs(sumYards - actualYards) > 0.01) return 'warn';
+        }
+        return '';
+    }
     var pieces = parseInt(m[1]);
     var ypp = u.yards_per_piece;
 
@@ -908,202 +746,38 @@ document.addEventListener('input', function(e) {
     }
 });
 
-// 批量添加弹框
-function openBatchModal(orderPk) {
-    document.getElementById('batchOrderPk').value = orderPk;
-    document.getElementById('batchModal').classList.add('show');
-}
 
-function closeBatchModal() {
-    document.getElementById('batchModal').classList.remove('show');
-}
 
-// 图片上传弹框
-let currentImageOrderPk = null;
-let pasteActive = false;
-let pendingFile = null;
-let uploadImageRotation = 0;
-
-function openImageModal(orderPk) {
-    currentImageOrderPk = orderPk;
-    pasteActive = false;
-    pendingFile = null;
-    uploadImageRotation = 0;
-    document.getElementById('imageModal').classList.add('show');
-    document.getElementById('pasteBox').classList.remove('active');
-    document.getElementById('uploadOptions').style.display = 'flex';
-    clearPreview();
-}
-
-function closeImageModal() {
-    currentImageOrderPk = null;
-    pasteActive = false;
-    pendingFile = null;
-    uploadImageRotation = 0;
-    document.getElementById('imageModal').classList.remove('show');
-    document.getElementById('pasteBox').classList.remove('active');
-    clearPreview();
-}
-
-function activatePaste() {
-    pasteActive = true;
-    document.getElementById('pasteBox').classList.add('active');
-    document.getElementById('pasteBox').querySelector('.text').textContent = '请按 Ctrl+V 粘贴图片...';
-}
-
-// 处理粘贴事件
-document.addEventListener('paste', async (e) => {
-    if (!pasteActive || !currentImageOrderPk) return;
-    
-    const items = e.clipboardData.items;
-    for (let item of items) {
-        if (item.type.startsWith('image/')) {
-            const file = item.getAsFile();
-            showPreview(file);
-            break;
-        }
+// 图片上传成功回调（局部插入图片，弹框逻辑见 _image_upload_modal.html）
+function onImageUploaded(data, orderPk) {
+    var dateGroup = document.querySelector('.date-group[data-order-id="' + orderPk + '"]');
+    if (!dateGroup) { location.reload(); return; }
+    var imageSection = dateGroup.querySelector('.image-section');
+    var imageArea = imageSection ? imageSection.querySelector('.image-upload-area') : null;
+    if (!imageSection) {
+        // 从未有过图片区域，先创建
+        imageSection = document.createElement('div');
+        imageSection.className = 'image-section';
+        imageSection.id = 'images-' + orderPk;
+        var savedCols = localStorage.getItem('inboundImgCols') || '5';
+        imageSection.innerHTML =
+            '<h4>📷 单据图片 (<span class="img-count">0</span>张)</h4>' +
+            '<div class="image-upload-area columns-' + savedCols + '" data-cols="' + savedCols + '"></div>';
+        dateGroup.appendChild(imageSection);
+        imageArea = imageSection.querySelector('.image-upload-area');
     }
-});
-
-// 处理文件选择
-function handleFileSelect(files) {
-    if (!currentImageOrderPk || !files || files.length === 0) return;
-    // 只处理第一个文件
-    showPreview(files[0]);
-}
-
-// 显示预览
-function showPreview(file) {
-    pendingFile = file;
-    uploadImageRotation = 0;
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        const preview = document.getElementById('modalImgPreview');
-        preview.innerHTML = '<img src="' + e.target.result + '">';
-        preview.style.display = 'block';
-        document.getElementById('rotateUploadBtn').style.display = 'inline-block';
-        document.getElementById('previewActions').style.display = 'flex';
-        // 保留上传按钮，不隐藏
-    };
-    reader.readAsDataURL(file);
-}
-
-function clearPreview() {
-    pendingFile = null;
-    uploadImageRotation = 0;
-    const preview = document.getElementById('modalImgPreview');
-    preview.innerHTML = '';
-    preview.style.display = 'none';
-    document.getElementById('rotateUploadBtn').style.display = 'none';
-    document.getElementById('previewActions').style.display = 'none';
-    document.getElementById('fileInput').value = '';
-}
-
-function rotateUploadImage() {
-    uploadImageRotation = (uploadImageRotation + 90) % 360;
-    const img = document.querySelector('#modalImgPreview img');
-    if (img) {
-        img.style.transform = 'rotate(' + uploadImageRotation + 'deg)';
-    }
-}
-
-// 使用 Canvas 旋转图片并生成新文件
-function getRotatedImageFile(file, rotation) {
-    return new Promise(function(resolve, reject) {
-        if (rotation === 0) {
-            resolve(file);
-            return;
-        }
-        const img = new Image();
-        const objectUrl = URL.createObjectURL(file);
-        img.onload = function() {
-            URL.revokeObjectURL(objectUrl);
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-
-            // 计算旋转后的尺寸
-            const radians = rotation * Math.PI / 180;
-            const sin = Math.abs(Math.sin(radians));
-            const cos = Math.abs(Math.cos(radians));
-            const newWidth = img.width * cos + img.height * sin;
-            const newHeight = img.width * sin + img.height * cos;
-
-            canvas.width = newWidth;
-            canvas.height = newHeight;
-
-            // 旋转并绘制
-            ctx.translate(newWidth / 2, newHeight / 2);
-            ctx.rotate(radians);
-            ctx.drawImage(img, -img.width / 2, -img.height / 2);
-
-            // 转换为 Blob
-            canvas.toBlob(function(blob) {
-                const rotatedFile = new File([blob], file.name, { type: file.type });
-                resolve(rotatedFile);
-            }, file.type, 0.92);
-        };
-        img.onerror = function() {
-            URL.revokeObjectURL(objectUrl);
-            reject(new Error('图片加载失败'));
-        };
-        img.src = objectUrl;
-    });
-}
-
-// 确认上传
-async function confirmUpload() {
-    if (!pendingFile || !currentImageOrderPk) return;
-
-    try {
-        // 如果有旋转，先处理旋转
-        const fileToUpload = await getRotatedImageFile(pendingFile, uploadImageRotation);
-
-        const formData = new FormData();
-        formData.append('image', fileToUpload);
-
-        const res = await fetch(`/api/v1/inbound-orders/${currentImageOrderPk}/images`, {
-            method: 'POST',
-            body: formData
-        });
-        const data = await res.json();
-        if (data.success) {
-            closeImageModal();
-            // 追加图片到 DOM，不刷新
-            var dateGroup = document.querySelector('.date-group[data-order-id="' + currentImageOrderPk + '"]');
-            if (!dateGroup) { location.reload(); return; }
-            var imageSection = dateGroup.querySelector('.image-section');
-            var imageArea = imageSection ? imageSection.querySelector('.image-upload-area') : null;
-            if (!imageSection) {
-                // 从未有过图片区域，先创建
-                imageSection = document.createElement('div');
-                imageSection.className = 'image-section';
-                imageSection.id = 'images-' + currentImageOrderPk;
-                var savedCols = localStorage.getItem('inboundImgCols') || '5';
-                imageSection.innerHTML =
-                    '<h4>📷 单据图片 (<span class="img-count">0</span>张)</h4>' +
-                    '<div class="image-upload-area columns-' + savedCols + '" data-cols="' + savedCols + '"></div>';
-                dateGroup.appendChild(imageSection);
-                imageArea = imageSection.querySelector('.image-upload-area');
-            }
-            if (!imageArea) { location.reload(); return; }
-            var imgItem = document.createElement('div');
-            imgItem.className = 'image-item';
-            imgItem.innerHTML =
-                '<img src="/upload/' + data.image + '" alt="单据图片" onclick="showImgPreview(\'/upload/' + data.image + '\')">' +
-                '<button class="delete-btn lock-hide" onclick="deleteImage(' + data.image_id + ', ' + currentImageOrderPk + ')">×</button>';
-            imageArea.appendChild(imgItem);
-            // 更新计数
-            var countEl = imageSection.querySelector('.img-count');
-            if (countEl) {
-                var count = imageArea.querySelectorAll('.image-item').length;
-                countEl.textContent = count;
-            }
-        } else {
-            alert('上传失败: ' + data.error);
-        }
-    } catch (err) {
-        console.error('confirmUpload error:', err);
-        alert('上传出错: ' + err.message);
+    if (!imageArea) { location.reload(); return; }
+    var imgItem = document.createElement('div');
+    imgItem.className = 'image-item';
+    imgItem.innerHTML =
+        '<img src="/upload/' + escAttr(data.image) + '" alt="单据图片" onclick="showImgPreview(\'/upload/' + escAttr(data.image) + '\')">' +
+        '<button class="delete-btn lock-hide" onclick="deleteImage(' + Number(data.image_id) + ', ' + Number(orderPk) + ')">×</button>';
+    imageArea.appendChild(imgItem);
+    // 更新计数
+    var countEl = imageSection.querySelector('.img-count');
+    if (countEl) {
+        var count = imageArea.querySelectorAll('.image-item').length;
+        countEl.textContent = count;
     }
 }
 
@@ -1217,6 +891,9 @@ function saveNote() {
             if (data.supplier) {
                 updateCustomerRow(currentNoteOrderPk, data.supplier);
             }
+            if (data.order_num) {
+                updateOrderNumRow(currentNoteOrderPk, data.order_num);
+            }
             closeNoteModal();
         } else {
             alert('保存失败：' + (data.error || '未知错误'));
@@ -1231,6 +908,15 @@ function updateCustomerRow(orderPk, newSupplier) {
     var supplierEl = dateGroup.querySelector('.group-supplier');
     if (supplierEl) {
         supplierEl.textContent = newSupplier;
+    }
+}
+
+function updateOrderNumRow(orderPk, newOrderNum) {
+    var dateGroup = document.querySelector('.date-group[data-order-id="' + orderPk + '"]');
+    if (!dateGroup) { location.reload(); return; }
+    var numEl = dateGroup.querySelector('.group-num');
+    if (numEl) {
+        numEl.textContent = '#' + newOrderNum;
     }
 }
 
@@ -1294,14 +980,11 @@ document.addEventListener('keydown', function(e) {
         closeNoteModal();
     }
 });
-
-// 点击遮罩关闭弹框
-document.getElementById('batchModal').addEventListener('click', function(e) {
-    if (e.target === this) closeBatchModal();
-});
-
-document.getElementById('imageModal').addEventListener('click', function(e) {
-    if (e.target === this) closeImageModal();
+// ESC 关闭智能填充弹框
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && document.getElementById('smartFillModal').classList.contains('show')) {
+        closeSmartFill();
+    }
 });
 
 // 3秒后自动隐藏 flash 消息
@@ -1389,12 +1072,12 @@ setTimeout(() => {
                         var rowNum = tds[0].textContent.replace('❌ ', '').replace('💡 ', '');
                         tds[0].textContent = mismatchIcon(newMismatch) + r.product_name;
                         tds[1].textContent = r.specification;
-                        tds[2].innerHTML = '<span class="qty-badge">' + r.quantity + '</span>';
-                        tds[3].innerHTML = '<span class="unit-badge">' + r.unit + '</span>';
+                        tds[2].innerHTML = '<span class="qty-badge">' + escHtml(r.quantity) + '</span>';
+                        tds[3].innerHTML = '<span class="unit-badge">' + escHtml(r.unit) + '</span>';
                         tds[4].textContent = r.remark || '-';
                         tds[4].className = 'remark-cell' + (r.remark ? ' has-content' : '');
                         var newPieceHint = getPieceHint(r.product_name, r.specification || '');
-                        tds[5].innerHTML = (getInboundUnitHint(r.product_name, r.specification || '', r.quantity, r.unit, r.remark) || '—') + (newPieceHint ? '<br><span style="color:#0984e3;">' + newPieceHint + '</span>' : '');
+                        tds[5].innerHTML = (getInboundUnitHint(r.product_name, r.specification || '', r.quantity, r.unit, r.remark) || '—') + (newPieceHint ? '<br><span style="color:#0984e3;">' + escHtml(newPieceHint) + '</span>' : '');
                         var newPieceMismatch = checkPieceMismatch(r.remark || '', r.quantity, r.product_name, r.specification || '');
                         if (newMismatch === 'warn' || newPieceMismatch === 'warn') { applyInboundMismatch(tr, 'warn'); }
                         else if (newMismatch === 'info' || newPieceMismatch === 'info') { applyInboundMismatch(tr, 'info'); }
@@ -1429,7 +1112,7 @@ setTimeout(() => {
             // 数量
             tds[2].innerHTML = '<input type="number" name="qty" class="form-control form-control-sm edit-input" style="width:100px;" value="' + vals[2] + '">';
             // 单位（下拉框）
-            var unitOpts = ['支','kg','y','桶','张','件','箱','卷','块','令'];
+            var unitOpts = ['支','kg','y','桶','张','件','箱','卷','块','令','斤'];
             var unitHtml = '<select class="form-control form-control-sm edit-input" style="width:70px;">';
             unitOpts.forEach(function(u) {
                 unitHtml += '<option value="' + u + '"' + (u === vals[3] ? ' selected' : '') + '>' + u + '</option>';
@@ -1570,64 +1253,6 @@ setTimeout(() => {
         });
     });
 
-    // ── 批量添加 ──
-    function submitBatchAdd() {
-        var orderPk = document.getElementById('batchOrderPk').value;
-        var text = document.getElementById('batchItemsText').value.trim();
-        if (!text) { alert('请输入商品数据'); return; }
-
-        var lines = text.split('\n');
-        var records = [];
-        for (var i = 0; i < lines.length; i++) {
-            var line = lines[i].trim();
-            if (!line) continue;
-            var parts;
-            if (line.indexOf('|') !== -1) {
-                parts = line.split('|');
-            } else {
-                parts = line.split(/\s+/);
-            }
-            records.push({
-                product_name: parts[0] ? parts[0].trim() : '',
-                specification: parts[1] ? parts[1].trim() : '',
-                unit: parts[2] ? parts[2].trim() : '支',
-                quantity: parts[3] ? parts[3].trim() : '',
-                remark: parts[4] ? parts[4].trim() : ''
-            });
-        }
-
-        if (records.length === 0) { alert('未解析到有效数据'); return; }
-
-        fetch('/api/v1/inbound-orders/' + orderPk + '/records/batch', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({records: records})
-        })
-            .then(function(r) { return r.json(); })
-            .then(function(data) {
-                if (data.success) {
-                    closeBatchModal();
-                    // 使用服务端返回的记录（含ID）构建行并插入
-                    var dateGroup = document.querySelector('.date-group[data-order-id="' + orderPk + '"]');
-                    if (!dateGroup) { location.reload(); return; }
-                    var tbody = dateGroup.querySelector('.record-table tbody');
-                    var firstNewTr = null;
-                    data.records.forEach(function(rec) {
-                        var tr = buildInboundRecordRow(rec, orderPk);
-                        tbody.appendChild(tr);
-                        if (!firstNewTr) firstNewTr = tr;
-                    });
-                    recalcInboundSummary(dateGroup);
-                    document.getElementById('batchItemsText').value = '';
-                    if (firstNewTr) firstNewTr.scrollIntoView({behavior: 'smooth', block: 'center'});
-                } else {
-                    alert('批量添加失败: ' + (data.error || '未知错误'));
-                }
-            })
-            .catch(function(err) {
-                alert('请求失败: ' + err.message);
-            });
-    }
 
     // ── 构建入库明细行 ──
     function buildInboundRecordRow(rec, orderPk) {
@@ -1639,14 +1264,14 @@ setTimeout(() => {
         var pieceMismatch = checkPieceMismatch(rec.remark || '', rec.quantity, rec.product_name, rec.specification || '');
         if (mismatch === 'warn' || pieceMismatch === 'warn') { tr.classList.add('row-warn'); }
         else if (mismatch === 'info' || pieceMismatch === 'info') { tr.classList.add('row-info'); }
-        var escapedName = rec.product_name.replace(/"/g, '&quot;');
+        var escapedName = escAttr(rec.product_name);
         tr.innerHTML =
-            '<td class="product-name" style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapedName + '">' + mismatchIcon(mismatch) + rec.product_name + '</td>' +
-            '<td class="spec">' + (rec.specification || '') + '</td>' +
-            '<td><span class="qty-badge">' + rec.quantity + '</span></td>' +
-            '<td><span class="unit-badge">' + rec.unit + '</span></td>' +
-            '<td class="remark-cell' + (rec.remark ? ' has-content' : '') + '">' + (rec.remark || '-') + '</td>' +
-            '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">' + unitHint + (pieceHint ? '<br><span style="color:#0984e3;">' + pieceHint + '</span>' : '') + '</td>' +
+            '<td class="product-name" style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapedName + '">' + mismatchIcon(mismatch) + escHtml(rec.product_name) + '</td>' +
+            '<td class="spec">' + escHtml(rec.specification || '') + '</td>' +
+            '<td><span class="qty-badge">' + escHtml(rec.quantity) + '</span></td>' +
+            '<td><span class="unit-badge">' + escHtml(rec.unit) + '</span></td>' +
+            '<td class="remark-cell' + (rec.remark ? ' has-content' : '') + '">' + escHtml(rec.remark || '-') + '</td>' +
+            '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">' + escHtml(unitHint) + (pieceHint ? '<br><span style="color:#0984e3;">' + escHtml(pieceHint) + '</span>' : '') + '</td>' +
             '<td style="white-space:nowrap;">' +
                 '<button type="button" class="btn btn-sm move-up-btn lock-hide" data-id="' + rec.id + '" title="上移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.2rem 0.4rem;font-size:0.75rem;">▲</button> ' +
                 '<button type="button" class="btn btn-sm move-down-btn lock-hide" data-id="' + rec.id + '" title="下移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.2rem 0.4rem;font-size:0.75rem;">▼</button> ' +
@@ -1721,12 +1346,12 @@ setTimeout(() => {
                         tds[0].textContent = mismatchIcon(newMismatch) + r.product_name;
                         tds[0].title = r.product_name;
                         tds[1].textContent = r.specification || '';
-                        tds[2].innerHTML = '<span class="qty-badge">' + r.quantity + '</span>';
-                        tds[3].innerHTML = '<span class="unit-badge">' + r.unit + '</span>';
+                        tds[2].innerHTML = '<span class="qty-badge">' + escHtml(r.quantity) + '</span>';
+                        tds[3].innerHTML = '<span class="unit-badge">' + escHtml(r.unit) + '</span>';
                         tds[4].textContent = r.remark || '-';
                         tds[4].className = 'remark-cell' + (r.remark ? ' has-content' : '');
                         var newPieceHint = getPieceHint(r.product_name, r.specification || '');
-                        tds[5].innerHTML = (getInboundUnitHint(r.product_name, r.specification || '', r.quantity, r.unit, r.remark) || '—') + (newPieceHint ? '<br><span style="color:#0984e3;">' + newPieceHint + '</span>' : '');
+                        tds[5].innerHTML = (getInboundUnitHint(r.product_name, r.specification || '', r.quantity, r.unit, r.remark) || '—') + (newPieceHint ? '<br><span style="color:#0984e3;">' + escHtml(newPieceHint) + '</span>' : '');
                         var newPieceMismatch = checkPieceMismatch(r.remark || '', r.quantity, r.product_name, r.specification || '');
                         if (newMismatch === 'warn' || newPieceMismatch === 'warn') { applyInboundMismatch(tr, 'warn'); }
                         else if (newMismatch === 'info' || newPieceMismatch === 'info') { applyInboundMismatch(tr, 'info'); }
@@ -1747,15 +1372,15 @@ setTimeout(() => {
                     tds[3].textContent.trim(),
                     tds[4].textContent.trim() === '-' ? '' : tds[4].textContent.trim()
                 ];
-                tds[0].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:80px;" value="' + vals[0].replace(/"/g, '&quot;') + '">';
-                tds[1].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + vals[1].replace(/"/g, '&quot;') + '">';
-                tds[2].innerHTML = '<input type="number" name="qty" class="form-control form-control-sm edit-input" style="width:100px;" value="' + vals[2] + '">';
-                var unitOpts = ['支','kg','y','桶','张','件','箱','卷','块','令'];
+                tds[0].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:80px;" value="' + escAttr(vals[0]) + '">';
+                tds[1].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + escAttr(vals[1]) + '">';
+                tds[2].innerHTML = '<input type="number" name="qty" class="form-control form-control-sm edit-input" style="width:100px;" value="' + escAttr(vals[2]) + '">';
+                var unitOpts = ['支','kg','y','桶','张','件','箱','卷','块','令','斤'];
                 var unitHtml = '<select class="form-control form-control-sm edit-input" style="width:70px;">';
                 unitOpts.forEach(function(u) { unitHtml += '<option value="' + u + '"' + (u === vals[3] ? ' selected' : '') + '>' + u + '</option>'; });
                 unitHtml += '</select>';
                 tds[3].innerHTML = unitHtml;
-                tds[4].innerHTML = '<input type="text" name="remark" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + vals[4].replace(/"/g, '&quot;') + '" oninput="autoFillQtyFromRemark(this)">';
+                tds[4].innerHTML = '<input type="text" name="remark" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + escAttr(vals[4]) + '" oninput="autoFillQtyFromRemark(this)">';
                 btn.textContent = '💾';
                 btn.classList.remove('btn-primary');
                 btn.classList.add('btn-success');
@@ -1815,6 +1440,86 @@ setTimeout(() => {
             '<td style="padding:0.6rem 0.75rem;"></td>';
         tbody.appendChild(summaryRow);
     }
+
+    // ── AI 图片删除按钮绑定（供 _smart_add_modal.html 的 insertAiImage 调用）──
+    function bindDeleteImageButtons() {
+        document.querySelectorAll('.del-img-btn:not([data-bound])').forEach(function(btn) {
+            btn.setAttribute('data-bound', '1');
+            btn.addEventListener('click', function() {
+                var imageId = this.getAttribute('data-image-id');
+                if (!imageId) return;
+                if (!confirm('确定删除这张AI识别图片吗？')) return;
+                fetch('/api/v1/inbound-orders/images/' + imageId, { method: 'DELETE' })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.success) {
+                        var wrap = this.closest('.ai-img-wrap');
+                        var area = this.closest('.ai-images-area');
+                        if (wrap) wrap.remove();
+                        if (area) {
+                            var remaining = area.querySelectorAll('.ai-img-wrap').length;
+                            var h4 = area.querySelector('h4');
+                            if (h4) h4.textContent = '🤖 AI 识别图片 (' + remaining + '张)';
+                            if (remaining === 0) area.remove();
+                        }
+                    } else { alert('删除失败: ' + (data.error || '未知错误')); }
+                }.bind(this)).catch(function(err) { alert('请求失败: ' + err.message); });
+            });
+        });
+    }
+
+    // ── 覆盖共享 _smart_add_modal.html 的 submitAiResults ──
+    // 原因：共享模板发送 {items} 但入库 API 需要 {records}；行格式也需匹配入库页面
+    window.submitAiResults = function() {
+        if (_smartFillOrderPk === null) { alert('缺少订单信息'); return; }
+        var rows = document.querySelectorAll('#aiResultBody tr'), items = [], i, row, pn, sp, qt, un, rm;
+        for (i = 0; i < rows.length; i++) {
+            row = rows[i];
+            pn = row.querySelector('[data-field="product_name"]').value.trim();
+            sp = row.querySelector('[data-field="specification"]').value.trim();
+            qt = row.querySelector('[data-field="quantity"]').value.trim();
+            un = row.querySelector('[data-field="unit"]').value;
+            rm = row.querySelector('[data-field="remark"]').value.trim();
+            if (pn && qt) items.push({product_name:pn, specification:sp, quantity:qt, unit:un, remark:rm});
+        }
+        if (items.length === 0) { alert('没有有效的数据可添加'); return; }
+
+        var doBatchAdd = function(imgData) {
+            if (typeof showLoading === 'function') showLoading('批量添加中...');
+            fetch(_smartAddApi + '/' + _smartFillOrderPk + '/records/batch', {
+                method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({records: items})
+            }).then(function(r){return r.json();}).then(function(data){
+                if (typeof hideLoading === 'function') hideLoading();
+                if (data.success) {
+                    updateOrderDocNumber(); closeSmartFill();
+                    if (data.records && data.records.length > 0) {
+                        var dateGroup = document.querySelector('.date-group[data-order-id="' + _smartFillOrderId + '"]');
+                        var tbody = dateGroup ? dateGroup.querySelector('.record-table tbody') : null;
+                        if (tbody) {
+                            data.records.forEach(function(item){
+                                var tr = buildInboundRecordRow(item, _smartFillOrderId);
+                                tbody.appendChild(tr);
+                            });
+                            recalcInboundSummary(dateGroup);
+                            if (imgData && imgData.success && imgData.image) insertAiImage(imgData, dateGroup);
+                        }
+                    }
+                } else { alert('添加失败：' + (data.error || '未知错误')); }
+            }).catch(function(err){ alert('请求失败：'+err); });
+        };
+
+        if (_smartAiImageFile) {
+            if (typeof showLoading === 'function') showLoading('上传图片中...');
+            var fd = new FormData(); fd.append('image', _smartAiImageFile); fd.append('source', 'ai');
+            fetch(_smartAddApi + '/' + _smartFillOrderPk + '/images', { method:'POST', body:fd })
+            .then(function(r){return r.json();}).then(function(d){doBatchAdd(d);}).catch(function(){doBatchAdd(null);});
+        } else { doBatchAdd(null); }
+    };
+
+    // 页面加载时绑定已有的 AI 图片删除按钮
+    document.addEventListener('DOMContentLoaded', function() {
+        bindDeleteImageButtons();
+    });
 </script>
 
 {% endblock %}
