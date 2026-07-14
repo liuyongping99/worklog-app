@@ -1,7 +1,54 @@
 """订单：出货 / 入库 / 装柜（三表 × 3 业务领域 = 9 个模型）"""
 import os
+import shutil
+import subprocess
 from datetime import datetime
 from ._db import get_db
+
+
+# mavis-trash 路径(在项目启动时解析一次,subprocess 调 .cmd 包装器)
+_MAVIS_TRASH = shutil.which('mavis-trash')
+
+
+def _safe_remove_file(file_path):
+    """删除图片物理文件,走 mavis-trash(进回收站,可恢复)+ 路径白名单(防误删其他文件)。
+
+    Args:
+        file_path: 文件绝对路径(从 DB file_path 字段读取)
+
+    Returns:
+        bool - True 表示文件已送入回收站(或本来就不存在),False 表示越界被拒或 mavis-trash 不可用
+    """
+    if not file_path:
+        return True
+    # 路径白名单:先校验路径在 upload/ 下(必须在 exists 检查之前,防攻击者用不存在的路径绕过)
+    try:
+        real = os.path.realpath(file_path)
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        upload_root = os.path.realpath(os.path.join(base_dir, 'upload'))
+        if not real.startswith(upload_root + os.sep):
+            # 路径越界,拒绝(攻击者构造 ../etc/passwd 之类的路径,即使文件不存在也不能放行)
+            return False
+    except Exception:
+        # realpath 解析失败,保险起见拒绝
+        return False
+    # 白名单通过后再看文件是否存在
+    if not os.path.exists(file_path):
+        return True
+    if not _MAVIS_TRASH:
+        # mavis-trash 未安装(理论上不会发生),退回 os.remove
+        try:
+            os.remove(file_path)
+            return True
+        except Exception:
+            return False
+    try:
+        subprocess.run([_MAVIS_TRASH, file_path], check=False, timeout=10)
+        return True
+    except Exception:
+        return False
+
+
 class ShippingOrder:
     @staticmethod
     def create(date: str, customer: str) -> int:
@@ -89,6 +136,15 @@ class ShippingOrder:
         conn = get_db()
         cursor = conn.cursor()
         cursor.execute('UPDATE shipping_orders SET order_note = ? WHERE id = ?', (note or '', order_id))
+        conn.commit()
+        conn.close()
+
+    @staticmethod
+    def set_doc_number(order_id: int, doc_number: str):
+        """设置单据编号"""
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('UPDATE shipping_orders SET doc_number = ? WHERE id = ?', (doc_number or '', order_id))
         conn.commit()
         conn.close()
 
@@ -414,6 +470,15 @@ class InboundOrder:
         conn.close()
 
     @staticmethod
+    def set_doc_number(order_id: int, doc_number: str):
+        """设置单据编号"""
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('UPDATE inbound_orders SET doc_number = ? WHERE id = ?', (doc_number or '', order_id))
+        conn.commit()
+        conn.close()
+
+    @staticmethod
     def set_supplier(order_id: int, supplier: str):
         """修改入库订单供应商名称（重排 order_num）"""
         conn = get_db()
@@ -596,12 +661,12 @@ class InboundRecord:
 
 class InboundImage:
     @staticmethod
-    def create(order_pk: int, file_path: str, original_name: str = ''):
+    def create(order_pk: int, file_path: str, original_name: str = '', source: str = 'upload'):
         conn = get_db()
         cursor = conn.cursor()
         cursor.execute(
-            'INSERT INTO inbound_images (order_pk, file_path, original_name, created_at) VALUES (?, ?, ?, ?)',
-            (order_pk, file_path, original_name, datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+            'INSERT INTO inbound_images (order_pk, file_path, original_name, source, created_at) VALUES (?, ?, ?, ?, ?)',
+            (order_pk, file_path, original_name, source, datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
         )
         conn.commit()
         image_id = cursor.lastrowid
@@ -636,6 +701,15 @@ class InboundImage:
         return path.replace('\\', '/')
 
     @staticmethod
+    def get_by_id(image_id: int):
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM inbound_images WHERE id = ?', (image_id,))
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    @staticmethod
     def delete(image_id: int):
         conn = get_db()
         cursor = conn.cursor()
@@ -648,9 +722,8 @@ class InboundImage:
             cursor.execute('DELETE FROM inbound_images WHERE id = ?', (image_id,))
             conn.commit()
             conn.close()
-            # 删除文件
-            if os.path.exists(file_path):
-                os.remove(file_path)
+            # 删除文件（走回收站 + 路径白名单）
+            _safe_remove_file(file_path)
             return True
         conn.close()
         return False
@@ -666,21 +739,20 @@ class InboundImage:
         cursor.execute('DELETE FROM inbound_images WHERE order_pk = ?', (order_pk,))
         conn.commit()
         conn.close()
-        # 删除文件
+        # 删除文件（走回收站 + 路径白名单）
         for file_path in file_paths:
-            if os.path.exists(file_path):
-                os.remove(file_path)
+            _safe_remove_file(file_path)
 
 
 
 class ShippingImage:
     @staticmethod
-    def create(order_pk: int, file_path: str, original_name: str = ''):
+    def create(order_pk: int, file_path: str, original_name: str = '', source: str = 'upload'):
         conn = get_db()
         cursor = conn.cursor()
         cursor.execute(
-            'INSERT INTO shipping_images (order_pk, file_path, original_name, created_at) VALUES (?, ?, ?, ?)',
-            (order_pk, file_path, original_name, datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+            'INSERT INTO shipping_images (order_pk, file_path, original_name, source, created_at) VALUES (?, ?, ?, ?, ?)',
+            (order_pk, file_path, original_name, source, datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
         )
         conn.commit()
         image_id = cursor.lastrowid
@@ -712,6 +784,15 @@ class ShippingImage:
         return path.replace('\\', '/')
 
     @staticmethod
+    def get_by_id(image_id: int):
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM shipping_images WHERE id = ?', (image_id,))
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    @staticmethod
     def delete(image_id: int):
         conn = get_db()
         cursor = conn.cursor()
@@ -722,8 +803,8 @@ class ShippingImage:
             cursor.execute('DELETE FROM shipping_images WHERE id = ?', (image_id,))
             conn.commit()
             conn.close()
-            if os.path.exists(file_path):
-                os.remove(file_path)
+            # 删除文件（走回收站 + 路径白名单）
+            _safe_remove_file(file_path)
             return True
         conn.close()
         return False
@@ -740,8 +821,7 @@ class ShippingImage:
         conn.commit()
         conn.close()
         for file_path in file_paths:
-            if os.path.exists(file_path):
-                os.remove(file_path)
+            _safe_remove_file(file_path)
 
 
 class LoadingOrder:
@@ -821,6 +901,15 @@ class LoadingOrder:
         conn = get_db()
         cursor = conn.cursor()
         cursor.execute('UPDATE loading_orders SET order_note = ? WHERE id = ?', (note or '', order_id))
+        conn.commit()
+        conn.close()
+
+    @staticmethod
+    def set_doc_number(order_id: int, doc_number: str):
+        """设置单据编号"""
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('UPDATE loading_orders SET doc_number = ? WHERE id = ?', (doc_number or '', order_id))
         conn.commit()
         conn.close()
 
@@ -1001,7 +1090,7 @@ class LoadingOrderRecord:
         # 先查询所有订单（日期范围内），再左连接明细
         if start_date and end_date:
             cursor.execute('''
-                SELECT o.id as order_pk, o.date, o.customer, o.order_num, o.is_locked, o.order_note,
+                SELECT o.id as order_pk, o.date, o.customer, o.order_num, o.is_locked, o.order_note, o.doc_number,
                        r.id as r_id, r.product_name, r.specification, r.quantity, r.unit, r.remark, r.created_at as r_created_at
                 FROM loading_orders o
                 LEFT JOIN loading_order_records r ON o.id = r.order_pk
@@ -1031,6 +1120,7 @@ class LoadingOrderRecord:
                     'order_num': row_dict['order_num'],
                     'is_locked': row_dict['is_locked'],
                     'order_note': row_dict.get('order_note', ''),
+                    'doc_number': row_dict.get('doc_number', ''),
                     'records': []
                 }
             # 只添加有明细的记录
@@ -1052,12 +1142,12 @@ class LoadingOrderRecord:
 class LoadingOrderImage:
     """装柜订单图片"""
     @staticmethod
-    def create(order_pk: int, file_path: str, original_name: str = ''):
+    def create(order_pk: int, file_path: str, original_name: str = '', source: str = 'upload'):
         conn = get_db()
         cursor = conn.cursor()
         cursor.execute(
-            'INSERT INTO loading_order_images (order_pk, file_path, original_name, created_at) VALUES (?, ?, ?, ?)',
-            (order_pk, file_path, original_name, datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+            'INSERT INTO loading_order_images (order_pk, file_path, original_name, source, created_at) VALUES (?, ?, ?, ?, ?)',
+            (order_pk, file_path, original_name, source, datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
         )
         conn.commit()
         image_id = cursor.lastrowid
@@ -1089,6 +1179,15 @@ class LoadingOrderImage:
         return path.replace('\\', '/')
 
     @staticmethod
+    def get_by_id(image_id: int):
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM loading_order_images WHERE id = ?', (image_id,))
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    @staticmethod
     def delete(image_id: int):
         conn = get_db()
         cursor = conn.cursor()
@@ -1099,8 +1198,8 @@ class LoadingOrderImage:
             cursor.execute('DELETE FROM loading_order_images WHERE id = ?', (image_id,))
             conn.commit()
             conn.close()
-            if os.path.exists(file_path):
-                os.remove(file_path)
+            # 删除文件（走回收站 + 路径白名单）
+            _safe_remove_file(file_path)
             return True
         conn.close()
         return False
@@ -1136,7 +1235,7 @@ class LoadingOrderImage:
             order_pk = item['order_pk']
             if order_pk not in result:
                 result[order_pk] = []
-                result[order_pk].append(item)
+            result[order_pk].append(item)
         return result
 
 

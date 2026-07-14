@@ -40,7 +40,7 @@ def create_app():
     # 注意:上传目录由 blueprints/_helpers.py 的 get_upload_dir() 集中管理,
     # 实际写到项目根的 upload/YYYY-MM/ 下,通过 blueprints/upload.py 的
     # /upload/<path> 路由对外暴露——这里不再用 app.config['UPLOAD_FOLDER']。
-    app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max
+    app.config['MAX_CONTENT_LENGTH'] = 20 * 1024 * 1024  # 20MB max（单次请求含图片）
 
     # === 初始化数据库 ===
     init_db()
@@ -62,6 +62,14 @@ def create_app():
             response.headers['Pragma'] = 'no-cache'
             response.headers['Expires'] = '0'
         return response
+
+    # === 上传超限 413 友好返回 ===
+    @app.errorhandler(413)
+    def request_entity_too_large(e):
+        from flask import jsonify, request
+        if request.path.startswith('/api/'):
+            return jsonify({'success': False, 'error': '上传文件过大，单次请求不能超过 20MB'}), 413
+        return ('上传文件过大，单次请求不能超过 20MB', 413)
 
     # === 注册蓝图 ===
     from blueprints.upload import bp as upload_bp
