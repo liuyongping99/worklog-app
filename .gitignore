@@ -54,6 +54,14 @@ _tw_copy_prompt.html
 309A_result.txt
 templates_fixed/
 scratchpad.md
+# 通用的临时/调试输出（前缀 _temp_* / _test_* / _diff_* / _original_*）
+_temp_*
+_test_*.py
+_diff_*.txt
+_diff_*.html
+_original_*.html
+# claude code workbuddy 工作目录
+.workbuddy/
 
 # ===== Claude Code 配置 / memory =====
 # 个人化配置和会话 memory,不上传公开仓库
@@ -95,3 +103,13 @@ nohup.out
 *.bak
 *.tmp
 *.swp
+# sql/ 下的临时调试脚本（product1/2/3 系列都是调试中间产物；new.sql + new_sqlite.sql 是正式文件）
+sql/_*.py
+sql/_*.json
+sql/product*.sql
+sql/*-0609.sql
+sql/new*.bak
+sql/*.bak
+sql/product_category_full*.sql
+sql/newlite.sql
+sql/new01.sql

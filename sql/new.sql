@@ -4,10 +4,10 @@ DROP TABLE IF EXISTS product;
 -- ============================================
 -- 商品分类表（邻接表模型）- 完整版含所有节点
 -- ============================================
-DROP TABLE IF EXISTS product_category;
+DROP TABLE IF EXISTS product_categories;
 
-CREATE TABLE product_category (
-    category_id          BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '分类ID',
+CREATE TABLE product_categories(
+    id                        BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '分类ID',
     category_code     VARCHAR(50) NOT NULL COMMENT '分类编码',
     category_name    VARCHAR(100) NOT NULL COMMENT '分类名称',
     parent_id             BIGINT DEFAULT NULL COMMENT '父分类ID，NULL为根节点',
@@ -17,7 +17,7 @@ CREATE TABLE product_category (
     created_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at         DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
-    FOREIGN KEY (parent_id) REFERENCES product_category(category_id),
+    FOREIGN KEY (parent_id) REFERENCES product_category(id),
     UNIQUE KEY uk_code (category_code),
     INDEX idx_parent (parent_id),
     INDEX idx_level (level)
@@ -58,7 +58,7 @@ DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at        
 DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
-    FOREIGN KEY (category_id) REFERENCES product_category(category_id),
+    FOREIGN KEY (category_id) REFERENCES product_categories(id),
     UNIQUE KEY uk_product_code (product_code),
     INDEX idx_category (category_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='商品表';
@@ -346,7 +346,8 @@ INSERT INTO product_category ( category_code, category_name, parent_id, level, s
 ( '021007', '7P环保LB鱼鳞布', @category_id, 4, 7),
 ( '021008', '7P环保HA猪皮纹', @category_id, 4, 8),
 ( '021009', '7P环保毛底底胶', @category_id, 4, 9),
-( '021010', '7P环保里布革', @category_id, 4, 10);
+( '021010', '7P环保里布革', @category_id, 4, 10),
+( '021011', '7P环保高弹', @category_id, 4, 10);
 
 -- 第4层：小类（A级杂胶下）
 SET @category_id = NULL;
