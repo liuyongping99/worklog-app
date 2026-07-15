@@ -74,7 +74,7 @@ window.removeAiImage = function() {
     document.getElementById('aiAddBtn').disabled = true;
 };
 
-// 拖拽支持
+// 拖拽 + 粘贴支持（仅在 modal 打开时生效）
 document.addEventListener('DOMContentLoaded', function() {
     var area = document.getElementById('aiUploadArea');
     if (!area) return;
@@ -84,6 +84,25 @@ document.addEventListener('DOMContentLoaded', function() {
         e.preventDefault(); area.classList.remove('drag-over');
         var file = e.dataTransfer.files[0];
         if (file) { document.getElementById('aiImageFile').files = e.dataTransfer.files; handleAiFileSelect(document.getElementById('aiImageFile')); }
+    });
+    // 全局 paste 监听：仅当弹框打开时拦截，避免劫持普通粘贴
+    document.addEventListener('paste', function(e) {
+        var modal = document.getElementById('smartFillModal');
+        if (!modal || !modal.classList.contains('show')) return;
+        // 仅在 AI tab 激活时处理
+        if (!document.getElementById('contentAI').classList.contains('active')) return;
+        if (!e.clipboardData || !e.clipboardData.items) return;
+        for (var i = 0; i < e.clipboardData.items.length; i++) {
+            var item = e.clipboardData.items[i];
+            if (item.type && item.type.indexOf('image/') === 0) {
+                var file = item.getAsFile();
+                if (file) {
+                    e.preventDefault();
+                    handleAiFileSelect({ files: [file], value: '' });
+                    return;
+                }
+            }
+        }
     });
     // 点击遮罩关闭
     document.getElementById('smartFillModal').addEventListener('click', function(e) {

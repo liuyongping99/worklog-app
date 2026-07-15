@@ -19,6 +19,7 @@ from blueprints._helpers import (
     get_upload_dir as get_helpers_upload_dir,
     get_ypp, calc_hint, check_remark, summarize_remarks,
     get_piece_conversion, calc_piece_quantity, check_piece_mismatch,
+    validate_image_content, check_uploaded_image, save_base64_image, save_uploaded_file,
 )
 
 bp = Blueprint('inbound', __name__)
@@ -281,35 +282,26 @@ def inbound_upload_image(order_pk):
         data = request.get_json()
         image_data = data.get('image')
         if image_data and image_data.startswith('data:image'):
-            header, base64_data = image_data.split(',', 1)
-            if 'png' in header:
-                ext = 'png'
-            elif 'jpeg' in header or 'jpg' in header:
-                ext = 'jpg'
-            elif 'gif' in header:
-                ext = 'gif'
-            else:
-                ext = 'png'
-            filename = f"{uuid.uuid4().hex}.{ext}"
-            filepath = os.path.join(upload_dir, filename)
-            image_bytes = base64.b64decode(base64_data)
-            with open(filepath, 'wb') as f:
-                f.write(image_bytes)
-            image_id = InboundImage.create(order_pk, filepath, '')
-            return jsonify({'success': True, 'image_id': image_id, 'file_path': filepath})
+            try:
+                filepath = save_base64_image(image_data)
+                image_id = InboundImage.create(order_pk, filepath, '')
+                return jsonify({'success': True, 'image_id': image_id, 'file_path': filepath})
+            except ValueError as e:
+                return jsonify({'success': False, 'error': str(e)}), 400
+            except Exception as e:
+                return jsonify({'success': False, 'error': f'图片保存失败: {e}'}), 500
 
     if 'image' in request.files:
         file = request.files['image']
         if file.filename:
-            ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else 'png'
-            if ext not in ['png', 'jpg', 'jpeg', 'gif', 'webp']:
-                ext = 'png'
-            filename = f"{uuid.uuid4().hex}.{ext}"
-            filepath = os.path.join(upload_dir, filename)
-            file.save(filepath)
-            original_name = file.filename
-            image_id = InboundImage.create(order_pk, filepath, original_name)
-            return jsonify({'success': True, 'image_id': image_id, 'file_path': filepath, 'original_name': original_name})
+            try:
+                filepath, original_name = save_uploaded_file(file)
+                image_id = InboundImage.create(order_pk, filepath, original_name)
+                return jsonify({'success': True, 'image_id': image_id, 'file_path': filepath, 'original_name': original_name})
+            except ValueError as e:
+                return jsonify({'success': False, 'error': str(e)}), 400
+            except Exception as e:
+                return jsonify({'success': False, 'error': f'图片保存失败: {e}'}), 500
 
     return jsonify({'success': False, 'error': 'No image provided'}), 400
 
@@ -644,16 +636,21 @@ def api_v1_inbound_orders_upload_image(order_id):
     if file.filename == '':
         return jsonify({'success': False, 'error': '未选择文件'}), 400
 
+    try:
+        ext = check_uploaded_image(file)
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
     upload_dir, date_str = _get_upload_dir()
 
-    ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else 'png'
-    if ext not in ('png', 'jpg', 'jpeg', 'gif', 'webp'):
-        ext = 'png'
-    # 防路径穿越 + 防文件名 XSS：白名单 [A-Za-z0-9._-]，其他字符替换为 _
     safe_name = re.sub(r'[^A-Za-z0-9._-]', '_', os.path.basename(file.filename))
     filename = f"inbound_{order_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{safe_name}"
     filepath = os.path.join(upload_dir, filename)
     file.save(filepath)
+    try:
+        validate_image_content(filepath)
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
 
     source = request.form.get('source', 'upload')
     if source not in ('upload', 'ai'):

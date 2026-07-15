@@ -914,6 +914,15 @@ class LoadingOrder:
         conn.close()
 
     @staticmethod
+    def set_img_cols(order_id: int, cols: int):
+        """设置装柜订单图片列数（每订单独立记忆，与 shipping_orders 对齐）"""
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('UPDATE loading_orders SET img_cols = ? WHERE id = ?', (cols, order_id))
+        conn.commit()
+        conn.close()
+
+    @staticmethod
     def set_customer(order_id: int, customer: str):
         """修改装柜订单客户名称（重排 order_num）"""
         conn = get_db()

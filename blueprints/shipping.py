@@ -17,6 +17,7 @@ from blueprints._helpers import (
     get_upload_dir as get_helpers_upload_dir,
     get_ypp, calc_hint, check_remark, summarize_remarks,
     get_piece_conversion, calc_piece_quantity, check_piece_mismatch,
+    validate_image_content, check_uploaded_image,
 )
 
 bp = Blueprint('shipping', __name__)
@@ -423,18 +424,27 @@ def api_v1_shipping_orders_upload_image(order_id):
             filepath = os.path.join(upload_dir, filename)
             with open(filepath, 'wb') as f:
                 f.write(img_bytes)
+            try:
+                validate_image_content(filepath)
+            except ValueError as e:
+                return jsonify({'success': False, 'error': str(e)}), 400
             original_name = 'pasted_image'
         else:
             return jsonify({'success': False, 'error': '无效的图片数据'}), 400
     elif 'image' in request.files:
         file = request.files['image']
         if file.filename:
-            ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else 'png'
-            if ext not in ['png', 'jpg', 'jpeg', 'gif', 'webp']:
-                ext = 'png'
+            try:
+                ext = check_uploaded_image(file)
+            except ValueError as e:
+                return jsonify({'success': False, 'error': str(e)}), 400
             filename = f"{uuid.uuid4().hex}.{ext}"
             filepath = os.path.join(upload_dir, filename)
             file.save(filepath)
+            try:
+                validate_image_content(filepath)
+            except ValueError as e:
+                return jsonify({'success': False, 'error': str(e)}), 400
             original_name = file.filename
         else:
             return jsonify({'success': False, 'error': '未选择文件'}), 400

@@ -1,3 +1,17 @@
+// === block 0 (HTML 转义工具，全局共用) ===
+// 用于把用户数据塞到 innerHTML / input value / src 属性前必须过这一关
+// 覆盖场景:品名 / 规格 / 备注 / 客户 / 图片路径 / 任何不可信字符串
+function escHtml(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+// alias:写到 HTML 属性时语义更清晰
+function escAttr(s) { return escHtml(s); }
+
 // === block 1 ===
 var _imgPreviewRotation = 0;
 function showImgPreview(src) {
