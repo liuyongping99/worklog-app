@@ -152,6 +152,15 @@ class RouteSmokeTests(unittest.TestCase):
         cls.app = app
         cls.client = app.test_client()
 
+    def setUp(self):
+        """T6 后所有受 gate 保护的页面都要登录;用一个占位 staff 写 session。
+        用一个 unique 名字避免和其他测试撞 staff 表数据。
+        """
+        from models.tasks_flow import StaffDB
+        self._op = StaffDB.create(name="smoke-tester", role="文员", is_active=1)
+        with self.client.session_transaction() as sess:
+            sess["operator_id"] = self._op["id"]
+
     def test_home_page(self):
         r = self.client.get('/')
         self.assertEqual(r.status_code, 200)
@@ -173,6 +182,8 @@ class RouteSmokeTests(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
 
     def test_404_page(self):
+        # T6 后已登录用户访问不存在路径:Flask routing 在 before_request 之后
+        # 找不到匹配,直接渲染 404(不受 gate 影响,因为 gate 已通过)
         r = self.client.get('/this-route-does-not-exist')
         self.assertEqual(r.status_code, 404)
 

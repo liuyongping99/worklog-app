@@ -6,6 +6,31 @@
     <title>{% if page_title %}{{ page_title }} - {% endif %}丰源工作台</title>
     
 <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+
+{# 操作员徽标 + 退出按钮(T6) — Tailwind 内联,避免动 static.css #}
+<style>
+    .navbar-operator {
+        display: inline-flex; align-items: center; gap: 0.4rem;
+        padding: 0.25rem 0.55rem;
+        background: rgba(255,255,255,0.18);
+        border: 1px solid rgba(255,255,255,0.28);
+        border-radius: 999px;
+        font-size: 0.8rem;
+        color: #fff;
+        margin-left: auto;
+    }
+    .navbar-operator .op-badge { line-height: 1; }
+    .navbar-operator .op-logout {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 22px; height: 22px;
+        border-radius: 50%;
+        background: rgba(255,255,255,0.15);
+        text-decoration: none; color: #fff;
+        font-size: 0.85rem;
+        transition: background 0.15s;
+    }
+    .navbar-operator .op-logout:hover { background: rgba(255,255,255,0.35); }
+</style>
 </head>
 <body>
 
@@ -58,6 +83,13 @@
         </ul>
     </div>
     <button class="nav-arrow nav-arrow-right" onclick="navScroll(1)" title="向后">▶</button>
+    {# 操作员信息 + 退出按钮(登录后才有 current_operator) #}
+    {% if current_operator %}
+    <div class="navbar-operator">
+        <span class="op-badge">👤 {{ current_operator.name }} · {{ current_operator.role }}</span>
+        <a href="/logout" class="op-logout" title="退出登录">🚪</a>
+    </div>
+    {% endif %}
 </nav>
 
 {% if all_notices %}

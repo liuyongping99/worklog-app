@@ -20,7 +20,7 @@
 """
 import os
 from dotenv import load_dotenv
-from flask import Flask
+from flask import Flask, redirect, request, session, url_for
 from models import init_db, Notice
 
 # 在 create_app 外加载，import 阶段就读到，方便 models.py 也能用
@@ -54,6 +54,46 @@ def create_app():
             notices = []
         return dict(all_notices=notices)
 
+    # === 全局上下文：注入当前操作员 (Task 6 / T6) ===
+    # 模板里直接用 {{ current_operator.name }} / {{ current_operator.role }}
+    # 未登录时为 None — 模板需自行判空(登录页 login.html 不依赖此值)。
+    @app.context_processor
+    def inject_current_operator():
+        op_id = session.get("operator_id")
+        op = None
+        if op_id is not None:
+            try:
+                from models.tasks_flow import StaffDB
+                op = StaffDB.get_by_id(op_id)
+                # is_active=0 的"离职"人员不应再作为操作员显示(防御性)
+                if op and op.get("is_active") != 1:
+                    op = None
+            except Exception:
+                op = None
+        return dict(current_operator=op)
+
+    # === 登录闸门：保护除了 /login /logout /static /api 之外的所有页面 (T6) ===
+    # 单人用场景也给登录"选身份"加一道闸门,
+    # 目的:1) 记录谁在操作;2) 让多人化只需加密码层、不用改 gate。
+    # 注意:API (REST /api/v1/*) 不在此处拦截 — 它们自己返回 401,由前端引导跳转。
+    _AUTH_PUBLIC_PREFIXES = ("/static", "/api/")
+    _AUTH_PUBLIC_PATHS = ("/login", "/logout", "/favicon.ico")
+
+    @app.before_request
+    def _require_login():
+        # 1. 公开路径直接放行
+        p = request.path
+        for prefix in _AUTH_PUBLIC_PREFIXES:
+            if p.startswith(prefix):
+                return None
+        if p in _AUTH_PUBLIC_PATHS:
+            return None
+        # 2. 未登录 → 跳 /login
+        if session.get("operator_id") is None:
+            # 记住原 URL,登录后跳回(可选;v1 简化直接跳根)
+            return redirect(url_for("auth.login"))
+        return None
+
     # === 缓存控制 ===
     @app.after_request
     def add_cache_control_headers(response):
@@ -72,6 +112,9 @@ def create_app():
         return ('上传文件过大，单次请求不能超过 20MB', 413)
 
     # === 注册蓝图 ===
+    # auth 必须最先注册 → 这样 url_for('auth.login') 之类的 endpoint
+    # 在测试启动时就可解析(before_request 也会用到)
+    from blueprints.auth import bp as auth_bp
     from blueprints.upload import bp as upload_bp
     from blueprints.basic_records import bp as basic_records_bp
     from blueprints.info_pages import bp as info_pages_bp
@@ -83,6 +126,7 @@ def create_app():
     from blueprints.search import bp as search_bp
     from blueprints.task_flow import bp as task_flow_bp
 
+    app.register_blueprint(auth_bp)
     app.register_blueprint(upload_bp)
     app.register_blueprint(basic_records_bp)
     app.register_blueprint(info_pages_bp)

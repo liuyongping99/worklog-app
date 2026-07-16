@@ -145,6 +145,27 @@ class StaffDB:
         ).fetchone()
         return dict(row) if row else None
 
+    @staticmethod
+    def get_active() -> list:
+        """返回所有 is_active=1 的 staff,按 role 排序、id 升序兜底。
+
+        登录选择页用 — 离职的(staff.is_active=0)不应出现在下拉里。
+        排序规则:role(司机/调度/搬运/打码/仓管/文员)、同 role 按 id 升序。
+        """
+        conn = get_db()
+        rows = conn.execute(
+            "SELECT * FROM staff WHERE is_active = 1 "
+            "ORDER BY CASE role "
+            "  WHEN '司机' THEN 1 "
+            "  WHEN '调度' THEN 2 "
+            "  WHEN '搬运' THEN 3 "
+            "  WHEN '打码' THEN 4 "
+            "  WHEN '仓管' THEN 5 "
+            "  WHEN '文员' THEN 6 "
+            "  ELSE 99 END, id"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
 
 class TaskDB:
     """tasks 表 CRUD。"""
