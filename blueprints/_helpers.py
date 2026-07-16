@@ -358,3 +358,41 @@ def check_piece_mismatch(remark, quantity_str, conversion):
     if abs(expected - actual) <= 0.01:
         return ''
     return 'info' if pieces == 1 else 'warn'
+
+
+# ── 图片内容安全校验(M1 stub) ─────────────────────────
+# 完整实现(文件头魔数 + Pillow 解码 + 体积限制)留 P1;这里只做最小可启动 stub
+
+_ALLOWED_IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
+_MAX_IMAGE_BYTES = 10 * 1024 * 1024  # 10MB
+
+
+def validate_image_content(filepath):
+    """校验已落盘文件是否为合法图片(M1 stub: 仅检查文件存在 + 扩展名 + 大小)。"""
+    if not filepath or not os.path.exists(filepath):
+        raise ValueError("文件不存在")
+    ext = os.path.splitext(filepath)[1].lower()
+    if ext not in _ALLOWED_IMAGE_EXTS:
+        raise ValueError(f"不支持的图片格式: {ext}")
+    size = os.path.getsize(filepath)
+    if size == 0:
+        raise ValueError("空文件")
+    if size > _MAX_IMAGE_BYTES:
+        raise ValueError(f"文件过大(>{_MAX_IMAGE_BYTES // 1024 // 1024}MB)")
+    return True
+
+
+def check_uploaded_image(file_storage):
+    """校验上传的 FileStorage,返回扩展名(含 .)。M1 stub: 仅检查扩展名 + 大小。"""
+    if not file_storage or not file_storage.filename:
+        raise ValueError("未选择文件")
+    ext = os.path.splitext(file_storage.filename)[1].lower()
+    if ext not in _ALLOWED_IMAGE_EXTS:
+        raise ValueError(f"不支持的图片格式: {ext}")
+    # 不读全文(避免内存峰值),靠 seek+length
+    file_storage.seek(0, os.SEEK_END)
+    size = file_storage.tell()
+    file_storage.seek(0)
+    if size > _MAX_IMAGE_BYTES:
+        raise ValueError(f"文件过大(>{_MAX_IMAGE_BYTES // 1024 // 1024}MB)")
+    return ext
