@@ -2,16 +2,12 @@
 
 包含：
 - /inbound-records 页面（带日期过滤、商品单位提示计算）
-- /inbound-records/* 传统 form 端点（add/add-item/edit/lock/batch-add/move/...）
-- /inbound-records/upload-image/<id> / delete-image/<id> HTML 风格图片端点
-- /api/v1/inbound-orders/* REST API（订单/明细/图片 CRUD + 移动）
+- /api/v1/inbound-orders/* REST API（订单/明细/图片 CRUD + 移动 + AI 识别）
 """
 import os
 import re
-import uuid
-import base64
 from datetime import date as date_cls, timedelta, datetime
-from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, current_app
+from flask import Blueprint, render_template, request, jsonify, current_app
 from models import (
     InboundOrder, InboundRecord, InboundImage, ProductUnit, PieceConversion, get_db, AuditLog
 )
@@ -19,7 +15,7 @@ from blueprints._helpers import (
     get_upload_dir as get_helpers_upload_dir,
     get_ypp, calc_hint, check_remark, summarize_remarks,
     get_piece_conversion, calc_piece_quantity, check_piece_mismatch,
-    validate_image_content, check_uploaded_image, save_base64_image, save_uploaded_file,
+    validate_image_content, check_uploaded_image,
 )
 
 bp = Blueprint('inbound', __name__)
@@ -110,213 +106,6 @@ def inbound_records():
     )
 
 
-# ── HTML form 端点 ──────────────────────────────────────────────
-@bp.route('/inbound-records/add', methods=['POST'])
-def inbound_records_add():
-    date = request.form.get('date')
-    supplier = request.form.get('supplier')
-    if date and supplier:
-        InboundOrder.create(date, supplier)
-        flash('已创建入库单')
-    return redirect(url_for('inbound.inbound_records'))
-
-
-@bp.route('/inbound-records/add-item', methods=['POST'])
-def inbound_records_add_item():
-    order_pk = request.form.get('order_pk')
-    product_name = request.form.get('product_name')
-    specification = request.form.get('specification')
-    quantity = request.form.get('quantity')
-    unit = request.form.get('unit', '支')
-    remark = request.form.get('remark', '')
-    if order_pk and product_name and quantity:
-        try:
-            order = InboundOrder.get_by_id(int(order_pk))
-        except (ValueError, TypeError):
-            flash('订单参数无效', 'error')
-            return redirect(url_for('inbound.inbound_records'))
-        if not order:
-            flash('订单不存在', 'error')
-            return redirect(url_for('inbound.inbound_records'))
-        if order.get('is_locked'):
-            flash('订单已锁定，无法添加明细', 'error')
-            return redirect(url_for('inbound.inbound_records'))
-        InboundRecord.create(int(order_pk), product_name, specification, quantity, unit, remark)
-        flash('已添加明细')
-    return redirect(url_for('inbound.inbound_records'))
-
-
-@bp.route('/inbound-records/delete/<int:record_id>', methods=['POST'])
-def inbound_records_delete(record_id):
-    record = InboundRecord.get_by_id(record_id)
-    if record:
-        order = InboundOrder.get_by_id(record['order_pk'])
-        if order and order.get('is_locked'):
-            flash('订单已锁定，无法删除明细', 'error')
-            return redirect(url_for('inbound.inbound_records'))
-        InboundRecord.delete(record_id)
-        flash('已删除明细')
-    return redirect(url_for('inbound.inbound_records'))
-
-
-@bp.route('/inbound-records/edit/<int:record_id>', methods=['POST'])
-def inbound_records_edit(record_id):
-    record = InboundRecord.get_by_id(record_id)
-    if not record:
-        return jsonify({'success': False, 'error': '记录不存在'})
-    order = InboundOrder.get_by_id(record['order_pk'])
-    if order and order.get('is_locked'):
-        return jsonify({'success': False, 'error': '该订单已锁定，无法修改'})
-    data = request.get_json()
-    InboundRecord.update(record_id, data)
-    updated = InboundRecord.get_by_id(record_id)
-    return jsonify({'success': True, 'record': updated})
-
-
-@bp.route('/inbound-records/delete-order/<int:order_id>', methods=['POST'])
-def inbound_records_delete_order(order_id):
-    order = InboundOrder.get_by_id(order_id)
-    if not order:
-        flash('订单不存在', 'error')
-        return redirect(url_for('inbound.inbound_records'))
-    if order.get('is_locked'):
-        flash('该订单已锁定，无法删除', 'error')
-        return redirect(url_for('inbound.inbound_records'))
-    supplier = order.get('supplier')
-    result = InboundOrder.delete(order_id)
-    if not result.get('success'):
-        flash(result.get('error', '删除失败'), 'error')
-        return redirect(url_for('inbound.inbound_records'))
-    AuditLog.log('delete_order', 'inbound_order', order_id, detail={'supplier': supplier})
-    flash('已删除入库单')
-    return redirect(url_for('inbound.inbound_records'))
-
-
-@bp.route('/inbound-records/lock/<int:order_id>', methods=['POST'])
-def inbound_records_lock(order_id):
-    """切换入库订单锁定状态"""
-    order = InboundOrder.get_by_id(order_id)
-    if not order:
-        return jsonify({'success': False, 'error': '订单不存在'})
-    if order.get('is_locked', 0):
-        InboundOrder.unlock(order_id)
-        locked = False
-    else:
-        InboundOrder.lock(order_id)
-        locked = True
-    return jsonify({'success': True, 'locked': locked})
-
-
-@bp.route('/inbound-records/batch-add', methods=['POST'])
-def inbound_records_batch_add():
-    order_pk = request.form.get('order_pk')
-    items_text = request.form.get('items_text', '')
-
-    if order_pk and items_text:
-        try:
-            order = InboundOrder.get_by_id(int(order_pk))
-        except (ValueError, TypeError):
-            flash('订单参数无效', 'error')
-            return redirect(url_for('inbound.inbound_records'))
-        if not order:
-            flash('订单不存在', 'error')
-            return redirect(url_for('inbound.inbound_records'))
-        if order.get('is_locked'):
-            flash('订单已锁定，无法批量添加', 'error')
-            return redirect(url_for('inbound.inbound_records'))
-        for line in items_text.strip().split('\n'):
-            line = line.strip()
-            if not line:
-                continue
-            if '|' in line:
-                parts = line.split('|')
-            else:
-                parts = line.split()
-            product_name = parts[0].strip() if len(parts) > 0 else ''
-            specification = parts[1].strip() if len(parts) > 1 else ''
-            unit = parts[2].strip() if len(parts) > 2 else '支'
-            quantity = parts[3].strip() if len(parts) > 3 else ''
-            remark = parts[4].strip() if len(parts) > 4 else ''
-            if product_name and quantity:
-                InboundRecord.create(int(order_pk), product_name, specification, quantity, unit, remark)
-        flash('已批量添加明细')
-    return redirect(url_for('inbound.inbound_records'))
-
-
-@bp.route('/inbound-records/move-up/<int:record_id>', methods=['POST'])
-def inbound_records_move_up(record_id):
-    record = InboundRecord.get_by_id(record_id)
-    if not record:
-        return jsonify({'success': False, 'error': '记录不存在'})
-    order = InboundOrder.get_by_id(record['order_pk'])
-    if order and order.get('is_locked'):
-        return jsonify({'success': False, 'error': '订单已锁定'})
-    InboundRecord.move_up(record_id)
-    return jsonify({'success': True})
-
-
-@bp.route('/inbound-records/move-down/<int:record_id>', methods=['POST'])
-def inbound_records_move_down(record_id):
-    record = InboundRecord.get_by_id(record_id)
-    if not record:
-        return jsonify({'success': False, 'error': '记录不存在'})
-    order = InboundOrder.get_by_id(record['order_pk'])
-    if order and order.get('is_locked'):
-        return jsonify({'success': False, 'error': '订单已锁定'})
-    InboundRecord.move_down(record_id)
-    return jsonify({'success': True})
-
-
-# ── HTML 风格图片上传 ──────────────────────────────────────────────
-@bp.route('/inbound-records/upload-image/<int:order_pk>', methods=['POST'])
-def inbound_upload_image(order_pk):
-    """上传图片到指定入库单"""
-    order = InboundOrder.get_by_id(order_pk)
-    if not order:
-        return jsonify({'success': False, 'error': '订单不存在'}), 404
-    if order.get('is_locked'):
-        return jsonify({'success': False, 'error': '订单已锁定，无法上传图片'}), 403
-    upload_dir, month_str = _get_upload_dir()
-
-    if request.is_json:
-        data = request.get_json()
-        image_data = data.get('image')
-        if image_data and image_data.startswith('data:image'):
-            try:
-                filepath = save_base64_image(image_data)
-                image_id = InboundImage.create(order_pk, filepath, '')
-                return jsonify({'success': True, 'image_id': image_id, 'file_path': filepath})
-            except ValueError as e:
-                return jsonify({'success': False, 'error': str(e)}), 400
-            except Exception as e:
-                return jsonify({'success': False, 'error': f'图片保存失败: {e}'}), 500
-
-    if 'image' in request.files:
-        file = request.files['image']
-        if file.filename:
-            try:
-                filepath, original_name = save_uploaded_file(file)
-                image_id = InboundImage.create(order_pk, filepath, original_name)
-                return jsonify({'success': True, 'image_id': image_id, 'file_path': filepath, 'original_name': original_name})
-            except ValueError as e:
-                return jsonify({'success': False, 'error': str(e)}), 400
-            except Exception as e:
-                return jsonify({'success': False, 'error': f'图片保存失败: {e}'}), 500
-
-    return jsonify({'success': False, 'error': 'No image provided'}), 400
-
-
-@bp.route('/inbound-records/delete-image/<int:image_id>', methods=['POST'])
-def inbound_delete_image(image_id):
-    img = InboundImage.get_by_id(image_id)
-    if not img:
-        return jsonify({'success': False, 'error': 'Image not found'}), 404
-    order = InboundOrder.get_by_id(img['order_pk'])
-    if order and order.get('is_locked'):
-        return jsonify({'success': False, 'error': '订单已锁定，无法删除图片'}), 403
-    if InboundImage.delete(image_id):
-        return jsonify({'success': True})
-    return jsonify({'success': False, 'error': 'Image not found'}), 404
 
 
 # ── REST API 订单 CRUD ──────────────────────────────────────────────
