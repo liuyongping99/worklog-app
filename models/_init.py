@@ -441,6 +441,127 @@ def init_db():
         except sqlite3.OperationalError:
             pass  # 表尚未创建(冷启动场景)——索引下次启动再加
 
+    # === 任务流 M1:6 张表(staff / vehicles / tasks / task_items / task_images / task_events) ===
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS staff (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            gender TEXT,
+            birth_date TEXT,
+            role TEXT NOT NULL CHECK(role IN ('司机','调度','搬运','打码','仓管','文员')),
+            staff_code TEXT UNIQUE,
+            phone TEXT,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            vehicle_id INTEGER,
+            login_name TEXT,
+            password_hash TEXT,
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            updated_at TEXT DEFAULT (datetime('now','localtime')),
+            FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE SET NULL
+        )
+    ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS vehicles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            plate_no TEXT NOT NULL UNIQUE,
+            tonnage REAL,
+            length REAL,
+            width REAL,
+            height REAL,
+            inspection_date TEXT,
+            status TEXT NOT NULL DEFAULT '启用' CHECK(status IN ('启用','停用')),
+            note TEXT,
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            updated_at TEXT DEFAULT (datetime('now','localtime'))
+        )
+    ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_no TEXT NOT NULL UNIQUE,
+            source_order_no TEXT UNIQUE,
+            task_type TEXT NOT NULL DEFAULT '送货' CHECK(task_type IN ('送货','退货','换货')),
+            related_task_id INTEGER,
+            source_type TEXT,
+            customer TEXT,
+            dest_address TEXT,
+            dest_lat REAL,
+            dest_lng REAL,
+            dest_poi_name TEXT,
+            status TEXT NOT NULL DEFAULT '准备中' CHECK(status IN ('准备中','已装货','已点数','已到达','已卸货','已完成','已拒收')),
+            coding_status TEXT NOT NULL DEFAULT '无需打码' CHECK(coding_status IN ('无需打码','待打码','打码中','打码完成')),
+            driver_id INTEGER,
+            vehicle_id INTEGER,
+            creator_id INTEGER NOT NULL,
+            operator_id INTEGER,
+            coder_id INTEGER,
+            coding_claimed_at TEXT,
+            coding_done_at TEXT,
+            est_weight_kg REAL,
+            est_distance_km REAL,
+            depart_at TEXT,
+            arrive_at TEXT,
+            remark TEXT,
+            is_cancelled INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            updated_at TEXT DEFAULT (datetime('now','localtime')),
+            FOREIGN KEY (driver_id) REFERENCES staff(id) ON DELETE SET NULL,
+            FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE SET NULL,
+            FOREIGN KEY (creator_id) REFERENCES staff(id) ON DELETE RESTRICT,
+            FOREIGN KEY (operator_id) REFERENCES staff(id) ON DELETE SET NULL,
+            FOREIGN KEY (coder_id) REFERENCES staff(id) ON DELETE SET NULL,
+            FOREIGN KEY (related_task_id) REFERENCES tasks(id) ON DELETE SET NULL
+        )
+    ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS task_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id INTEGER NOT NULL,
+            product_name TEXT NOT NULL,
+            specification TEXT,
+            quantity REAL NOT NULL,
+            unit TEXT,
+            remark TEXT,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            line_type TEXT NOT NULL DEFAULT 'normal' CHECK(line_type IN ('normal','return','exchange_out','exchange_in')),
+            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        )
+    ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS task_images (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id INTEGER NOT NULL,
+            stage TEXT NOT NULL CHECK(stage IN ('识别原图','装车照','点数标签照','点数整体照','卸货照','签收单','打码照','退单照','退货照')),
+            image_path TEXT NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        )
+    ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS task_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id INTEGER NOT NULL,
+            event_type TEXT NOT NULL CHECK(event_type IN ('advance','assign','coding_claim','coding_release','coding_done','driver_release','task_cancel','return_create')),
+            from_status TEXT,
+            to_status TEXT,
+            operator_id INTEGER,
+            note TEXT,
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+            FOREIGN KEY (operator_id) REFERENCES staff(id) ON DELETE SET NULL
+        )
+    ''')
+
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_task_events_task_id ON task_events(task_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_task_items_task_id ON task_items(task_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_task_images_task_id ON task_images(task_id)')
+
     conn.commit()
     conn.close()
 
