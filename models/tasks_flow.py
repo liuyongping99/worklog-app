@@ -242,7 +242,41 @@ class TaskEventDB:
         return cur.lastrowid
 
 
+class TaskItemDB:
+    """task_items 表 CRUD。Task 12 (整单退回) 用来拷贝明细到退货单。"""
+
+    @staticmethod
+    def create(
+        task_id: int,
+        product_name: str,
+        quantity: float,
+        unit: Optional[str] = None,
+        specification: Optional[str] = None,
+        remark: Optional[str] = None,
+        sort_order: int = 0,
+        line_type: str = "normal",
+    ) -> int:
+        conn = get_db()
+        cur = conn.execute(
+            "INSERT INTO task_items "
+            "(task_id, product_name, specification, quantity, unit, remark, sort_order, line_type) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (task_id, product_name, specification, quantity, unit, remark, sort_order, line_type),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+    @staticmethod
+    def get_by_task(task_id: int) -> list:
+        conn = get_db()
+        rows = conn.execute(
+            "SELECT * FROM task_items WHERE task_id = ? ORDER BY sort_order, id",
+            (task_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
 __all__ = [
     "Staff", "Task", "TaskItem", "TaskImage", "TaskEvent",
-    "StaffDB", "TaskDB", "TaskImageDB", "TaskEventDB",
+    "StaffDB", "TaskDB", "TaskItemDB", "TaskImageDB", "TaskEventDB",
 ]

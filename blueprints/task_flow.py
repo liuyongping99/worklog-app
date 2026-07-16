@@ -21,7 +21,7 @@ from datetime import datetime
 from flask import Blueprint, request, jsonify, session
 
 from models._permissions import Action, can
-from models.tasks_flow import TaskDB, TaskImageDB, TaskEventDB
+from models.tasks_flow import TaskDB, TaskItemDB, TaskImageDB, TaskEventDB
 
 
 bp = Blueprint("task_flow", __name__)
@@ -149,7 +149,7 @@ def advance(tid):
 
 
 # ============================================================
-# 占位(后续任务 T9/T11/T12/T13 补全)
+# 占位(后续任务 T9/T11/T13 补全)
 # ============================================================
 
 @bp.route("/api/v1/tasks/<int:tid>/assign", methods=["POST"])
@@ -172,11 +172,122 @@ def coding_release(tid):  # noqa: D401 - placeholder
     return jsonify(success=False, error="未实现:coding_release"), 501
 
 
+# ============================================================
+# Task 12 — 司机退单 + 任务作废 + 整单退回
+# ============================================================
+
 @bp.route("/api/v1/tasks/<int:tid>/driver-release", methods=["POST"])
-def driver_release(tid):  # noqa: D401 - placeholder
-    return jsonify(success=False, error="未实现:driver_release"), 501
+def driver_release(tid):
+    """司机退单(从已装货退回准备中,vehicle/driver 解绑,coding_status 保留)。
+
+    权限:仅本单司机在 准备中/已装货 状态。
+    闸门:必须已有退单照(stage='退单照')。
+    """
+    op = _current_operator()
+    if op is None:
+        return jsonify(success=False, error="未登录"), 401
+
+    t = TaskDB.get_by_id(tid)
+    if not t:
+        return jsonify(success=False, error="任务不存在"), 404
+
+    if not can(op, Action.DRIVER_RELEASE, t):
+        return jsonify(success=False, error="无权限或状态不允许"), 403
+
+    # 必传退单照
+    imgs = TaskImageDB.get_by_task(tid)
+    if not any(i["stage"] == "退单照" for i in imgs):
+        return jsonify(success=False, error="请先上传退单照"), 400
+
+    from_status = t["status"]
+    TaskDB.update(tid, driver_id=None, vehicle_id=None, status="准备中")
+    TaskEventDB.create(
+        tid, "driver_release",
+        operator_id=op["id"],
+        from_status=from_status, to_status="准备中",
+        note="司机退单",
+    )
+    return jsonify(success=True)
 
 
 @bp.route("/api/v1/tasks/<int:tid>/cancel", methods=["POST"])
-def cancel(tid):  # noqa: D401 - placeholder
-    return jsonify(success=False, error="未实现:cancel"), 501
+def cancel(tid):
+    """任务作废(仅准备中)。权限:调度/文员。设置 is_cancelled=1。"""
+    op = _current_operator()
+    if op is None:
+        return jsonify(success=False, error="未登录"), 401
+
+    t = TaskDB.get_by_id(tid)
+    if not t:
+        return jsonify(success=False, error="任务不存在"), 404
+
+    if not can(op, Action.TASK_CANCEL, t):
+        return jsonify(success=False, error="无权限或状态不允许"), 403
+
+    TaskDB.update(tid, is_cancelled=1)
+    TaskEventDB.create(
+        tid, "task_cancel",
+        operator_id=op["id"],
+        from_status=t["status"], to_status=t["status"],
+        note="任务作废",
+    )
+    return jsonify(success=True)
+
+
+@bp.route("/api/v1/tasks/<int:tid>/return-all", methods=["POST"])
+def return_all(tid):
+    """整单退回(已卸货后):原单进 已拒收,生成新退货单(数量负)。
+
+    权限:仅本单司机在 已卸货/已到达 状态(can() 中 RETURN_CREATE 仅允许
+    司机且是本单 driver_id,与 Action.DRIVER_RELEASE 在范围上略有差异;
+    此处保持 brief 语义不变)。
+    闸门:必须已有退货照(stage='退货照')。
+    """
+    op = _current_operator()
+    if op is None:
+        return jsonify(success=False, error="未登录"), 401
+
+    t = TaskDB.get_by_id(tid)
+    if not t:
+        return jsonify(success=False, error="任务不存在"), 404
+
+    if not can(op, Action.RETURN_CREATE, t):
+        return jsonify(success=False, error="无权限或状态不允许"), 403
+
+    # 必传退货照
+    imgs = TaskImageDB.get_by_task(tid)
+    if not any(i["stage"] == "退货照" for i in imgs):
+        return jsonify(success=False, error="请先上传退货照"), 400
+
+    # 生成退货单:数量全负
+    new_tid = TaskDB.create(
+        task_no=f"TD-RET-{datetime.now().strftime('%Y%m%d%H%M%S')}",
+        creator_id=op["id"],
+        source_order_no=None,
+        task_type="退货",
+        related_task_id=tid,
+        source_type=t.get("source_type"),
+        customer=t.get("customer"),
+        dest_address=t.get("dest_address"),
+        driver_id=op["id"],  # 自动给该司机
+    )
+    for i, it in enumerate(TaskItemDB.get_by_task(tid)):
+        TaskItemDB.create(
+            new_tid, it["product_name"], -it["quantity"], it["unit"],
+            it["specification"], it["remark"], i, "return",
+        )
+
+    TaskDB.update(tid, status="已拒收")
+    TaskEventDB.create(
+        tid, "return_create",
+        operator_id=op["id"],
+        from_status=t["status"], to_status="已拒收",
+        note="整单退回",
+    )
+    TaskEventDB.create(
+        new_tid, "assign",
+        operator_id=op["id"],
+        from_status=None, to_status="准备中",
+        note="系统代建退货单",
+    )
+    return jsonify(success=True, new_task_id=new_tid)
