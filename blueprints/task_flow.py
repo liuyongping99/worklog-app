@@ -262,6 +262,25 @@ def new_task_view():
         return jsonify(success=True)
 
 
+# ============================================================
+# Task 14 — 打码抢单池(M1 占位,仅显示待打码)
+# ============================================================
+
+@bp.route("/coding-pool", methods=["GET"])
+def coding_pool_view():
+    """打码抢单池列表视图。
+
+    M1: 仅显示 coding_status='待打码' 且未作废的任务。
+    M2: 接入抢单 / 完成 / 释放真实逻辑(POST 端点已在下方占位)。
+    """
+    op = _current_operator()
+    pool = [
+        t for t in TaskDB.get_all()
+        if t["coding_status"] == "待打码" and not t["is_cancelled"]
+    ]
+    return render_template("coding-pool.html", pool=pool, op=op)
+
+
 @bp.route("/tasks/<int:tid>", methods=["GET"])
 def detail_view(tid):
     """详情视图。"""

@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+/* ── 打码抢单池页专属色:深青 ── */
+:root { --page-accent: #00b894; --page-accent-bg: #d1f5ec; --page-accent-light-bg: #e8faf4; }
+.coding-pool-page .card-title { color: var(--page-accent); border-bottom-color: var(--page-accent-bg); }
+.coding-pool-page .subtitle {
+    color: #868e96; font-size: 0.88rem; margin: -0.4rem 0 1rem 0;
+}
+.coding-pool-page .pool-table { width: 100%; border-collapse: collapse; }
+.coding-pool-page .pool-table th {
+    background: #f8f9fa; padding: 0.55rem 0.65rem;
+    font-size: 0.82rem; color: #868e96;
+    border-bottom: 2px solid #e9ecef;
+    text-align: left; white-space: nowrap;
+}
+.coding-pool-page .pool-table td {
+    padding: 0.55rem 0.65rem;
+    border-bottom: 1px solid #f1f3f5;
+    font-size: 0.9rem;
+}
+.coding-pool-page .pool-table tr:hover td { background: var(--page-accent-light-bg); }
+.coding-pool-page .pool-table .task-no {
+    font-family: monospace; color: var(--page-accent);
+    font-weight: 600;
+}
+.coding-pool-page .status-badge {
+    display: inline-block;
+    padding: 0.18rem 0.55rem;
+    border-radius: 8px;
+    font-size: 0.78rem; font-weight: 600;
+    white-space: nowrap;
+    background: var(--page-accent-bg); color: var(--page-accent);
+}
+.coding-pool-page .customer-tag {
+    background: var(--page-accent-bg); color: var(--page-accent);
+    padding: 0.15rem 0.55rem; border-radius: 8px;
+    font-size: 0.85rem; font-weight: 600;
+}
+.coding-pool-page .empty-state {
+    text-align: center; padding: 3rem 1rem; color: #bbb;
+}
+.coding-pool-page .empty-state .icon { font-size: 3rem; margin-bottom: 0.5rem; }
+.coding-pool-page .claim-btn {
+    background: #ced4da; color: #fff;
+    padding: 0.3rem 0.85rem; border-radius: 6px;
+    border: none; font-size: 0.85rem; font-weight: 600;
+    cursor: not-allowed; opacity: 0.7;
+}
+.coding-pool-page .detail-link {
+    background: var(--page-accent); color: #fff;
+    padding: 0.25rem 0.7rem; border-radius: 6px;
+    text-decoration: none; font-size: 0.85rem; font-weight: 600;
+    margin-right: 0.4rem;
+}
+.coding-pool-page .detail-link:hover { background: #00997a; }
+</style>
+
+<div class="card coding-pool-page">
+    <h2 class="card-title">💻 打码抢单池</h2>
+    <p class="subtitle">M1 占位 — 仅显示待打码任务. 抢单功能 M2 接</p>
+
+    {% if pool and pool|length > 0 %}
+    <table class="pool-table">
+        <thead>
+            <tr>
+                <th>任务编号</th>
+                <th>客户</th>
+                <th>单据号</th>
+                <th>打码状态</th>
+                <th>创建时间</th>
+                <th style="width:180px;">操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for t in pool %}
+            <tr>
+                <td><span class="task-no">{{ t.task_no or ('#' ~ t.id) }}</span></td>
+                <td>
+                    {% if t.customer %}<span class="customer-tag">{{ t.customer }}</span>{% else %}<span style="color:#bbb;">—</span>{% endif %}
+                </td>
+                <td style="color:#636e72; font-size:0.85rem;">{{ t.source_order_no or '—' }}</td>
+                <td><span class="status-badge">{{ t.coding_status }}</span></td>
+                <td style="color:#868e96; font-size:0.82rem;">{{ t.created_at or '—' }}</td>
+                <td>
+                    <a href="/tasks/{{ t.id }}" class="detail-link">查看详情</a>
+                    <button class="claim-btn" disabled title="M2 接入">抢单</button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <div class="icon">🪣</div>
+        <p>抢单池暂无待打码任务</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
