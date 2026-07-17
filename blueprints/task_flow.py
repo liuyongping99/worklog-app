@@ -390,10 +390,11 @@ def delete_task_image(iid):
 
 @bp.route("/api/v1/tasks/ai-recognize", methods=["POST"])
 def recognize():
-    """OCR 识别(直接复用出货页 #aiEngine 下拉的引擎)。"""
-    op = _current_operator()
-    if not can(op, Action.CREATE_TASK):
-        return jsonify(success=False, error="无权限"), 403
+    """OCR 识别(直接复用出货页 #aiEngine 下拉的引擎)。
+
+    端点本身是 /api/ 公网前缀 (无需登录), OCR 是预览/工具, 不破坏数据,
+    所以不卡 can(op, CREATE_TASK) — 真正落库 (POST /api/v1/tasks) 才有 can() 校验。
+    """
     f = request.files.get("image")
     if not f:
         return jsonify(success=False, error="无文件"), 400
