@@ -76,6 +76,16 @@
                     <a href="/vehicle-maintenance" class="{% if request.endpoint == 'vehicle_maintenance' %}active{% endif %}">🚛 车辆维护记录</a>
                 </div>
             </li>
+            <li class="nav-dropdown">
+                <a href="#" class="nav-dropdown-toggle">🔁 任务流 ▾</a>
+                <div class="nav-dropdown-menu">
+                    <a href="/tasks" class="{% if request.endpoint == 'tasks.index' or request.endpoint == 'task_flow.tasks' %}active{% endif %}">📋 任务列表</a>
+                    <a href="/tasks/new" class="{% if request.endpoint == 'tasks.new' or request.endpoint == 'task_flow.new_task' %}active{% endif %}">➕ 建单</a>
+                    <a href="/coding-pool" class="{% if request.endpoint == 'coding_pool' %}active{% endif %}">💻 打码抢单池</a>
+                    <a href="/staff" class="{% if request.endpoint == 'staff' %}active{% endif %}">👥 人员档案</a>
+                    <a href="/vehicles" class="{% if request.endpoint == 'vehicles' %}active{% endif %}">🚐 车辆档案</a>
+                </div>
+            </li>
             <li><a href="/loading-orders" class="{% if request.endpoint == 'loading_orders' %}active{% endif %}">📦 装柜订单</a></li>
             <li><a href="/shipping-records" class="{% if request.endpoint == 'shipping_records' %}active{% endif %}">🚛 出货记录</a></li>
             <li><a href="/inbound-records" class="{% if request.endpoint == 'inbound_records' %}active{% endif %}"><span style="display:inline-block;transform:scaleX(-1);font-size:1em;">🚚</span> 入库记录</a></li>
