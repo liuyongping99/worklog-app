@@ -1,0 +1,309 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+.staff-page .card-title { color: #0984e3; border-bottom-color: #d6ecff; }
+.staff-page .form-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 0.6rem; align-items: end;
+}
+.staff-page .form-grid label { display: block; font-weight: 600; font-size: 0.82rem; margin-bottom: 0.25rem; color: #636e72; }
+.staff-page .form-grid input, .staff-page .form-grid select {
+    width: 100%; padding: 0.4rem 0.55rem;
+    border: 1px solid #dfe6e9; border-radius: 6px;
+    font-size: 0.9rem; background: #fff;
+    box-sizing: border-box;
+}
+.staff-page .form-grid input:focus, .staff-page .form-grid select:focus {
+    outline: none; border-color: #0984e3;
+    box-shadow: 0 0 0 2px rgba(9,132,227,0.1);
+}
+.staff-page .form-grid .full { grid-column: 1 / -1; }
+.staff-page .actions-row {
+    grid-column: 1 / -1;
+    display: flex; gap: 0.5rem; align-items: center;
+}
+.staff-page .staff-table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
+.staff-page .staff-table th {
+    background: #f8f9fa; padding: 0.55rem 0.65rem;
+    text-align: left; font-size: 0.82rem; color: #868e96;
+    border-bottom: 2px solid #e9ecef;
+    white-space: nowrap;
+}
+.staff-page .staff-table td {
+    padding: 0.55rem 0.65rem; border-bottom: 1px solid #f1f3f5;
+    font-size: 0.9rem; vertical-align: middle;
+}
+.staff-page .staff-table tr:hover td { background: #eef7ff; }
+.staff-page .staff-table tr.disabled td { background: #f8f9fa; color: #adb5bd; }
+.staff-page .staff-table tr.editing td { background: #e8f4ff; }
+.staff-page .name-badge {
+    background: #e3f2fd; color: #0984e3;
+    border: 1px solid #90caf9;
+    padding: 0.2rem 0.6rem; border-radius: 12px;
+    font-weight: 700; font-size: 0.88rem;
+    white-space: nowrap;
+}
+.staff-page .name-badge.disabled {
+    background: #e9ecef; color: #6c757d;
+    border-color: #ced4da;
+}
+.staff-page .role-badge {
+    display: inline-block; padding: 0.18rem 0.5rem; border-radius: 6px;
+    font-size: 0.78rem; font-weight: 600; white-space: nowrap;
+}
+.staff-page .role-司机 { background: #fff3cd; color: #856404; }
+.staff-page .role-调度 { background: #cfe2ff; color: #084298; }
+.staff-page .role-搬运 { background: #f8d7da; color: #842029; }
+.staff-page .role-打码 { background: #d1ecf1; color: #0c5460; }
+.staff-page .role-仓管 { background: #d4edda; color: #155724; }
+.staff-page .role-文员 { background: #e2e3e5; color: #6c757d; }
+.staff-page .status-badge {
+    display: inline-block; padding: 0.18rem 0.5rem; border-radius: 6px;
+    font-size: 0.78rem; font-weight: 600; white-space: nowrap;
+}
+.staff-page .status-active { background: #d4edda; color: #155724; }
+.staff-page .status-inactive { background: #e2e3e5; color: #6c757d; }
+.staff-page .empty-state { text-align: center; padding: 2.5rem 1rem; color: #bbb; }
+.staff-page .empty-state .icon { font-size: 3rem; margin-bottom: 0.5rem; }
+.staff-page .filter-bar {
+    display: flex; align-items: center; flex-wrap: wrap;
+    gap: 0.5rem; margin-bottom: 0.75rem;
+    font-size: 0.88rem; color: #636e72;
+}
+.staff-page .filter-bar .switch {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    padding: 0.3rem 0.7rem; border-radius: 14px;
+    background: #f1f3f5; color: #495057;
+    text-decoration: none; font-weight: 600;
+    border: 1px solid #dee2e6;
+}
+.staff-page .filter-bar .switch.on { background: #0984e3; color: #fff; border-color: #0984e3; }
+.staff-page .filter-bar .role-chip {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    padding: 0.3rem 0.7rem; border-radius: 14px;
+    background: #f1f3f5; color: #495057;
+    text-decoration: none; font-weight: 600;
+    border: 1px solid #dee2e6;
+}
+.staff-page .filter-bar .role-chip.on { background: #0984e3; color: #fff; border-color: #0984e3; }
+.staff-page .filter-bar .count { color: #868e96; margin-left: auto; }
+.staff-page .inline-form input, .staff-page .inline-form select {
+    width: 100%; padding: 0.3rem 0.45rem;
+    border: 1px solid #dfe6e9; border-radius: 4px;
+    font-size: 0.85rem; box-sizing: border-box;
+}
+.staff-page .inline-form input:focus, .staff-page .inline-form select:focus {
+    outline: none; border-color: #0984e3;
+}
+.staff-page .edit-actions { display: flex; gap: 0.3rem; white-space: nowrap; }
+@media (max-width: 900px) {
+    .staff-page .form-grid { grid-template-columns: 1fr 1fr; }
+}
+</style>
+
+<!-- 顶部过滤栏 + 新增表单 -->
+<div class="card staff-page">
+    <h2 class="card-title">👤 人员档案</h2>
+    <div class="filter-bar">
+        <a class="switch {{ 'on' if show_disabled else '' }}"
+           href="{{ url_for('staff.staff_list', show_disabled='1' if not show_disabled else None, role=filter_role or None) }}">
+            {{ '✓ 显示停用' if show_disabled else '○ 显示停用' }}
+        </a>
+        <a class="role-chip {{ 'on' if not filter_role else '' }}"
+           href="{{ url_for('staff.staff_list', show_disabled='1' if show_disabled else None) }}">
+            全部
+        </a>
+        {% for r in role_options %}
+        <a class="role-chip {{ 'on' if filter_role == r else '' }}"
+           href="{{ url_for('staff.staff_list', role=r, show_disabled='1' if show_disabled else None) }}">
+            {{ r }}
+        </a>
+        {% endfor %}
+        <span class="count">共 {{ staff_list|length }} 条</span>
+    </div>
+
+    <!-- 新增人员表单 -->
+    <form action="{{ url_for('staff.staff_add') }}" method="POST" class="form-grid">
+        <div>
+            <label for="name">姓名 *</label>
+            <input type="text" id="name" name="name" placeholder="例如:张三" required>
+        </div>
+        <div>
+            <label for="role">角色 *</label>
+            <select id="role" name="role" required>
+                {% for r in role_options %}
+                <option value="{{ r }}">{{ r }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="gender">性别</label>
+            <select id="gender" name="gender">
+                <option value="">—</option>
+                <option value="男">男</option>
+                <option value="女">女</option>
+            </select>
+        </div>
+        <div>
+            <label for="birth_date">出生日期</label>
+            <input type="date" id="birth_date" name="birth_date">
+        </div>
+        <div>
+            <label for="phone">手机号</label>
+            <input type="text" id="phone" name="phone" placeholder="例如:13800000000">
+        </div>
+        <div>
+            <label for="vehicle_id">绑定车辆</label>
+            <select id="vehicle_id" name="vehicle_id">
+                <option value="">无</option>
+                {% for v in vehicle_list %}
+                <option value="{{ v.id }}">{{ v.plate_no }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="staff_code">工号</label>
+            <input type="text" id="staff_code" name="staff_code" placeholder="可选,唯一">
+        </div>
+        <div class="actions-row">
+            <button type="submit" class="btn btn-primary">➕ 添加人员</button>
+            <span style="font-size:0.78rem;color:#868e96;">姓名 + 角色 必填;其他可选,可后续编辑</span>
+        </div>
+    </form>
+</div>
+
+<!-- 列表 -->
+<div class="card staff-page">
+    {% if staff_list %}
+    <table class="staff-table">
+        <thead>
+            <tr>
+                <th>姓名</th>
+                <th>角色</th>
+                <th>性别</th>
+                <th>出生日期</th>
+                <th>手机号</th>
+                <th>绑定车辆</th>
+                <th>状态</th>
+                <th style="width:180px;">操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for s in staff_list %}
+            {% set disabled = s.is_active != 1 %}
+            {# 把 vehicle_id 映射到 plate_no(用 vehicle_list 在模板外做,见下) #}
+            {% set v = (vehicle_list | selectattr('id', 'equalto', s.vehicle_id) | list | first) if s.vehicle_id else None %}
+            <tr class="staff-row {% if disabled %}disabled{% endif %}" data-sid="{{ s.id }}">
+                <td>
+                    <span class="name-badge {{ 'disabled' if disabled else '' }}">{{ s.name }}</span>
+                </td>
+                <td><span class="role-badge role-{{ s.role }}">{{ s.role }}</span></td>
+                <td>{{ s.gender or '—' }}</td>
+                <td>{{ s.birth_date or '—' }}</td>
+                <td>{{ s.phone or '—' }}</td>
+                <td>{{ v.plate_no if v else '—' }}</td>
+                <td>
+                    {% if disabled %}
+                    <span class="status-badge status-inactive">停用</span>
+                    {% else %}
+                    <span class="status-badge status-active">启用</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if not disabled %}
+                    <button class="btn btn-primary btn-sm" onclick="toggleEdit({{ s.id }})">✏️ 编辑</button>
+                    <form action="{{ url_for('staff.staff_delete', sid=s.id) }}" method="POST" style="display:inline;" onsubmit="return confirm('确定停用人员 {{ s.name }}?行不会被删除。');">
+                        <button type="submit" class="btn btn-danger btn-sm">🚫 停用</button>
+                    </form>
+                    {% else %}
+                    <form action="{{ url_for('staff.staff_enable', sid=s.id) }}" method="POST" style="display:inline;">
+                        <button type="submit" class="btn btn-success btn-sm">✅ 启用</button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+            {# ── inline 编辑行(默认隐藏) ── #}
+            <tr class="edit-row" id="edit-row-{{ s.id }}" style="display:none;">
+                <td colspan="8" style="background:#e8f4ff;padding:0.75rem 1rem;">
+                    <form action="{{ url_for('staff.staff_update', sid=s.id) }}" method="POST" class="inline-form">
+                        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:0.5rem;align-items:end;">
+                            <div>
+                                <label style="display:block;font-size:0.75rem;color:#868e96;margin-bottom:0.2rem;">姓名 *</label>
+                                <input type="text" name="name" value="{{ s.name }}" required>
+                            </div>
+                            <div>
+                                <label style="display:block;font-size:0.75rem;color:#868e96;margin-bottom:0.2rem;">角色 *</label>
+                                <select name="role" required>
+                                    {% for r in role_options %}
+                                    <option value="{{ r }}" {{ 'selected' if s.role == r else '' }}>{{ r }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div>
+                                <label style="display:block;font-size:0.75rem;color:#868e96;margin-bottom:0.2rem;">性别</label>
+                                <select name="gender">
+                                    <option value="" {{ 'selected' if not s.gender else '' }}>—</option>
+                                    <option value="男" {{ 'selected' if s.gender == '男' else '' }}>男</option>
+                                    <option value="女" {{ 'selected' if s.gender == '女' else '' }}>女</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label style="display:block;font-size:0.75rem;color:#868e96;margin-bottom:0.2rem;">出生日期</label>
+                                <input type="date" name="birth_date" value="{{ s.birth_date or '' }}">
+                            </div>
+                            <div>
+                                <label style="display:block;font-size:0.75rem;color:#868e96;margin-bottom:0.2rem;">手机号</label>
+                                <input type="text" name="phone" value="{{ s.phone or '' }}">
+                            </div>
+                            <div>
+                                <label style="display:block;font-size:0.75rem;color:#868e96;margin-bottom:0.2rem;">绑定车辆</label>
+                                <select name="vehicle_id">
+                                    <option value="" {{ 'selected' if not s.vehicle_id else '' }}>无</option>
+                                    {% for v in vehicle_list %}
+                                    <option value="{{ v.id }}" {{ 'selected' if s.vehicle_id == v.id else '' }}>{{ v.plate_no }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div>
+                                <label style="display:block;font-size:0.75rem;color:#868e96;margin-bottom:0.2rem;">工号</label>
+                                <input type="text" name="staff_code" value="{{ s.staff_code or '' }}">
+                            </div>
+                        </div>
+                        <div class="edit-actions" style="margin-top:0.6rem;">
+                            <button type="submit" class="btn btn-primary btn-sm">💾 保存</button>
+                            <button type="button" class="btn btn-sm" style="background:#b2bec3;color:#fff;" onclick="toggleEdit({{ s.id }})">取消</button>
+                        </div>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <div class="icon">👤</div>
+        <p>暂无人员,先在上面表单添加第一位吧!</p>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+// ── inline 编辑切换 ──
+function toggleEdit(sid) {
+    var row = document.getElementById('edit-row-' + sid);
+    if (!row) return;
+    if (row.style.display === 'none' || row.style.display === '') {
+        row.style.display = '';
+        // 高亮原行
+        var orig = document.querySelector('.staff-row[data-sid="' + sid + '"]');
+        if (orig) orig.classList.add('editing');
+    } else {
+        row.style.display = 'none';
+        var orig = document.querySelector('.staff-row[data-sid="' + sid + '"]');
+        if (orig) orig.classList.remove('editing');
+    }
+}
+</script>
+{% endblock %}

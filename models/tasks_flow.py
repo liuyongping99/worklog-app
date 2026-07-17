@@ -166,6 +166,49 @@ class StaffDB:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    @staticmethod
+    def get_all(role: Optional[str] = None, include_inactive: bool = False) -> list:
+        """默认只返回 is_active=1。role 不为空则按 role 过滤。
+
+        T7 人员管理页用 — 比 get_active 更灵活,支持 role 过滤和显示离职。
+        排序:按 id 升序(模板里再做展示排序)。
+        """
+        sql = "SELECT * FROM staff"
+        params = []
+        where = []
+        if not include_inactive:
+            where.append("is_active=1")
+        if role:
+            where.append("role=?")
+            params.append(role)
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY id"
+        return [dict(r) for r in get_db().execute(sql, params).fetchall()]
+
+    @staticmethod
+    def update(staff_id: int, **fields) -> None:
+        """按 fields 增量更新 staff。无字段时 no-op。
+
+        不做白名单限制(staff 表所有字段都可改,除了 id/created_at —
+        id 写在 WHERE,created_at 由 DEFAULT 管)。
+        """
+        if not fields:
+            return
+        keys = ",".join(f"{k}=?" for k in fields)
+        params = list(fields.values()) + [staff_id]
+        conn = get_db()
+        conn.execute(
+            f"UPDATE staff SET {keys}, updated_at=datetime('now','localtime') WHERE id=?",
+            params,
+        )
+        conn.commit()
+
+    @staticmethod
+    def delete(staff_id: int) -> None:
+        """软删:is_active=0(行不删,跟 vehicles.delete 保持一致)。"""
+        StaffDB.update(staff_id, is_active=0)
+
 
 class TaskDB:
     """tasks 表 CRUD。"""

@@ -126,6 +126,7 @@ def create_app():
     from blueprints.search import bp as search_bp
     from blueprints.task_flow import bp as task_flow_bp
     from blueprints.vehicles import bp as vehicles_bp
+    from blueprints.staff import bp as staff_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(upload_bp)
@@ -139,6 +140,7 @@ def create_app():
     app.register_blueprint(search_bp)
     app.register_blueprint(task_flow_bp)
     app.register_blueprint(vehicles_bp)
+    app.register_blueprint(staff_bp)
 
     return app
 
