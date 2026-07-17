@@ -214,8 +214,12 @@ class TaskDB:
     """tasks 表 CRUD。"""
 
     @staticmethod
-    def create(task_no: str, creator_id: int, **fields) -> int:
-        """INSERT 一条 task,返回新行 id(不是 dict,方便做 creator_id 喂参)。"""
+    def create(task_no: str, creator_id: int, *, commit: bool = True, conn=None, **fields) -> int:
+        """INSERT 一条 task,返回新行 id(不是 dict,方便做 creator_id 喂参)。
+
+        commit=False → 调用方负责事务结束时的 commit/rollback(Fix 4 用)。
+        conn       → 复用已有连接(事务多步写入场景必须传)。
+        """
         cols = ["task_no", "creator_id"]
         vals = [task_no, creator_id]
         for k, v in fields.items():
@@ -223,9 +227,11 @@ class TaskDB:
             vals.append(v)
         placeholders = ",".join("?" for _ in cols)
         sql = f"INSERT INTO tasks ({','.join(cols)}) VALUES ({placeholders})"
-        conn = get_db()
+        if conn is None:
+            conn = get_db()
         cur = conn.execute(sql, vals)
-        conn.commit()
+        if commit:
+            conn.commit()
         return cur.lastrowid
 
     @staticmethod
@@ -283,14 +289,16 @@ class TaskImageDB:
     """task_images 表 CRUD。"""
 
     @staticmethod
-    def create(task_id: int, stage: str, image_path: str, sort_order: int = 0) -> int:
-        conn = get_db()
+    def create(task_id: int, stage: str, image_path: str, sort_order: int = 0, *, commit: bool = True, conn=None) -> int:
+        if conn is None:
+            conn = get_db()
         cur = conn.execute(
             "INSERT INTO task_images (task_id, stage, image_path, sort_order) "
             "VALUES (?, ?, ?, ?)",
             (task_id, stage, image_path, sort_order),
         )
-        conn.commit()
+        if commit:
+            conn.commit()
         return cur.lastrowid
 
     @staticmethod
@@ -313,7 +321,7 @@ class TaskEventDB:
     """task_events 表 CRUD。"""
 
     @staticmethod
-    def create(task_id: int, event_type: str, **fields) -> int:
+    def create(task_id: int, event_type: str, *, commit: bool = True, conn=None, **fields) -> int:
         cols = ["task_id", "event_type"]
         vals = [task_id, event_type]
         for k in ("from_status", "to_status", "operator_id", "note"):
@@ -322,9 +330,11 @@ class TaskEventDB:
                 vals.append(fields[k])
         placeholders = ",".join("?" for _ in cols)
         sql = f"INSERT INTO task_events ({','.join(cols)}) VALUES ({placeholders})"
-        conn = get_db()
+        if conn is None:
+            conn = get_db()
         cur = conn.execute(sql, vals)
-        conn.commit()
+        if commit:
+            conn.commit()
         return cur.lastrowid
 
     @staticmethod
@@ -431,15 +441,20 @@ class TaskItemDB:
         remark: Optional[str] = None,
         sort_order: int = 0,
         line_type: str = "normal",
+        *,
+        commit: bool = True,
+        conn=None,
     ) -> int:
-        conn = get_db()
+        if conn is None:
+            conn = get_db()
         cur = conn.execute(
             "INSERT INTO task_items "
             "(task_id, product_name, specification, quantity, unit, remark, sort_order, line_type) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (task_id, product_name, specification, quantity, unit, remark, sort_order, line_type),
         )
-        conn.commit()
+        if commit:
+            conn.commit()
         return cur.lastrowid
 
     @staticmethod

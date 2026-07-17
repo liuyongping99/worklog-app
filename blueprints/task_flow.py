@@ -24,7 +24,6 @@ import logging
 from datetime import datetime
 
 from flask import Blueprint, request, jsonify, session, render_template, abort
-from werkzeug.utils import secure_filename
 
 from models._permissions import Action, can
 from models.tasks_flow import TaskDB, TaskItemDB, TaskImageDB, TaskEventDB
@@ -84,6 +83,14 @@ def _current_operator():
 
 def _now_str() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _clean(v):
+    """空字符串 → None(避免 source_order_no 等 UNIQUE 字段空串撞约束)。Fix 7。"""
+    if v is None:
+        return None
+    s = str(v).strip()
+    return s if s else None
 
 
 def _gen_task_no() -> str:
@@ -185,45 +192,68 @@ def advance(tid):
 @bp.route("/api/v1/tasks", methods=["POST"])
 def create_task():
     """建单:Body 包含 items[] + 可选 source_order_no / task_type / source_type /
-    customer / dest_address / driver_id / vehicle_id / remark。"""
+    customer / dest_address / driver_id / vehicle_id / remark。
+
+    事务(Fix 4):TaskDB.create + 循环 TaskItemDB.create + TaskEventDB.create
+    全部 commit=False,最后由本端点统一 commit;失败时 rollback,不留孤儿 task。
+    """
     op = _current_operator()
     if not can(op, Action.CREATE_TASK):
         return jsonify(success=False, error="无权限建单"), 403
     data = request.get_json(force=True, silent=True) or {}
+    from models._db import get_db
+    db = get_db()
     try:
         task_no = data.get("task_no") or _gen_task_no()
         tid = TaskDB.create(
             task_no=task_no,
             creator_id=op["id"],
-            source_order_no=data.get("source_order_no"),
+            source_order_no=_clean(data.get("source_order_no")),  # Fix 7
             task_type=data.get("task_type", "送货"),
-            source_type=data.get("source_type"),
-            customer=data.get("customer"),
-            dest_address=data.get("dest_address"),
+            source_type=_clean(data.get("source_type")),
+            customer=_clean(data.get("customer")),
+            dest_address=_clean(data.get("dest_address")),
             driver_id=data.get("driver_id"),
             vehicle_id=data.get("vehicle_id"),
-            remark=data.get("remark"),
+            remark=_clean(data.get("remark")),
+            commit=False,
+            conn=db,
         )
     except (ValueError, sqlite3.IntegrityError) as e:
+        db.rollback()
         return jsonify(success=False, error=str(e)), 400
+    except Exception:
+        db.rollback()
+        raise
 
-    for i, item in enumerate(data.get("items", [])):
-        TaskItemDB.create(
-            task_id=tid,
-            product_name=item["product_name"],
-            specification=item.get("specification"),
-            quantity=item["quantity"],
-            unit=item.get("unit", "y"),
-            remark=item.get("remark"),
-            sort_order=i,
+    try:
+        for i, item in enumerate(data.get("items", [])):
+            TaskItemDB.create(
+                task_id=tid,
+                product_name=item["product_name"],
+                specification=item.get("specification"),
+                quantity=item["quantity"],
+                unit=item.get("unit", "y"),
+                remark=item.get("remark"),
+                sort_order=i,
+                commit=False,
+                conn=db,
+            )
+
+        TaskEventDB.create(
+            task_id=tid, event_type="assign",
+            operator_id=op["id"],
+            from_status=None, to_status="准备中",
+            note="建单",
+            commit=False,
+            conn=db,
         )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("create_task 事务失败,已 rollback")
+        return jsonify(success=False, error="建单失败,请重试"), 500
 
-    TaskEventDB.create(
-        task_id=tid, event_type="assign",
-        operator_id=op["id"],
-        from_status=None, to_status="准备中",
-        note="建单",
-    )
     return jsonify(success=True, task_id=tid, task_no=task_no)
 
 
@@ -248,21 +278,16 @@ def list_view():
             t for t in TaskDB.get_all(include_cancelled=False)
             if t["status"] in status_map.get(tab, [])
         ]
-    # 渲染模板不存在不报错(M2 才建),只把数据塞 JSON 方便前端调试
-    try:
-        return render_template("tasks.html", tasks=tasks, tab=tab, op=op)
-    except Exception:
-        return jsonify(success=True, tasks=tasks, tab=tab)
+    # 模板已就绪 → 直接 render,任何 Jinja 错误应让 Flask 抛 500(Fix 3)。
+    return render_template("tasks.html", tasks=tasks, tab=tab, op=op)
 
 
 @bp.route("/tasks/new", methods=["GET"])
 def new_task_view():
     """新建任务页面(渲染 tasks-new.html,带 OCR 弹框复用)。"""
     op = _current_operator()
-    try:
-        return render_template("tasks-new.html", op=op)
-    except Exception:
-        return jsonify(success=True)
+    # 模板已就绪 → 直接 render(Fix 3)。
+    return render_template("tasks-new.html", op=op)
 
 
 # ============================================================
@@ -294,13 +319,11 @@ def detail_view(tid):
     items = TaskItemDB.get_by_task(tid)
     events = TaskEventDB.get_by_task(tid)
     images = TaskImageDB.get_by_task(tid)
-    try:
-        return render_template(
-            "task-detail.html",
-            task=t, items=items, events=events, images=images, op=op,
-        )
-    except Exception:
-        return jsonify(success=True, task=t, items=items, events=events, images=images)
+    # 模板已就绪 → 直接 render(Fix 3)。
+    return render_template(
+        "task-detail.html",
+        task=t, items=items, events=events, images=images, op=op,
+    )
 
 
 @bp.route("/api/v1/tasks/<int:tid>/images", methods=["POST"])
@@ -320,10 +343,15 @@ def upload_image(tid):
     if not f or not f.filename:
         return jsonify(success=False, error="无文件"), 400
 
+    # Fix 5:复用 _helpers.check_uploaded_image(扩展名 + 大小白名单)
+    from blueprints._helpers import get_upload_dir, check_uploaded_image
+    try:
+        ext = check_uploaded_image(f)
+    except ValueError as e:
+        return jsonify(success=False, error=str(e)), 400
+
     # 复用 _helpers.get_upload_dir()(返回 (dir, month) 元组)
-    from blueprints._helpers import get_upload_dir
     up_dir, month = get_upload_dir()
-    ext = os.path.splitext(secure_filename(f.filename))[1] or ".jpg"
     name = f"task_{tid}_{uuid.uuid4().hex[:8]}{ext}"
     f.save(os.path.join(up_dir, name))
     rel = f"{month}/{name}"
@@ -370,12 +398,18 @@ def recognize():
     if not f:
         return jsonify(success=False, error="无文件"), 400
     engine_name = request.form.get("engine") or os.environ.get("OCR_BACKEND", "moonshot")
+
+    # Fix 6:分层 catch — 无效引擎 → 400,识别失败 → 500 + 记日志(对齐 shipping)
     try:
         from blueprints.ocr_engine import get_ocr_engine
         engine = get_ocr_engine(engine_name)
+    except ValueError as e:
+        return jsonify(success=False, error=f"无效引擎: {engine_name}", hint=str(e)), 400
+    try:
         result = engine.recognize(f.read(), f.filename)
-    except Exception as e:
-        return jsonify(success=False, error=str(e)), 500
+    except Exception:
+        logger.exception("OCR 识别失败 (engine=%s)", engine_name)
+        return jsonify(success=False, error="OCR 识别失败,请重试"), 500
     return jsonify(result)
 
 
