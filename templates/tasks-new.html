@@ -230,6 +230,11 @@ function collectItemsFromForm() {
 // _smartFillOrderPk 提交会 alert "缺少订单信息"。
 // 简单办法:在弹框打开后,把"添加到订单"按钮替换成我们的"填充到表单"。
 
+<!--
+⚠️ FRAGILE: 覆盖 _smart_add_modal.html 的 #aiAddBtn.onclick.
+原因: 该 modal 默认 submitAiResults() 调 {smart_add_api}/records/batch, 任务流没有这个端点.
+如改 modal: 确认这个 override 仍生效, 或改用独立 modal.
+-->
 function openSmartFillForNewTask() {
     if (typeof openSmartFill !== 'function') {
         alert('OCR 弹框未加载');
