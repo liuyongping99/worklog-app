@@ -1,0 +1,301 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+/* ── 任务详情页:深紫,与列表页一致 ── */
+:root { --page-accent: #6c5ce7; --page-accent-bg: #ece9ff; --page-accent-light-bg: #f7f5ff; --stage-pending: #b2bec3; --stage-done: #00b894; --stage-failed: #d63031; }
+.tasks-detail-page .card-title { color: var(--page-accent); border-bottom-color: var(--page-accent-bg); }
+.tasks-detail-page .back-link {
+    display: inline-flex; align-items: center; gap: 0.3rem;
+    color: var(--page-accent); text-decoration: none;
+    font-size: 0.88rem; font-weight: 600; margin-bottom: 0.5rem;
+}
+.tasks-detail-page .back-link:hover { text-decoration: underline; }
+
+/* ── 7 状态进度条 ── */
+.tasks-detail-page .task-progress {
+    display: flex; align-items: stretch; justify-content: space-between;
+    background: #fff; padding: 1rem 1.25rem; border-radius: 12px;
+    margin-bottom: 1.25rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    border: 1px solid #ece9ff; gap: 0.5rem; flex-wrap: wrap;
+}
+.tasks-detail-page .stage {
+    display: flex; flex-direction: column; align-items: center;
+    flex: 1; min-width: 90px; padding: 0.5rem 0.4rem;
+    position: relative; color: var(--stage-pending);
+}
+.tasks-detail-page .stage .dot {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: #f1f3f5; border: 2px solid var(--stage-pending);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.85rem; font-weight: 700; color: var(--stage-pending);
+    margin-bottom: 0.4rem; transition: all 0.2s;
+}
+.tasks-detail-page .stage .label { font-size: 0.82rem; font-weight: 600; }
+.tasks-detail-page .stage.done .dot { background: var(--stage-done); border-color: var(--stage-done); color: #fff; }
+.tasks-detail-page .stage.done .label { color: var(--stage-done); }
+.tasks-detail-page .stage.failed .dot { background: var(--stage-failed); border-color: var(--stage-failed); color: #fff; }
+.tasks-detail-page .stage.failed .label { color: var(--stage-failed); }
+/* 连线(伪元素) */
+.tasks-detail-page .stage:not(:last-child)::after {
+    content: ''; position: absolute; top: 21px; right: -50%; width: 100%;
+    height: 2px; background: #f1f3f5; z-index: -1;
+}
+.tasks-detail-page .stage.done:not(:last-child)::after { background: var(--stage-done); }
+
+/* ── 头部信息卡片 ── */
+.tasks-detail-page .head-card {
+    background: linear-gradient(135deg, #f7f5ff 0%, #ece9ff 100%);
+    border-radius: 12px; padding: 1.1rem 1.4rem; margin-bottom: 1rem;
+    display: flex; flex-wrap: wrap; gap: 1rem 1.5rem;
+    align-items: flex-start;
+}
+.tasks-detail-page .head-card .customer-name {
+    font-size: 1.45rem; font-weight: 700; color: var(--page-accent);
+    flex: 1; min-width: 200px;
+}
+.tasks-detail-page .head-card .doc-no {
+    background: #fff; color: #0984e3;
+    padding: 0.2rem 0.7rem; border-radius: 12px;
+    font-size: 0.85rem; font-weight: 600;
+    border: 1px solid #b3d8ff;
+}
+.tasks-detail-page .head-card .task-no {
+    font-family: monospace; color: #6c5ce7; font-weight: 700;
+    font-size: 0.92rem;
+}
+.tasks-detail-page .head-card .meta {
+    flex-basis: 100%;
+    display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem;
+    color: #636e72; font-size: 0.85rem;
+}
+.tasks-detail-page .head-card .meta b { color: #2d3436; font-weight: 600; }
+
+/* ── 证据图网格 ── */
+.tasks-detail-page .evidence-section {
+    margin-bottom: 1rem;
+}
+.tasks-detail-page .evidence-section h4 {
+    margin: 0 0 0.5rem 0; font-size: 0.9rem;
+    color: #2d3436; display: flex; align-items: center; gap: 0.4rem;
+}
+.tasks-detail-page .stage-group {
+    margin-bottom: 1rem; background: #fff;
+    border: 1px solid #f1f3f5; border-radius: 8px; padding: 0.6rem 0.8rem;
+}
+.tasks-detail-page .stage-group .stage-name {
+    font-size: 0.82rem; font-weight: 700; color: var(--page-accent);
+    margin-bottom: 0.4rem;
+}
+.tasks-detail-page .stage-group .stage-images {
+    display: grid; gap: 0.4rem;
+}
+.tasks-detail-page .stage-group .stage-images.cols-1 { grid-template-columns: 1fr; }
+.tasks-detail-page .stage-group .stage-images.cols-2 { grid-template-columns: repeat(2, 1fr); }
+.tasks-detail-page .stage-group .stage-images.cols-3 { grid-template-columns: repeat(3, 1fr); }
+.tasks-detail-page .stage-group .stage-images.cols-4 { grid-template-columns: repeat(4, 1fr); }
+.tasks-detail-page .stage-group img {
+    width: 100%; height: 110px; object-fit: cover;
+    border-radius: 6px; border: 1px solid #dee2e6;
+    cursor: pointer; transition: transform 0.15s;
+}
+.tasks-detail-page .stage-group img:hover { transform: scale(1.02); }
+
+/* ── 商品明细表 ── */
+.tasks-detail-page .items-table {
+    width: 100%; border-collapse: collapse; background: #fff;
+    border-radius: 8px; overflow: hidden;
+}
+.tasks-detail-page .items-table th {
+    background: #f8f9fa; padding: 0.5rem 0.65rem;
+    font-size: 0.82rem; color: #868e96;
+    border-bottom: 2px solid #e9ecef; text-align: left;
+}
+.tasks-detail-page .items-table td {
+    padding: 0.5rem 0.65rem; border-bottom: 1px solid #f1f3f5;
+    font-size: 0.9rem;
+}
+.tasks-detail-page .items-table tr:hover td { background: var(--page-accent-light-bg); }
+.tasks-detail-page .qty-badge {
+    background: #ece9ff; color: var(--page-accent);
+    padding: 0.15rem 0.55rem; border-radius: 8px;
+    font-weight: 600; font-size: 0.85rem;
+}
+.tasks-detail-page .unit-badge {
+    background: #f1f3f5; color: #495057;
+    padding: 0.1rem 0.5rem; border-radius: 6px;
+    font-size: 0.8rem;
+}
+
+/* ── 事件历史(时间线) ── */
+.tasks-detail-page .events-section h3 {
+    font-size: 1rem; color: var(--page-accent);
+    margin: 0 0 0.75rem 0;
+}
+.tasks-detail-page .timeline {
+    list-style: none; padding: 0; margin: 0;
+    border-left: 2px solid var(--page-accent-bg);
+    padding-left: 1.2rem;
+}
+.tasks-detail-page .timeline li {
+    padding: 0.4rem 0; position: relative; font-size: 0.88rem;
+}
+.tasks-detail-page .timeline li::before {
+    content: ''; position: absolute; left: -1.65rem; top: 0.85rem;
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--page-accent); border: 2px solid #fff;
+    box-shadow: 0 0 0 2px var(--page-accent-bg);
+}
+.tasks-detail-page .timeline .event-time {
+    color: #868e96; font-size: 0.78rem; margin-right: 0.5rem;
+}
+.tasks-detail-page .timeline .event-type {
+    background: var(--page-accent-bg); color: var(--page-accent);
+    padding: 0.05rem 0.5rem; border-radius: 6px;
+    font-weight: 600; font-size: 0.78rem; margin-right: 0.4rem;
+}
+.tasks-detail-page .timeline .event-meta {
+    color: #636e72; font-size: 0.85rem;
+}
+.tasks-detail-page .timeline .event-note {
+    display: block; color: #2d3436; font-size: 0.82rem;
+    margin-top: 0.2rem; padding-left: 0.5rem;
+    border-left: 2px solid #f1f3f5;
+}
+
+.tasks-detail-page .status-badge {
+    display: inline-block;
+    padding: 0.2rem 0.6rem; border-radius: 8px;
+    font-size: 0.82rem; font-weight: 600;
+}
+.tasks-detail-page .status-准备中 { background: #fff3cd; color: #856404; }
+.tasks-detail-page .status-已装货 { background: #cfe2ff; color: #084298; }
+.tasks-detail-page .status-已点数 { background: #d1ecf1; color: #0c5460; }
+.tasks-detail-page .status-已到达 { background: #d4edda; color: #155724; }
+.tasks-detail-page .status-已卸货 { background: #d4edda; color: #155724; }
+.tasks-detail-page .status-已完成 { background: #d4edda; color: #155724; }
+.tasks-detail-page .status-已拒收 { background: #f8d7da; color: #842029; }
+.tasks-detail-page .status-已作废 { background: #f8d7da; color: #842029; }
+</style>
+
+<div class="tasks-detail-page">
+    <a href="/tasks" class="back-link">← 返回任务列表</a>
+
+    <!-- 7 状态进度条 -->
+    {% set stages = ['准备中', '已装货', '已点数', '已到达', '已卸货', '已完成'] %}
+    {% set current_idx = stages.index(task.status) if task.status in stages else -1 %}
+    {% set is_failed = task.status in ('已拒收', '已作废') or task.is_cancelled %}
+    <div class="task-progress">
+        {% for s in stages %}
+        <div class="stage {% if loop.index0 <= current_idx %}done{% endif %} {% if is_failed %}failed{% endif %}">
+            <span class="dot">{{ loop.index }}</span>
+            <span class="label">{{ s }}</span>
+        </div>
+        {% endfor %}
+        {% if is_failed %}
+        <div class="stage failed">
+            <span class="dot">✕</span>
+            <span class="label">{% if task.status == '已拒收' %}已拒收{% else %}已作废{% endif %}</span>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- 头部信息卡片 -->
+    <div class="head-card">
+        <div class="customer-name">{{ task.customer or '(未填写客户)' }}</div>
+        {% if task.source_order_no %}<span class="doc-no">📄 {{ task.source_order_no }}</span>{% endif %}
+        <span class="task-no">#{{ task.task_no or task.id }}</span>
+        <span class="status-badge status-{{ task.status }}">{{ task.status }}</span>
+        {% if task.is_cancelled %}<span class="status-badge status-已作废">已作废</span>{% endif %}
+        <div class="meta">
+            <span><b>创建时间:</b> {{ task.created_at or '—' }}</span>
+            {% if task.driver_id %}<span><b>司机:</b> #{{ task.driver_id }}</span>{% endif %}
+            {% if task.vehicle_id %}<span><b>车辆:</b> #{{ task.vehicle_id }}</span>{% endif %}
+            {% if task.dest_address %}<span><b>收货地址:</b> {{ task.dest_address }}</span>{% endif %}
+            {% if task.task_type %}<span><b>类型:</b> {{ task.task_type }}</span>{% endif %}
+            {% if task.coding_status %}<span><b>打码:</b> {{ task.coding_status }}</span>{% endif %}
+        </div>
+    </div>
+
+    <!-- 证据图区域(分 stage 展示) -->
+    {% set stages_with_imgs = images | groupby('stage') %}
+    {% if images and images|length > 0 %}
+    <div class="card">
+        <h3 style="font-size:1rem; color:var(--page-accent); margin:0 0 0.75rem 0;">📷 证据图 ({{ images|length }} 张)</h3>
+        <div class="evidence-section">
+            {% for stage_group in stages_with_imgs %}
+            <div class="stage-group">
+                <div class="stage-name">📌 {{ stage_group.grouper }} ({{ stage_group.list|length }} 张)</div>
+                <div class="stage-images cols-3">
+                    {% for img in stage_group.list %}
+                    <img src="/upload/{{ img.image_path }}" alt="{{ stage_group.grouper }}" onclick="showImgPreview('/upload/{{ img.image_path }}')">
+                    {% endfor %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- 商品明细表 -->
+    <div class="card">
+        <h3 style="font-size:1rem; color:var(--page-accent); margin:0 0 0.75rem 0;">📦 商品明细 ({{ items|length }} 条)</h3>
+        {% if items and items|length > 0 %}
+        <table class="items-table">
+            <thead>
+                <tr>
+                    <th style="width:35px;">#</th>
+                    <th>商品名称</th>
+                    <th style="width:18%;">规格</th>
+                    <th style="width:12%;">数量</th>
+                    <th style="width:8%;">单位</th>
+                    <th>备注</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in items %}
+                <tr>
+                    <td style="color:#868e96; text-align:center;">{{ loop.index }}</td>
+                    <td style="font-weight:600;">{{ item.product_name }}</td>
+                    <td style="color:#636e72;">{{ item.specification or '—' }}</td>
+                    <td><span class="qty-badge">{{ item.quantity }}</span></td>
+                    <td><span class="unit-badge">{{ item.unit or 'y' }}</span></td>
+                    <td style="color:#636e72;">{{ item.remark or '—' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p style="color:#bbb; text-align:center; padding:1.5rem;">暂无商品明细</p>
+        {% endif %}
+    </div>
+
+    <!-- 事件历史 -->
+    <div class="card">
+        <div class="events-section">
+            <h3>📜 事件历史 ({{ events|length }} 条)</h3>
+            {% if events and events|length > 0 %}
+            <ul class="timeline">
+                {% for e in events %}
+                <li>
+                    <span class="event-time">{{ e.created_at or '—' }}</span>
+                    <span class="event-type">{{ e.event_type }}</span>
+                    {% if e.from_status or e.to_status %}
+                    <span class="event-meta">
+                        {% if e.from_status %}{{ e.from_status }}{% endif %}
+                        {% if e.from_status and e.to_status %} → {% endif %}
+                        {% if e.to_status %}{{ e.to_status }}{% endif %}
+                    </span>
+                    {% endif %}
+                    {% if e.operator_id %}<span class="event-meta">by #{{ e.operator_id }}</span>{% endif %}
+                    {% if e.note %}<span class="event-note">💬 {{ e.note }}</span>{% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p style="color:#bbb; text-align:center; padding:1.5rem;">暂无事件</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

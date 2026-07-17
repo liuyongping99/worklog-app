@@ -1,0 +1,327 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+:root { --page-accent: #6c5ce7; --page-accent-bg: #ece9ff; --page-accent-light-bg: #f7f5ff; }
+.tasks-new-page .card-title { color: var(--page-accent); border-bottom-color: var(--page-accent-bg); }
+.tasks-new-page .head-card {
+    background: linear-gradient(135deg, #f7f5ff 0%, #ece9ff 100%);
+    border-radius: 12px; padding: 1rem 1.4rem; margin-bottom: 1rem;
+    display: flex; flex-wrap: wrap; gap: 1rem 1.5rem; align-items: center;
+}
+.tasks-new-page .head-card label {
+    font-size: 0.82rem; font-weight: 600; color: #636e72;
+    display: block; margin-bottom: 0.25rem;
+}
+.tasks-new-page .head-card input {
+    width: 320px; padding: 0.5rem 0.7rem;
+    border: 1px solid #d0c8f5; border-radius: 6px;
+    font-size: 0.95rem; background: #fff; box-sizing: border-box;
+}
+.tasks-new-page .head-card input:focus { outline: none; border-color: var(--page-accent); }
+
+.tasks-new-page .toolbar {
+    display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1rem;
+}
+.tasks-new-page .btn-smart {
+    background: #00b894; color: #fff;
+    padding: 0.55rem 1.1rem; border-radius: 8px; border: none;
+    font-size: 0.92rem; font-weight: 600; cursor: pointer;
+}
+.tasks-new-page .btn-smart:hover { background: #00a381; }
+
+.tasks-new-page .items-table {
+    width: 100%; border-collapse: collapse; background: #fff;
+    border-radius: 8px; overflow: hidden; margin-bottom: 1rem;
+}
+.tasks-new-page .items-table th {
+    background: #f8f9fa; padding: 0.5rem 0.65rem;
+    font-size: 0.82rem; color: #868e96;
+    border-bottom: 2px solid #e9ecef; text-align: left;
+}
+.tasks-new-page .items-table td {
+    padding: 0.4rem 0.5rem; border-bottom: 1px solid #f1f3f5;
+    font-size: 0.9rem;
+}
+.tasks-new-page .items-table input, .tasks-new-page .items-table select {
+    width: 100%; padding: 0.35rem 0.5rem;
+    border: 1px solid #dfe6e9; border-radius: 4px;
+    font-size: 0.88rem; box-sizing: border-box; background: #fff;
+}
+.tasks-new-page .items-table input:focus, .tasks-new-page .items-table select:focus {
+    outline: none; border-color: var(--page-accent);
+}
+.tasks-new-page .items-table .del-row {
+    background: #ffeaa7; border: 1px solid #fdcb6e; color: #d63031;
+    padding: 0.15rem 0.5rem; border-radius: 4px; cursor: pointer;
+    font-size: 1rem;
+}
+.tasks-new-page .qty-badge {
+    background: #ece9ff; color: var(--page-accent);
+    padding: 0.15rem 0.55rem; border-radius: 8px;
+    font-weight: 600; font-size: 0.85rem;
+}
+.tasks-new-page .submit-bar {
+    display: flex; gap: 0.5rem; justify-content: flex-end;
+    margin-top: 1rem; padding-top: 1rem; border-top: 1px dashed #e9ecef;
+}
+.tasks-new-page .empty-state {
+    text-align: center; padding: 2rem 1rem; color: #bbb;
+}
+.tasks-new-page .empty-state .icon { font-size: 2.5rem; margin-bottom: 0.4rem; }
+.tasks-new-page .info-tip {
+    background: #f8f9fa; border-left: 3px solid var(--page-accent);
+    padding: 0.6rem 0.9rem; border-radius: 4px;
+    color: #636e72; font-size: 0.85rem; margin-bottom: 1rem;
+}
+</style>
+
+<div class="tasks-new-page">
+    <div class="card">
+        <h2 class="card-title">➕ 新建任务</h2>
+        <div class="info-tip">
+            💡 上传单据图片,AI 自动识别商品明细 + 客户名称 + 单据号 → 点击「填充到表单」→ 核对后点击「创建任务」
+        </div>
+
+        <!-- 头部:客户 + 单据号 -->
+        <div class="head-card">
+            <div>
+                <label for="customerInput">客户名称</label>
+                <input type="text" id="customerInput" placeholder="客户名称(AI 识别后回填)" autocomplete="off">
+            </div>
+            <div>
+                <label for="sourceOrderNoInput">单据号</label>
+                <input type="text" id="sourceOrderNoInput" placeholder="单据号(AI 识别后回填)" autocomplete="off">
+            </div>
+        </div>
+
+        <!-- 工具栏:OCR 触发 + 添加明细 -->
+        <div class="toolbar">
+            <button type="button" class="btn-smart" onclick="openSmartFillForNewTask()">🧠 智能识别(OCR)</button>
+            <button type="button" class="btn btn-primary btn-sm" onclick="addEmptyItemRow()" style="margin-left:auto;">➕ 添加明细</button>
+        </div>
+
+        <!-- 明细表(初始空) -->
+        <table class="items-table" id="taskItemsTable">
+            <thead>
+                <tr>
+                    <th style="width:35px;">#</th>
+                    <th>商品名称 *</th>
+                    <th style="width:140px;">规格</th>
+                    <th style="width:90px;">数量 *</th>
+                    <th style="width:75px;">单位</th>
+                    <th>备注</th>
+                    <th style="width:35px;"></th>
+                </tr>
+            </thead>
+            <tbody id="taskItemsBody">
+                <!-- 由 JS 维护 -->
+            </tbody>
+        </table>
+        <div class="empty-state" id="emptyState">
+            <div class="icon">📋</div>
+            <p>暂无明细,点「智能识别(OCR)」上传单据图,或点「添加明细」手动录入</p>
+        </div>
+
+        <!-- 提交栏 -->
+        <div class="submit-bar">
+            <a href="/tasks" class="btn btn-sm" style="background:#f1f3f5; color:#495057; padding:0.45rem 1rem; border-radius:8px; text-decoration:none;">取消</a>
+            <button type="button" class="btn btn-primary" onclick="submitNewTask()" id="submitBtn">✅ 创建任务</button>
+        </div>
+    </div>
+</div>
+
+<!-- OCR 弹框复用(智能填充) — 共享 _smart_add_modal.html,session-friendly 包在 with 里 -->
+{% with smart_add_api="/api/v1/tasks" %}
+{% include "_smart_add_modal.html" %}
+{% endwith %}
+
+<script>
+// ============================================================
+// tasks-new.html:主表单 + OCR 弹框适配层
+// ============================================================
+
+// ── 主表单明细行(自己维护,与 _smart_add_modal.html 解耦) ──
+var _taskItems = [];
+
+function addEmptyItemRow(prefill) {
+    prefill = prefill || {};
+    var tr = document.createElement('tr');
+    var pn = prefill.product_name || '';
+    var sp = prefill.specification || '';
+    var qt = prefill.quantity != null ? String(prefill.quantity) : '';
+    var un = prefill.unit || 'y';
+    var rm = prefill.remark || '';
+    tr.innerHTML =
+        '<td style="text-align:center; color:#868e96;">' + (_taskItems.length + 1) + '</td>' +
+        '<td><input type="text" class="in-pn" value="' + escHtml(pn) + '"></td>' +
+        '<td><input type="text" class="in-sp" value="' + escHtml(sp) + '"></td>' +
+        '<td><input type="text" class="in-qt" value="' + escHtml(qt) + '"></td>' +
+        '<td><select class="in-un">' +
+            '<option value="y"' + (un === 'y' ? ' selected' : '') + '>y</option>' +
+            '<option value="支"' + (un === '支' ? ' selected' : '') + '>支</option>' +
+            '<option value="kg"' + (un === 'kg' ? ' selected' : '') + '>kg</option>' +
+            '<option value="桶"' + (un === '桶' ? ' selected' : '') + '>桶</option>' +
+            '<option value="张"' + (un === '张' ? ' selected' : '') + '>张</option>' +
+            '<option value="件"' + (un === '件' ? ' selected' : '') + '>件</option>' +
+            '<option value="箱"' + (un === '箱' ? ' selected' : '') + '>箱</option>' +
+            '<option value="卷"' + (un === '卷' ? ' selected' : '') + '>卷</option>' +
+            '<option value="块"' + (un === '块' ? ' selected' : '') + '>块</option>' +
+            '<option value="令"' + (un === '令' ? ' selected' : '') + '>令</option>' +
+            '<option value="斤"' + (un === '斤' ? ' selected' : '') + '>斤</option>' +
+        '</select></td>' +
+        '<td><input type="text" class="in-rm" value="' + escHtml(rm) + '"></td>' +
+        '<td style="text-align:center;"><button type="button" class="del-row" onclick="removeItemRow(this)" title="删除此行">&times;</button></td>';
+    document.getElementById('taskItemsBody').appendChild(tr);
+    _taskItems.push({});
+    refreshEmptyState();
+}
+
+function removeItemRow(btn) {
+    var tr = btn.closest('tr');
+    tr.parentNode.removeChild(tr);
+    _taskItems.pop();
+    refreshRowNumbers();
+    refreshEmptyState();
+}
+
+function refreshRowNumbers() {
+    var rows = document.querySelectorAll('#taskItemsBody tr');
+    rows.forEach(function(r, i) {
+        var c = r.querySelector('td');
+        if (c) c.textContent = (i + 1);
+    });
+}
+
+function refreshEmptyState() {
+    var has = document.querySelectorAll('#taskItemsBody tr').length > 0;
+    document.getElementById('emptyState').style.display = has ? 'none' : 'block';
+    document.getElementById('taskItemsTable').style.display = has ? '' : 'none';
+}
+
+function collectItemsFromForm() {
+    var rows = document.querySelectorAll('#taskItemsBody tr'), items = [], i, row;
+    for (i = 0; i < rows.length; i++) {
+        row = rows[i];
+        var pn = row.querySelector('.in-pn').value.trim();
+        var sp = row.querySelector('.in-sp').value.trim();
+        var qt = row.querySelector('.in-qt').value.trim();
+        var un = row.querySelector('.in-un').value;
+        var rm = row.querySelector('.in-rm').value.trim();
+        if (pn && qt) {
+            var qn = parseFloat(qt);
+            if (isNaN(qn)) continue;
+            items.push({product_name: pn, specification: sp, quantity: qn, unit: un, remark: rm});
+        }
+    }
+    return items;
+}
+
+// ── OCR 弹框适配 ──
+//
+// _smart_add_modal.html 的 submitAiResults() 是为出货/入库/装柜设计的,
+// 会调 {api}/{pk}/records/batch — 不适用于任务建单(无现成 task_id)。
+// 这里拦截 modal 的"添加到订单"按钮:打开弹框 → 用户识别 → 我们读 modal
+// 的 #aiResultBody 表格(用户已编辑过的数据) + 全局 _smartAiItems +
+// _smartDocNumber → 写到主表单。
+//
+// modal 渲染后,它的 #aiAddBtn 的 onclick = submitAiResults()(全局函数)。
+// 我们覆盖 _smartAddApi 在加载 modal 时已是 /api/v1/tasks, 但因为没
+// _smartFillOrderPk 提交会 alert "缺少订单信息"。
+// 简单办法:在弹框打开后,把"添加到订单"按钮替换成我们的"填充到表单"。
+
+function openSmartFillForNewTask() {
+    if (typeof openSmartFill !== 'function') {
+        alert('OCR 弹框未加载');
+        return;
+    }
+    // 弹框需要 orderPk — 我们传一个 dummy(0),_smartFillOrderPk 被设为 0
+    openSmartFill(0, '(新任务)', '(尚未创建)');
+    // 替换"添加到订单"按钮的点击行为
+    var btn = document.getElementById('aiAddBtn');
+    if (btn) {
+        btn.textContent = '✅ 填充到表单';
+        btn.onclick = applyAiResultsToTaskForm;
+    }
+}
+
+function applyAiResultsToTaskForm() {
+    // 优先读用户在 modal 表格里编辑过的值;若未编辑则 fallback 到全局 _smartAiItems
+    var rows = document.querySelectorAll('#aiResultBody tr');
+    var items = [];
+    rows.forEach(function(row) {
+        var pn = row.querySelector('[data-field="product_name"]').value.trim();
+        var sp = row.querySelector('[data-field="specification"]').value.trim();
+        var qt = row.querySelector('[data-field="quantity"]').value.trim();
+        var un = row.querySelector('[data-field="unit"]').value;
+        var rm = row.querySelector('[data-field="remark"]').value.trim();
+        if (pn && qt) items.push({product_name: pn, specification: sp, quantity: qt, unit: un, remark: rm});
+    });
+    if (items.length === 0 && typeof _smartAiItems !== 'undefined' && _smartAiItems.length > 0) {
+        items = _smartAiItems;
+    }
+    if (items.length === 0) {
+        alert('没有可填充的数据');
+        return;
+    }
+    // 1. 清空当前明细
+    document.getElementById('taskItemsBody').innerHTML = '';
+    _taskItems = [];
+    // 2. 写入主表单
+    items.forEach(function(it) {
+        addEmptyItemRow(it);
+    });
+    // 3. 客户名 + 单据号
+    var cust = document.getElementById('customerInput');
+    var src = document.getElementById('sourceOrderNoInput');
+    if (typeof _smartDocNumber !== 'undefined' && _smartDocNumber && !src.value.trim()) {
+        src.value = _smartDocNumber;
+    }
+    // _smartAiItems 里没有 customer_name(纯 items),全局 modal 里没存;
+    // 当前 modal 返回的 _smartAiItems 是 OCR 的纯商品,客户名需要从 #customerInput
+    // 手动填。这里留空,让用户手动确认。
+    // (若需要,可以从 _smartAiItems[0]?.customer_name 取,但目前 OCR 返回不包含)
+    refreshEmptyState();
+    closeSmartFill();
+    if (typeof showLoading === 'function') {
+        showLoading('已填充 ' + items.length + ' 条明细到表单');
+        setTimeout(function() { hideLoading(); }, 800);
+    }
+}
+
+// ── 提交创建 ──
+function submitNewTask() {
+    var items = collectItemsFromForm();
+    if (items.length === 0) { alert('请至少添加一条明细'); return; }
+    var payload = {
+        customer: document.getElementById('customerInput').value.trim() || null,
+        source_order_no: document.getElementById('sourceOrderNoInput').value.trim() || null,
+        items: items,
+    };
+    var btn = document.getElementById('submitBtn');
+    if (typeof showBtnLoading === 'function') showBtnLoading(btn, '创建中...');
+    fetch('/api/v1/tasks', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+    }).then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (typeof hideBtnLoading === 'function') hideBtnLoading(btn);
+        if (data.success) {
+            window.location.href = '/tasks/' + data.task_id;
+        } else {
+            alert('创建失败: ' + (data.error || '未知错误'));
+        }
+      })
+      .catch(function(err) {
+        if (typeof hideBtnLoading === 'function') hideBtnLoading(btn);
+        alert('请求失败: ' + err);
+      });
+}
+
+// 初始:空明细
+(function() {
+    refreshEmptyState();
+})();
+</script>
+{% endblock %}

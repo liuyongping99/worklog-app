@@ -252,6 +252,16 @@ def list_view():
         return jsonify(success=True, tasks=tasks, tab=tab)
 
 
+@bp.route("/tasks/new", methods=["GET"])
+def new_task_view():
+    """新建任务页面(渲染 tasks-new.html,带 OCR 弹框复用)。"""
+    op = _current_operator()
+    try:
+        return render_template("tasks-new.html", op=op)
+    except Exception:
+        return jsonify(success=True)
+
+
 @bp.route("/tasks/<int:tid>", methods=["GET"])
 def detail_view(tid):
     """详情视图。"""

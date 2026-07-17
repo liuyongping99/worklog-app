@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+/* ── 任务流页专属色:深紫 ── */
+:root { --page-accent: #6c5ce7; --page-accent-bg: #ece9ff; --page-accent-light-bg: #f7f5ff; }
+.tasks-page .card-title { color: var(--page-accent); border-bottom-color: var(--page-accent-bg); }
+.tasks-page .tasks-tabs { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
+.tasks-page .tasks-tabs .tab {
+    display: inline-flex; align-items: center;
+    padding: 0.45rem 0.95rem;
+    background: #f1f3f5; color: #495057;
+    border-radius: 18px;
+    text-decoration: none;
+    font-size: 0.88rem; font-weight: 600;
+    border: 1px solid #dee2e6;
+    transition: all 0.15s;
+}
+.tasks-page .tasks-tabs .tab:hover { background: var(--page-accent-bg); color: var(--page-accent); border-color: var(--page-accent); }
+.tasks-page .tasks-tabs .tab.active {
+    background: var(--page-accent); color: #fff;
+    border-color: var(--page-accent);
+}
+.tasks-page .toolbar {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 1rem; gap: 1rem; flex-wrap: wrap;
+}
+.tasks-page .task-table { width: 100%; border-collapse: collapse; }
+.tasks-page .task-table th {
+    background: #f8f9fa; padding: 0.55rem 0.65rem;
+    font-size: 0.82rem; color: #868e96;
+    border-bottom: 2px solid #e9ecef;
+    text-align: left; white-space: nowrap;
+}
+.tasks-page .task-table td {
+    padding: 0.55rem 0.65rem;
+    border-bottom: 1px solid #f1f3f5;
+    font-size: 0.9rem;
+}
+.tasks-page .task-table tr:hover td { background: var(--page-accent-light-bg); }
+.tasks-page .task-table .task-no {
+    font-family: monospace; color: var(--page-accent);
+    font-weight: 600;
+}
+.tasks-page .status-badge {
+    display: inline-block;
+    padding: 0.18rem 0.55rem;
+    border-radius: 8px;
+    font-size: 0.78rem; font-weight: 600;
+    white-space: nowrap;
+}
+.tasks-page .status-准备中    { background: #fff3cd; color: #856404; }
+.tasks-page .status-已装货    { background: #cfe2ff; color: #084298; }
+.tasks-page .status-已点数    { background: #d1ecf1; color: #0c5460; }
+.tasks-page .status-已到达    { background: #d4edda; color: #155724; }
+.tasks-page .status-已卸货    { background: #d4edda; color: #155724; }
+.tasks-page .status-已完成    { background: #d4edda; color: #155724; }
+.tasks-page .status-已拒收    { background: #f8d7da; color: #842029; }
+.tasks-page .status-已作废    { background: #f8d7da; color: #842029; }
+.tasks-page .customer-tag {
+    background: var(--page-accent-bg); color: var(--page-accent);
+    padding: 0.15rem 0.55rem; border-radius: 8px;
+    font-size: 0.85rem; font-weight: 600;
+}
+.tasks-page .empty-state {
+    text-align: center; padding: 3rem 1rem; color: #bbb;
+}
+.tasks-page .empty-state .icon { font-size: 3rem; margin-bottom: 0.5rem; }
+.tasks-page .new-task-btn {
+    background: var(--page-accent); color: #fff;
+    padding: 0.55rem 1.1rem; border-radius: 8px;
+    text-decoration: none; font-weight: 600; font-size: 0.92rem;
+    border: none; cursor: pointer; display: inline-block;
+}
+.tasks-page .new-task-btn:hover { background: #5b4bc4; }
+.tasks-page .row-cancelled td { opacity: 0.55; }
+.tasks-page .cancel-badge {
+    background: #f8d7da; color: #842029;
+    padding: 0.1rem 0.4rem; border-radius: 6px;
+    font-size: 0.7rem; font-weight: 700;
+    margin-left: 0.4rem;
+}
+</style>
+
+<div class="card tasks-page">
+    <h2 class="card-title">📋 任务列表</h2>
+    <div class="toolbar">
+        <div class="tasks-tabs">
+            {% set tabs = [
+                ('all',         '全部'),
+                ('pending',     '待接单'),
+                ('in_progress', '进行中'),
+                ('done',        '已完成'),
+                ('cancelled',   '已退单'),
+            ] %}
+            {% for k, label in tabs %}
+                <a href="/tasks?tab={{ k }}" class="tab {% if tab == k %}active{% endif %}">{{ label }}</a>
+            {% endfor %}
+        </div>
+        <a href="/tasks/new" class="new-task-btn">➕ 新建任务</a>
+    </div>
+
+    {% if tasks and tasks|length > 0 %}
+    <table class="task-table">
+        <thead>
+            <tr>
+                <th>任务编号</th>
+                <th>客户</th>
+                <th>单据号</th>
+                <th>状态</th>
+                <th>司机</th>
+                <th>车辆</th>
+                <th>创建时间</th>
+                <th style="width:80px;">操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for t in tasks %}
+            <tr class="{% if t.is_cancelled %}row-cancelled{% endif %}">
+                <td><span class="task-no">{{ t.task_no or ('#' ~ t.id) }}</span></td>
+                <td>
+                    {% if t.customer %}<span class="customer-tag">{{ t.customer }}</span>{% else %}<span style="color:#bbb;">—</span>{% endif %}
+                </td>
+                <td style="color:#636e72; font-size:0.85rem;">{{ t.source_order_no or '—' }}</td>
+                <td>
+                    <span class="status-badge status-{{ t.status }}">{{ t.status }}</span>
+                    {% if t.is_cancelled %}<span class="cancel-badge">作废</span>{% endif %}
+                </td>
+                <td style="font-size:0.88rem;">{{ t.driver_id if t.driver_id else '—' }}</td>
+                <td style="font-size:0.88rem;">{{ t.vehicle_id if t.vehicle_id else '—' }}</td>
+                <td style="color:#868e96; font-size:0.82rem;">{{ t.created_at or '—' }}</td>
+                <td>
+                    <a href="/tasks/{{ t.id }}" class="btn btn-sm" style="background:var(--page-accent); color:#fff; padding:0.25rem 0.7rem; text-decoration:none;">详情</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <div class="icon">📭</div>
+        <p>该 tab 下暂无任务</p>
+        <a href="/tasks/new" class="new-task-btn" style="margin-top:1rem;">➕ 新建任务</a>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
