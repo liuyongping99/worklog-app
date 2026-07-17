@@ -388,7 +388,7 @@ def delete_task_image(iid):
     return jsonify(success=True)
 
 
-@bp.route("/api/v1/tasks/recognize", methods=["POST"])
+@bp.route("/api/v1/tasks/ai-recognize", methods=["POST"])
 def recognize():
     """OCR 识别(直接复用出货页 #aiEngine 下拉的引擎)。"""
     op = _current_operator()
