@@ -17,8 +17,13 @@ coding_release / driver_release / task_cancel / return_create / list / detail
 - 已卸货 → 已完成 需要签收单
 - 推进动作走 can(op, Action.X, t) 集中校验
 """
+import os
+import sqlite3
+import uuid
 from datetime import datetime
-from flask import Blueprint, request, jsonify, session
+
+from flask import Blueprint, request, jsonify, session, render_template, abort
+from werkzeug.utils import secure_filename
 
 from models._permissions import Action, can
 from models.tasks_flow import TaskDB, TaskItemDB, TaskImageDB, TaskEventDB
@@ -76,6 +81,28 @@ def _current_operator():
 
 def _now_str() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _gen_task_no() -> str:
+    """TD-YYYYMMDD-NNNN — NNNN 是当日已建任务数 +1。
+
+    简单乐观锁(N+1):并发极低(单人用户)下足够;并发高了应改 UNIQUE+重试。
+    """
+    today = datetime.now().strftime("%Y%m%d")
+    prefix = f"TD-{today}-"
+    conn = __import__("models._db", fromlist=["get_db"]).get_db()
+    row = conn.execute(
+        "SELECT COUNT(*) AS c FROM tasks WHERE task_no LIKE ?",
+        (prefix + "%",),
+    ).fetchone()
+    return f"{prefix}{(row['c'] if row else 0) + 1:04d}"
+
+
+# 任务图片允许的 stage 白名单(对应证据链采集节点)
+ALLOWED_STAGES = {
+    "识别原图", "装车照", "点数标签照", "点数整体照",
+    "卸货照", "签收单", "打码照", "退单照", "退货照",
+}
 
 
 # ============================================================
@@ -149,13 +176,179 @@ def advance(tid):
 
 
 # ============================================================
-# 占位(后续任务 T9/T11/T13 补全)
+# 端点:T9b — 建单 / 列表 / 详情 / 上传 / OCR + assign 实现
 # ============================================================
 
-@bp.route("/api/v1/tasks/<int:tid>/assign", methods=["POST"])
-def assign(tid):  # noqa: D401 - placeholder
-    return jsonify(success=False, error="未实现:assign"), 501
+@bp.route("/api/v1/tasks", methods=["POST"])
+def create_task():
+    """建单:Body 包含 items[] + 可选 source_order_no / task_type / source_type /
+    customer / dest_address / driver_id / vehicle_id / remark。"""
+    op = _current_operator()
+    if not can(op, Action.CREATE_TASK):
+        return jsonify(success=False, error="无权限建单"), 403
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        task_no = data.get("task_no") or _gen_task_no()
+        tid = TaskDB.create(
+            task_no=task_no,
+            creator_id=op["id"],
+            source_order_no=data.get("source_order_no"),
+            task_type=data.get("task_type", "送货"),
+            source_type=data.get("source_type"),
+            customer=data.get("customer"),
+            dest_address=data.get("dest_address"),
+            driver_id=data.get("driver_id"),
+            vehicle_id=data.get("vehicle_id"),
+            remark=data.get("remark"),
+        )
+    except (ValueError, sqlite3.IntegrityError) as e:
+        return jsonify(success=False, error=str(e)), 400
 
+    for i, item in enumerate(data.get("items", [])):
+        TaskItemDB.create(
+            task_id=tid,
+            product_name=item["product_name"],
+            specification=item.get("specification"),
+            quantity=item["quantity"],
+            unit=item.get("unit", "y"),
+            remark=item.get("remark"),
+            sort_order=i,
+        )
+
+    TaskEventDB.create(
+        task_id=tid, event_type="assign",
+        operator_id=op["id"],
+        from_status=None, to_status="准备中",
+        note="建单",
+    )
+    return jsonify(success=True, task_id=tid, task_no=task_no)
+
+
+@bp.route("/tasks", methods=["GET"])
+def list_view():
+    """列表视图(渲染模板,M2 才有 tasks.html,现在仅靠 status 过滤 task 列表)。"""
+    op = _current_operator()
+    tab = request.args.get("tab", "all")
+    status_map = {
+        "pending":     ["准备中", "待打码", "打码中"],     # 待接单
+        "in_progress": ["已装货", "已点数", "已到达"],     # 进行中
+        "done":        ["已卸货", "已完成"],
+        # cancelled 走 include_cancelled=True
+    }
+    if tab == "cancelled":
+        tasks = TaskDB.get_all(include_cancelled=True)
+        tasks = [t for t in tasks if t["is_cancelled"] == 1]
+    elif tab == "all":
+        tasks = TaskDB.get_all(include_cancelled=False)
+    else:
+        tasks = [
+            t for t in TaskDB.get_all(include_cancelled=False)
+            if t["status"] in status_map.get(tab, [])
+        ]
+    # 渲染模板不存在不报错(M2 才建),只把数据塞 JSON 方便前端调试
+    try:
+        return render_template("tasks.html", tasks=tasks, tab=tab, op=op)
+    except Exception:
+        return jsonify(success=True, tasks=tasks, tab=tab)
+
+
+@bp.route("/tasks/<int:tid>", methods=["GET"])
+def detail_view(tid):
+    """详情视图。"""
+    op = _current_operator()
+    t = TaskDB.get_by_id(tid)
+    if not t:
+        abort(404)
+    items = TaskItemDB.get_by_task(tid)
+    events = TaskEventDB.get_by_task(tid)
+    images = TaskImageDB.get_by_task(tid)
+    try:
+        return render_template(
+            "task-detail.html",
+            task=t, items=items, events=events, images=images, op=op,
+        )
+    except Exception:
+        return jsonify(success=True, task=t, items=items, events=events, images=images)
+
+
+@bp.route("/api/v1/tasks/<int:tid>/images", methods=["POST"])
+def upload_image(tid):
+    """上传任务图片(multipart, field=image, 表单 field=stage)。"""
+    op = _current_operator()
+    if not op:
+        return jsonify(success=False, error="未登录"), 401
+    t = TaskDB.get_by_id(tid)
+    if not t:
+        return jsonify(success=False, error="任务不存在"), 404
+
+    f = request.files.get("image")
+    stage = request.form.get("stage")
+    if stage not in ALLOWED_STAGES:
+        return jsonify(success=False, error=f"非法 stage {stage}"), 400
+    if not f or not f.filename:
+        return jsonify(success=False, error="无文件"), 400
+
+    # 复用 _helpers.get_upload_dir()(返回 (dir, month) 元组)
+    from blueprints._helpers import get_upload_dir
+    up_dir, month = get_upload_dir()
+    ext = os.path.splitext(secure_filename(f.filename))[1] or ".jpg"
+    name = f"task_{tid}_{uuid.uuid4().hex[:8]}{ext}"
+    f.save(os.path.join(up_dir, name))
+    rel = f"{month}/{name}"
+    iid = TaskImageDB.create(tid, stage, rel)
+    return jsonify(success=True, image=rel, image_id=iid)
+
+
+@bp.route("/api/v1/tasks/recognize", methods=["POST"])
+def recognize():
+    """OCR 识别(直接复用出货页 #aiEngine 下拉的引擎)。"""
+    op = _current_operator()
+    if not can(op, Action.CREATE_TASK):
+        return jsonify(success=False, error="无权限"), 403
+    f = request.files.get("image")
+    if not f:
+        return jsonify(success=False, error="无文件"), 400
+    engine_name = request.form.get("engine") or os.environ.get("OCR_BACKEND", "moonshot")
+    try:
+        from blueprints.ocr_engine import get_ocr_engine
+        engine = get_ocr_engine(engine_name)
+        result = engine.recognize(f.read(), f.filename)
+    except Exception as e:
+        return jsonify(success=False, error=str(e)), 500
+    return jsonify(result)
+
+
+@bp.route("/api/v1/tasks/<int:tid>/assign", methods=["POST"])
+def assign(tid):
+    """指派司机:仅调度/文员;driver_id 必须为司机角色;自动写入 vehicle_id。"""
+    op = _current_operator()
+    t = TaskDB.get_by_id(tid)
+    if not t:
+        return jsonify(success=False, error="任务不存在"), 404
+    if not can(op, Action.ASSIGN, t):
+        return jsonify(success=False, error="无权限"), 403
+    data = request.get_json(silent=True) or {}
+    driver_id = data.get("driver_id")
+    if not driver_id:
+        return jsonify(success=False, error="需 driver_id"), 400
+    from models.tasks_flow import StaffDB
+    driver = StaffDB.get_by_id(driver_id)
+    if not driver or driver["role"] != "司机":
+        return jsonify(success=False, error="driver_id 必须为司机"), 400
+    vehicle_id = driver.get("vehicle_id")
+    TaskDB.update(tid, driver_id=driver_id, vehicle_id=vehicle_id)
+    TaskEventDB.create(
+        tid, "assign",
+        operator_id=op["id"],
+        from_status=None, to_status=None,
+        note=f"指派司机 #{driver_id}",
+    )
+    return jsonify(success=True, vehicle_id=vehicle_id)
+
+
+# ============================================================
+# 占位(后续任务 T11 补全 — 打码三操作)
+# ============================================================
 
 @bp.route("/api/v1/tasks/<int:tid>/coding-claim", methods=["POST"])
 def coding_claim(tid):  # noqa: D401 - placeholder

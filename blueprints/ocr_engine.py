@@ -342,6 +342,7 @@ class MoonshotEngine(BaseOCREngine):
         '图片中可能包含出货单、送货单、报价单、库存表等。\n'
         '请提取所有商品行，返回一个 JSON 对象，包含以下字段：\n'
         '- doc_number: 单据编号（从图片顶部或标题区域提取，无则空字符串）\n'
+        '- customer_name: 客户/收货方名称（从单据抬头或收货方字段提取，无则空字符串）\n'
         '- items: 商品列表数组，每条商品包含：\n'
         '  - product_name: 商品名称（必须）\n'
         '  - specification: 规格型号（必须，无则空字符串）\n'
@@ -379,12 +380,12 @@ class MoonshotEngine(BaseOCREngine):
         '如果某行只有部分信息，quantity默认"1"\n'
         '只返回纯 JSON 对象，不要其他解释文字，不要 markdown 代码块。\n'
         '示例（注意 remark 都有值）：\n'
-        '{"doc_number":"SO20260701","items":['
+        '{"doc_number":"SO20260701","customer_name":"AC公司","items":['
         '{"product_name":"PVC桌布","specification":"1.2×1.8m","quantity":"50","unit":"支","remark":"急单"},'
         '{"product_name":"无纺布","specification":"2m","quantity":"30","unit":"kg","remark":"A-03仓位"},'
         '{"product_name":"7P环保杂胶","specification":"","quantity":"100","unit":"y","remark":"每箱25y"}'
         ']}\n'
-        '如果图片中没有任何可识别的商品行，返回 {"doc_number":"","items":[]}'
+        '如果图片中没有任何可识别的商品行，返回 {"doc_number":"","customer_name":"","items":[]}'
     )
 
     def _image_to_data_url(self, image_bytes, filename):
@@ -446,12 +447,15 @@ class MoonshotEngine(BaseOCREngine):
             if isinstance(data, list):
                 items = data
                 doc_number = ''
+                customer_name = ''
             elif isinstance(data, dict):
                 items = data.get('items', [])
                 doc_number = data.get('doc_number', '') or ''
+                customer_name = data.get('customer_name', '') or ''
             else:
                 items = None
                 doc_number = ''
+                customer_name = ''
 
             if not isinstance(items, list):
                 return {
@@ -460,7 +464,12 @@ class MoonshotEngine(BaseOCREngine):
                     'hint': '图片可能不够清晰，建议手动输入或换张图片重试'
                 }
             items, _removed = _filter_summary_items(items)
-            return {'success': True, 'items': items, 'doc_number': doc_number}
+            return {
+                'success': True,
+                'items': items,
+                'doc_number': doc_number,
+                'customer_name': customer_name,
+            }
 
         except openai.AuthenticationError:
             return {
@@ -640,12 +649,12 @@ class DeepSeekEngine(BaseOCREngine):
         '如果 OCR 文字中某行的末尾还有多余文字，请填入 remark，不要丢弃。\n\n'
         '只返回纯 JSON 对象，不要 markdown 代码块，不要解释文字。\n'
         '示例（注意示例中的 remark 都是有值的）：\n'
-        '{"doc_number":"SO20260701","items":['
+        '{"doc_number":"SO20260701","customer_name":"AC公司","items":['
         '{"product_name":"PVC桌布","specification":"1.2×1.8m","quantity":"50","unit":"支","remark":"急单"},'
         '{"product_name":"无纺布","specification":"2m","quantity":"30","unit":"kg","remark":"A-03仓位"},'
         '{"product_name":"7P环保杂胶","specification":"","quantity":"100","unit":"y","remark":"每箱25y"}'
         ']}\n'
-        '如果没有可识别的商品行，返回 {"doc_number":"","items":[]}\n\n'
+        '如果没有可识别的商品行，返回 {"doc_number":"","customer_name":"","items":[]}\n\n'
         'OCR 识别的文字如下：\n'
     )
 
@@ -702,9 +711,11 @@ class DeepSeekEngine(BaseOCREngine):
             if isinstance(data, list):
                 items = data
                 doc_number = ''
+                customer_name = ''
             else:
                 items = data.get('items', [])
                 doc_number = data.get('doc_number', '') or ''
+                customer_name = data.get('customer_name', '') or ''
 
             if not isinstance(items, list):
                 return {
@@ -713,7 +724,12 @@ class DeepSeekEngine(BaseOCREngine):
                     'hint': '请重试或切换到其他引擎'
                 }
             items, _removed = _filter_summary_items(items)
-            return {'success': True, 'items': items, 'doc_number': doc_number}
+            return {
+                'success': True,
+                'items': items,
+                'doc_number': doc_number,
+                'customer_name': customer_name,
+            }
 
         except ImportError:
             return {
