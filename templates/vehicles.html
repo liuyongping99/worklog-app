@@ -1,0 +1,255 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+.vehicles-page .card-title { color: #d63031; border-bottom-color: #ffe3e3; }
+.vehicles-page .form-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 0.6rem; align-items: end;
+}
+.vehicles-page .form-grid label { display: block; font-weight: 600; font-size: 0.82rem; margin-bottom: 0.25rem; color: #636e72; }
+.vehicles-page .form-grid input, .vehicles-page .form-grid textarea {
+    width: 100%; padding: 0.4rem 0.55rem;
+    border: 1px solid #dfe6e9; border-radius: 6px;
+    font-size: 0.9rem; background: #fff;
+    box-sizing: border-box;
+}
+.vehicles-page .form-grid input:focus {
+    outline: none; border-color: #d63031;
+    box-shadow: 0 0 0 2px rgba(214,48,49,0.1);
+}
+.vehicles-page .form-grid .full { grid-column: 1 / -1; }
+.vehicles-page .actions-row {
+    grid-column: 1 / -1;
+    display: flex; gap: 0.5rem; align-items: center;
+}
+.vehicles-page .vehicle-table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
+.vehicles-page .vehicle-table th {
+    background: #f8f9fa; padding: 0.55rem 0.65rem;
+    text-align: left; font-size: 0.82rem; color: #868e96;
+    border-bottom: 2px solid #e9ecef;
+    white-space: nowrap;
+}
+.vehicles-page .vehicle-table td {
+    padding: 0.55rem 0.65rem; border-bottom: 1px solid #f1f3f5;
+    font-size: 0.9rem; vertical-align: middle;
+}
+.vehicles-page .vehicle-table tr:hover td { background: #fff5f5; }
+.vehicles-page .vehicle-table tr.disabled td { background: #f8f9fa; color: #adb5bd; }
+.vehicles-page .vehicle-table tr.editing td { background: #fff8e1; }
+.vehicles-page .plate-badge {
+    background: #fff0f0; color: #d63031;
+    border: 1px solid #fab1b1;
+    padding: 0.2rem 0.6rem; border-radius: 12px;
+    font-weight: 700; font-size: 0.88rem;
+    white-space: nowrap;
+    letter-spacing: 0.05em;
+}
+.vehicles-page .plate-badge.disabled {
+    background: #e9ecef; color: #6c757d;
+    border-color: #ced4da;
+}
+.vehicles-page .status-badge {
+    display: inline-block; padding: 0.18rem 0.5rem; border-radius: 6px;
+    font-size: 0.78rem; font-weight: 600; white-space: nowrap;
+}
+.vehicles-page .status-active { background: #d4edda; color: #155724; }
+.vehicles-page .status-inactive { background: #e2e3e5; color: #6c757d; }
+.vehicles-page .empty-state { text-align: center; padding: 2.5rem 1rem; color: #bbb; }
+.vehicles-page .empty-state .icon { font-size: 3rem; margin-bottom: 0.5rem; }
+.vehicles-page .toggle-bar {
+    display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem;
+    font-size: 0.88rem; color: #636e72;
+}
+.vehicles-page .toggle-bar .switch {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    padding: 0.3rem 0.7rem; border-radius: 14px;
+    background: #f1f3f5; color: #495057;
+    text-decoration: none; font-weight: 600;
+    border: 1px solid #dee2e6;
+}
+.vehicles-page .toggle-bar .switch.on { background: #d63031; color: #fff; border-color: #d63031; }
+.vehicles-page .toggle-bar .count { color: #868e96; }
+.vehicles-page .inline-form input {
+    width: 100%; padding: 0.3rem 0.45rem;
+    border: 1px solid #dfe6e9; border-radius: 4px;
+    font-size: 0.85rem; box-sizing: border-box;
+}
+.vehicles-page .inline-form input:focus { outline: none; border-color: #d63031; }
+.vehicles-page .edit-actions { display: flex; gap: 0.3rem; white-space: nowrap; }
+@media (max-width: 900px) {
+    .vehicles-page .form-grid { grid-template-columns: 1fr 1fr; }
+}
+</style>
+
+<!-- 顶部 toggle: 显示停用 -->
+<div class="card vehicles-page">
+    <h2 class="card-title">🚐 车辆档案</h2>
+    <div class="toggle-bar">
+        <a class="switch {{ 'on' if show_disabled else '' }}"
+           href="{{ url_for('vehicles.vehicles_list', show_disabled='1' if not show_disabled else None) }}">
+            {{ '✓ 显示停用' if show_disabled else '○ 显示停用' }}
+        </a>
+        <span class="count">共 {{ vehicles|length }} 条</span>
+    </div>
+
+    <!-- 新增车辆表单 -->
+    <form action="{{ url_for('vehicles.vehicles_add') }}" method="POST" class="form-grid">
+        <div>
+            <label for="plate_no">车牌号 *</label>
+            <input type="text" id="plate_no" name="plate_no" placeholder="例如:粤B12345" required>
+        </div>
+        <div>
+            <label for="tonnage">吨位(t)</label>
+            <input type="number" id="tonnage" name="tonnage" step="0.01" min="0" placeholder="例如:5.0">
+        </div>
+        <div>
+            <label for="length">长(m)</label>
+            <input type="number" id="length" name="length" step="0.01" min="0" placeholder="例如:4.2">
+        </div>
+        <div>
+            <label for="width">宽(m)</label>
+            <input type="number" id="width" name="width" step="0.01" min="0" placeholder="例如:1.8">
+        </div>
+        <div>
+            <label for="height">高(m)</label>
+            <input type="number" id="height" name="height" step="0.01" min="0" placeholder="例如:1.9">
+        </div>
+        <div>
+            <label for="inspection_date">年检日期</label>
+            <input type="date" id="inspection_date" name="inspection_date">
+        </div>
+        <div>
+            <label for="note">备注</label>
+            <input type="text" id="note" name="note" placeholder="可选">
+        </div>
+        <div class="actions-row">
+            <button type="submit" class="btn btn-primary">➕ 添加车辆</button>
+            <span style="font-size:0.78rem;color:#868e96;">车牌号唯一;吨位/尺寸/年检/备注 可后续编辑</span>
+        </div>
+    </form>
+</div>
+
+<!-- 列表 -->
+<div class="card vehicles-page">
+    {% if vehicles %}
+    <table class="vehicle-table">
+        <thead>
+            <tr>
+                <th>车牌号</th>
+                <th>吨位(t)</th>
+                <th>长×宽×高(m)</th>
+                <th>年检</th>
+                <th>状态</th>
+                <th>备注</th>
+                <th style="width:160px;">操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for v in vehicles %}
+            {% set disabled = v.status == '停用' %}
+            <tr class="vehicle-row {% if disabled %}disabled{% endif %}" data-vid="{{ v.id }}">
+                <td>
+                    <span class="plate-badge {{ 'disabled' if disabled else '' }}">{{ v.plate_no }}</span>
+                </td>
+                <td>{{ '%.2f'|format(v.tonnage) if v.tonnage else '—' }}</td>
+                <td>
+                    {% if v.length or v.width or v.height %}
+                        {{ '%.2f'|format(v.length) if v.length else '?' }} ×
+                        {{ '%.2f'|format(v.width) if v.width else '?' }} ×
+                        {{ '%.2f'|format(v.height) if v.height else '?' }}
+                    {% else %}—{% endif %}
+                </td>
+                <td>{{ v.inspection_date or '—' }}</td>
+                <td>
+                    {% if disabled %}
+                    <span class="status-badge status-inactive">停用</span>
+                    {% else %}
+                    <span class="status-badge status-active">启用</span>
+                    {% endif %}
+                </td>
+                <td>{{ v.note or '—' }}</td>
+                <td>
+                    {% if not disabled %}
+                    <button class="btn btn-primary btn-sm" onclick="toggleEdit({{ v.id }})">✏️ 编辑</button>
+                    <form action="{{ url_for('vehicles.vehicles_delete', vid=v.id) }}" method="POST" style="display:inline;" onsubmit="return confirm('确定停用车辆 {{ v.plate_no }}?行不会被删除。');">
+                        <button type="submit" class="btn btn-danger btn-sm">🚫 停用</button>
+                    </form>
+                    {% else %}
+                    <form action="{{ url_for('vehicles.vehicles_enable', vid=v.id) }}" method="POST" style="display:inline;">
+                        <button type="submit" class="btn btn-success btn-sm">✅ 启用</button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+            {# ── inline 编辑行(默认隐藏) ── #}
+            <tr class="edit-row" id="edit-row-{{ v.id }}" style="display:none;">
+                <td colspan="7" style="background:#fffbe6;padding:0.75rem 1rem;">
+                    <form action="{{ url_for('vehicles.vehicles_update', vid=v.id) }}" method="POST" class="inline-form">
+                        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:0.5rem;align-items:end;">
+                            <div>
+                                <label style="display:block;font-size:0.75rem;color:#868e96;margin-bottom:0.2rem;">车牌号 *</label>
+                                <input type="text" name="plate_no" value="{{ v.plate_no }}" required>
+                            </div>
+                            <div>
+                                <label style="display:block;font-size:0.75rem;color:#868e96;margin-bottom:0.2rem;">吨位</label>
+                                <input type="number" name="tonnage" step="0.01" min="0" value="{{ v.tonnage or '' }}">
+                            </div>
+                            <div>
+                                <label style="display:block;font-size:0.75rem;color:#868e96;margin-bottom:0.2rem;">长(m)</label>
+                                <input type="number" name="length" step="0.01" min="0" value="{{ v.length or '' }}">
+                            </div>
+                            <div>
+                                <label style="display:block;font-size:0.75rem;color:#868e96;margin-bottom:0.2rem;">宽(m)</label>
+                                <input type="number" name="width" step="0.01" min="0" value="{{ v.width or '' }}">
+                            </div>
+                            <div>
+                                <label style="display:block;font-size:0.75rem;color:#868e96;margin-bottom:0.2rem;">高(m)</label>
+                                <input type="number" name="height" step="0.01" min="0" value="{{ v.height or '' }}">
+                            </div>
+                            <div>
+                                <label style="display:block;font-size:0.75rem;color:#868e96;margin-bottom:0.2rem;">年检</label>
+                                <input type="date" name="inspection_date" value="{{ v.inspection_date or '' }}">
+                            </div>
+                            <div>
+                                <label style="display:block;font-size:0.75rem;color:#868e96;margin-bottom:0.2rem;">备注</label>
+                                <input type="text" name="note" value="{{ v.note or '' }}">
+                            </div>
+                        </div>
+                        <div class="edit-actions" style="margin-top:0.6rem;">
+                            <button type="submit" class="btn btn-primary btn-sm">💾 保存</button>
+                            <button type="button" class="btn btn-sm" style="background:#b2bec3;color:#fff;" onclick="toggleEdit({{ v.id }})">取消</button>
+                        </div>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <div class="icon">🚐</div>
+        <p>暂无车辆,先在上面表单添加第一辆吧!</p>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+// ── inline 编辑切换 ──
+function toggleEdit(vid) {
+    var row = document.getElementById('edit-row-' + vid);
+    if (!row) return;
+    if (row.style.display === 'none' || row.style.display === '') {
+        row.style.display = '';
+        // 高亮原行
+        var orig = document.querySelector('.vehicle-row[data-vid="' + vid + '"]');
+        if (orig) orig.classList.add('editing');
+    } else {
+        row.style.display = 'none';
+        var orig = document.querySelector('.vehicle-row[data-vid="' + vid + '"]');
+        if (orig) orig.classList.remove('editing');
+    }
+}
+</script>
+{% endblock %}

@@ -263,6 +263,90 @@ class TaskEventDB:
         return cur.lastrowid
 
 
+class VehicleDB:
+    """vehicles 表 CRUD。
+
+    删除是软删:`delete(vid)` 只把 status 置为 '停用',行不删。
+    默认 `get_all(include_disabled=False)` 不返回停用的,做下拉/列表时更干净;
+    T7 的人员管理页下拉直接用默认行为即可。
+    """
+
+    @staticmethod
+    def create(
+        plate_no: str,
+        tonnage=None,
+        length=None,
+        width=None,
+        height=None,
+        inspection_date=None,
+        status: str = "启用",
+        note=None,
+    ) -> int:
+        """INSERT 一条 vehicle,返回新行 id。
+
+        plate_no 是 UNIQUE 约束,重复插入会让 sqlite3.IntegrityError 透传出去
+        (上层 blueprint 接住后 flash 错误,不静默吞)。
+        """
+        conn = get_db()
+        cur = conn.execute(
+            "INSERT INTO vehicles "
+            "(plate_no, tonnage, length, width, height, inspection_date, status, note) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (plate_no, tonnage, length, width, height, inspection_date, status, note),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+    @staticmethod
+    def get_by_id(vehicle_id: int) -> Optional[dict]:
+        conn = get_db()
+        row = conn.execute(
+            "SELECT * FROM vehicles WHERE id = ?", (vehicle_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    @staticmethod
+    def get_all(include_disabled: bool = False) -> list:
+        """按 plate_no 升序返回车辆列表。默认过滤 status='停用'。"""
+        conn = get_db()
+        if include_disabled:
+            rows = conn.execute(
+                "SELECT * FROM vehicles ORDER BY plate_no"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM vehicles WHERE status = '启用' ORDER BY plate_no"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    @staticmethod
+    def update(vehicle_id: int, **fields) -> None:
+        """按 fields 增量更新 vehicle。无字段时 no-op。
+
+        白名单字段:防止 caller 误改 id/created_at 等不可变列。
+        """
+        if not fields:
+            return
+        allowed = {
+            "plate_no", "tonnage", "length", "width", "height",
+            "inspection_date", "status", "note",
+        }
+        safe_fields = {k: v for k, v in fields.items() if k in allowed}
+        if not safe_fields:
+            return
+        set_clause = ",".join(f"{k}=?" for k in safe_fields.keys())
+        params = list(safe_fields.values()) + [vehicle_id]
+        sql = f"UPDATE vehicles SET {set_clause}, updated_at=datetime('now','localtime') WHERE id=?"
+        conn = get_db()
+        conn.execute(sql, params)
+        conn.commit()
+
+    @staticmethod
+    def delete(vehicle_id: int) -> None:
+        """软删:把 status 置为 '停用',不删行。"""
+        VehicleDB.update(vehicle_id, status="停用")
+
+
 class TaskItemDB:
     """task_items 表 CRUD。Task 12 (整单退回) 用来拷贝明细到退货单。"""
 
@@ -300,4 +384,5 @@ class TaskItemDB:
 __all__ = [
     "Staff", "Task", "TaskItem", "TaskImage", "TaskEvent",
     "StaffDB", "TaskDB", "TaskItemDB", "TaskImageDB", "TaskEventDB",
+    "VehicleDB",
 ]
