@@ -238,6 +238,22 @@ class TaskDB:
         return dict(row) if row else None
 
     @staticmethod
+    def get_all(include_cancelled: bool = False, status: Optional[str] = None) -> list:
+        """列表任务, 默认不返回作废. status 不为空则按状态过滤."""
+        sql = "SELECT * FROM tasks"
+        where = []
+        params = []
+        if not include_cancelled:
+            where.append("is_cancelled=0")
+        if status:
+            where.append("status=?")
+            params.append(status)
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY id DESC"
+        return [dict(r) for r in get_db().execute(sql, params).fetchall()]
+
+    @staticmethod
     def update(task_id: int, **fields) -> None:
         """按 fields 增量更新 task。无字段时 no-op。"""
         if not fields:
@@ -286,6 +302,12 @@ class TaskImageDB:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    @staticmethod
+    def delete(image_id: int) -> None:
+        conn = get_db()
+        conn.execute("DELETE FROM task_images WHERE id=?", (image_id,))
+        conn.commit()
+
 
 class TaskEventDB:
     """task_events 表 CRUD。"""
@@ -304,6 +326,12 @@ class TaskEventDB:
         cur = conn.execute(sql, vals)
         conn.commit()
         return cur.lastrowid
+
+    @staticmethod
+    def get_by_task(task_id: int) -> list:
+        return [dict(r) for r in get_db().execute(
+            "SELECT * FROM task_events WHERE task_id=? ORDER BY created_at, id", (task_id,)
+        ).fetchall()]
 
 
 class VehicleDB:
@@ -422,6 +450,24 @@ class TaskItemDB:
             (task_id,),
         ).fetchall()
         return [dict(r) for r in rows]
+
+    @staticmethod
+    def update(item_id: int, **fields) -> None:
+        if not fields:
+            return
+        if fields.get("unit") == "码":
+            fields["unit"] = "y"
+        keys = ",".join(f"{k}=?" for k in fields)
+        params = list(fields.values()) + [item_id]
+        conn = get_db()
+        conn.execute(f"UPDATE task_items SET {keys} WHERE id=?", params)
+        conn.commit()
+
+    @staticmethod
+    def delete(item_id: int) -> None:
+        conn = get_db()
+        conn.execute("DELETE FROM task_items WHERE id=?", (item_id,))
+        conn.commit()
 
 
 __all__ = [
