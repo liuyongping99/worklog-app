@@ -79,9 +79,9 @@
             <li class="nav-dropdown">
                 <a href="#" class="nav-dropdown-toggle">🔁 任务流 ▾</a>
                 <div class="nav-dropdown-menu">
-                    <a href="/tasks" class="{% if request.endpoint == 'tasks.index' or request.endpoint == 'task_flow.tasks' %}active{% endif %}">📋 任务列表</a>
-                    <a href="/tasks/new" class="{% if request.endpoint == 'tasks.new' or request.endpoint == 'task_flow.new_task' %}active{% endif %}">➕ 建单</a>
-                    <a href="/coding-pool" class="{% if request.endpoint == 'coding_pool' %}active{% endif %}">💻 打码抢单池</a>
+                    <a href="/tasks" class="{% if request.endpoint == 'tasks.index' or request.endpoint == 'task_flow.list_view' %}active{% endif %}">📋 任务列表</a>
+                    <a href="/tasks/new" class="{% if request.endpoint == 'tasks.new' or request.endpoint == 'task_flow.new_task_view' %}active{% endif %}">➕ 建单</a>
+                    <a href="/coding-pool" class="{% if request.endpoint == 'coding_pool' or request.endpoint == 'task_flow.coding_pool_view' %}active{% endif %}">💻 打码抢单池</a>
                     <a href="/staff" class="{% if request.endpoint == 'staff' %}active{% endif %}">👥 人员档案</a>
                     <a href="/vehicles" class="{% if request.endpoint == 'vehicles' %}active{% endif %}">🚐 车辆档案</a>
                 </div>
