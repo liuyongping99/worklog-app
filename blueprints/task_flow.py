@@ -20,6 +20,7 @@ coding_release / driver_release / task_cancel / return_create / list / detail
 import os
 import sqlite3
 import uuid
+import logging
 from datetime import datetime
 
 from flask import Blueprint, request, jsonify, session, render_template, abort
@@ -30,6 +31,8 @@ from models.tasks_flow import TaskDB, TaskItemDB, TaskImageDB, TaskEventDB
 
 
 bp = Blueprint("task_flow", __name__)
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -326,6 +329,35 @@ def upload_image(tid):
     rel = f"{month}/{name}"
     iid = TaskImageDB.create(tid, stage, rel)
     return jsonify(success=True, image=rel, image_id=iid)
+
+
+@bp.route("/api/v1/tasks/images/<int:iid>", methods=["DELETE"])
+def delete_task_image(iid):
+    """删除任务图片(详情页证据图可改)。删除文件 + DB 行。
+
+    TaskImageDB 没有 get_by_id,直接 SQL 查 image_path 以便清掉文件。
+    """
+    op = _current_operator()
+    if op is None:
+        return jsonify(success=False, error="未登录"), 401
+
+    from models._db import get_db
+    row = get_db().execute(
+        "SELECT image_path FROM task_images WHERE id=?", (iid,)
+    ).fetchone()
+    if not row:
+        return jsonify(success=False, error="图片不存在"), 404
+
+    # 删文件(可能已不存在 → 容错)
+    # image_path 形如 "2026-07/task_xxx.png",文件位于 BASE_DIR/upload/<image_path>
+    try:
+        from blueprints._helpers import BASE_DIR
+        os.remove(os.path.join(BASE_DIR, "upload", row["image_path"]))
+    except OSError:
+        pass
+
+    TaskImageDB.delete(iid)
+    return jsonify(success=True)
 
 
 @bp.route("/api/v1/tasks/recognize", methods=["POST"])

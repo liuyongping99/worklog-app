@@ -6,7 +6,7 @@
 // ── 智能添加弹框 ──
 var SMART_ADD_API = '{{ smart_add_api }}';
 var _smartAddApi = SMART_ADD_API;
-var _smartAiImageFile = null, _smartAiItems = [], _smartDocNumber = '';
+var _smartAiImageFile = null, _smartAiItems = [], _smartDocNumber = '', _smartCustomer = '';
 var _smartFillOrderPk = null, _smartFillOrderId = null;
 
 window.openSmartFill = function(orderPk, orderDate, orderCustomer) {
@@ -34,7 +34,7 @@ window.onAiEngineChange = function() {
 };
 
 function resetAiState() {
-    _smartAiImageFile = null; _smartAiItems = []; _smartDocNumber = '';
+    _smartAiImageFile = null; _smartAiItems = []; _smartDocNumber = ''; _smartCustomer = '';
     var els = ['aiPreview','aiPreviewImg','aiImageFile','aiLoading','aiResultArea','aiResultBody','aiAddBtn','aiUploadArea'];
     document.getElementById('aiPreview').classList.remove('show');
     document.getElementById('aiPreviewImg').src = '';
@@ -125,7 +125,7 @@ function submitAiRecognize() {
     .then(function(data) {
         document.getElementById('aiLoading').classList.remove('show');
         if (data.success && data.items && data.items.length > 0) {
-            _smartAiItems = data.items; _smartDocNumber = data.doc_number || '';
+            _smartAiItems = data.items; _smartDocNumber = data.doc_number || ''; _smartCustomer = data.customer_name || '';
             renderAiResults(data.items);
             document.getElementById('aiResultArea').classList.add('show');
             document.getElementById('aiAddBtn').disabled = false;

@@ -277,10 +277,11 @@ function applyAiResultsToTaskForm() {
     if (typeof _smartDocNumber !== 'undefined' && _smartDocNumber && !src.value.trim()) {
         src.value = _smartDocNumber;
     }
-    // _smartAiItems 里没有 customer_name(纯 items),全局 modal 里没存;
-    // 当前 modal 返回的 _smartAiItems 是 OCR 的纯商品,客户名需要从 #customerInput
-    // 手动填。这里留空,让用户手动确认。
-    // (若需要,可以从 _smartAiItems[0]?.customer_name 取,但目前 OCR 返回不包含)
+    // OCR 提取的客户名(若识别到)→ 自动回填到 #customerInput。
+    // 用户后续手动修改不会被覆盖(因为 cust.value 为空才填)。
+    if (typeof _smartCustomer !== 'undefined' && _smartCustomer && !cust.value.trim()) {
+        cust.value = _smartCustomer;
+    }
     refreshEmptyState();
     closeSmartFill();
     if (typeof showLoading === 'function') {
