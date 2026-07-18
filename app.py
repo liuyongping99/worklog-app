@@ -70,6 +70,10 @@ def create_app():
                     op = None
             except Exception:
                 op = None
+            # session 里的 staff 已被删除/查不到 — 清掉,避免模板永远拿不到 current_operator
+            # (头像/nav 高亮等都会消失,看起来"什么都没了")
+            if op is None:
+                session.pop("operator_id", None)
         return dict(current_operator=op)
 
     # === 登录闸门：保护除了 /login /logout /static /api 之外的所有页面 (T6) ===
