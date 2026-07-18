@@ -274,16 +274,19 @@ function applyAiResultsToTaskForm() {
     items.forEach(function(it) {
         addEmptyItemRow(it);
     });
-    // 3. 客户名 + 单据号
+    // 3. 客户名 + 单据号 — 优先读 modal 顶部的可编辑输入框 (用户可能改过),
+    //    再 fallback 到全局 (如果 modal 的输入框被清空).
     var cust = document.getElementById('customerInput');
     var src = document.getElementById('sourceOrderNoInput');
-    if (typeof _smartDocNumber !== 'undefined' && _smartDocNumber && !src.value.trim()) {
-        src.value = _smartDocNumber;
+    var aiCust = document.getElementById('aiCustomerInput');
+    var aiDoc = document.getElementById('aiDocNumberInput');
+    var finalCust = (aiCust && aiCust.value.trim()) || (typeof _smartCustomer !== 'undefined' ? _smartCustomer : '');
+    var finalDoc = (aiDoc && aiDoc.value.trim()) || (typeof _smartDocNumber !== 'undefined' ? _smartDocNumber : '');
+    if (finalDoc && !src.value.trim()) {
+        src.value = finalDoc;
     }
-    // OCR 提取的客户名(若识别到)→ 自动回填到 #customerInput。
-    // 用户后续手动修改不会被覆盖(因为 cust.value 为空才填)。
-    if (typeof _smartCustomer !== 'undefined' && _smartCustomer && !cust.value.trim()) {
-        cust.value = _smartCustomer;
+    if (finalCust && !cust.value.trim()) {
+        cust.value = finalCust;
     }
     refreshEmptyState();
     closeSmartFill();

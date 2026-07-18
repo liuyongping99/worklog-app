@@ -42,6 +42,8 @@ function resetAiState() {
     document.getElementById('aiLoading').classList.remove('show');
     document.getElementById('aiResultArea').classList.remove('show');
     document.getElementById('aiResultBody').innerHTML = '';
+    document.getElementById('aiCustomerInput').value = '';
+    document.getElementById('aiDocNumberInput').value = '';
     document.getElementById('aiAddBtn').disabled = true;
     document.getElementById('aiUploadArea').style.display = 'block';
     var p = document.querySelector('#aiLoading p'); if (p) p.textContent = 'AI 正在识别中，请稍候...';
@@ -126,10 +128,22 @@ function submitAiRecognize() {
         document.getElementById('aiLoading').classList.remove('show');
         if (data.success && data.items && data.items.length > 0) {
             _smartAiItems = data.items; _smartDocNumber = data.doc_number || ''; _smartCustomer = data.customer_name || '';
+            // 把 customer_name 和 doc_number 写到 modal 顶部的可编辑输入框(用户可手动改)
+            document.getElementById('aiCustomerInput').value = _smartCustomer;
+            document.getElementById('aiDocNumberInput').value = _smartDocNumber;
             renderAiResults(data.items);
             document.getElementById('aiResultArea').classList.add('show');
             document.getElementById('aiAddBtn').disabled = false;
         } else if (data.success && data.items && data.items.length === 0) {
+            // 即使没识别到商品, 也显示 customer_name/doc_number (如果识别到了)
+            if (data.customer_name || data.doc_number) {
+                _smartCustomer = data.customer_name || '';
+                _smartDocNumber = data.doc_number || '';
+                document.getElementById('aiCustomerInput').value = _smartCustomer;
+                document.getElementById('aiDocNumberInput').value = _smartDocNumber;
+                document.getElementById('aiResultArea').classList.add('show');
+                document.getElementById('aiAddBtn').disabled = false;
+            }
             alert('AI 未能从图片中识别到商品信息，请尝试其他图片或手动输入。');
         } else {
             var m = data.hint ? data.error + '\n\n💡 ' + data.hint : (data.error || '未知错误');
@@ -336,6 +350,19 @@ window.copyPrompt = function() {
 .ai-result-area { display: none; }
 .ai-result-area.show { display: block; }
 .ai-result-area h4 { margin: 0 0 0.5rem 0; font-size: 0.9rem; color: #2d3436; }
+/* 客户名称 + 订单号 (商品明细上方) */
+.ai-meta-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem;
+    background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 6px;
+    padding: 0.6rem 0.8rem; margin-bottom: 0.6rem;
+}
+.ai-meta-row { display: flex; flex-direction: column; gap: 0.2rem; }
+.ai-meta-label { font-size: 0.78rem; color: #636e72; font-weight: 600; }
+.ai-meta-input {
+    width: 100%; padding: 0.4rem 0.6rem; border: 1px solid #dfe6e9;
+    border-radius: 4px; font-size: 0.88rem; background: #fff; box-sizing: border-box;
+}
+.ai-meta-input:focus { border-color: #00b894; outline: none; }
 .ai-result-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-bottom: 0.5rem; }
 .ai-result-table th { background: #f8f9fa; padding: 0.4rem 0.5rem; text-align: left; color: #868e96; border-bottom: 1px solid #e9ecef; }
 .ai-result-table td { padding: 0.35rem 0.5rem; border-bottom: 1px solid #f1f3f5; }
@@ -392,6 +419,18 @@ window.copyPrompt = function() {
             </div>
             <div class="ai-result-area" id="aiResultArea">
                 <h4>✅ 识别结果（请核对后可编辑）</h4>
+                <div class="ai-meta-grid" id="aiMetaGrid">
+                    <div class="ai-meta-row">
+                        <span class="ai-meta-label">📇 客户名称</span>
+                        <input type="text" id="aiCustomerInput" class="ai-meta-input"
+                               placeholder="(未识别到)" autocomplete="off">
+                    </div>
+                    <div class="ai-meta-row">
+                        <span class="ai-meta-label">🧾 订单号</span>
+                        <input type="text" id="aiDocNumberInput" class="ai-meta-input"
+                               placeholder="(未识别到)" autocomplete="off">
+                    </div>
+                </div>
                 <div class="ai-result-scroll">
                 <table class="ai-result-table">
                     <thead><tr>
