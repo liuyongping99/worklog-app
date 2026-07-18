@@ -399,6 +399,10 @@ def recognize():
     if not f:
         return jsonify(success=False, error="无文件"), 400
     engine_name = request.form.get("engine") or os.environ.get("OCR_BACKEND", "moonshot")
+    file_size = len(f.read())
+    f.seek(0)  # 重置, 引擎还要再读
+    logger.info("OCR recognize: engine=%s, file=%s (%d bytes)",
+                engine_name, f.filename, file_size)
 
     # Fix 6:分层 catch — 无效引擎 → 400,识别失败 → 500 + 记日志(对齐 shipping)
     try:
@@ -411,6 +415,12 @@ def recognize():
     except Exception:
         logger.exception("OCR 识别失败 (engine=%s)", engine_name)
         return jsonify(success=False, error="OCR 识别失败,请重试"), 500
+    # 记录识别结果摘要 (调试用)
+    logger.info("OCR result: success=%s, items=%d, doc_number=%r, customer_name=%r",
+                result.get("success"),
+                len(result.get("items") or []),
+                result.get("doc_number"),
+                result.get("customer_name"))
     return jsonify(result)
 
 
