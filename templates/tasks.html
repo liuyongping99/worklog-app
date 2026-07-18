@@ -149,9 +149,42 @@
     </div>
     {% endif %}
 </div>
-{% endblock %}
 
 <script>
+// 硬删除任务 (测试阶段用). 后端 DELETE /api/v1/tasks/<id>, 权限:调度/文员.
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.btn-del-task').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var tid = btn.dataset.taskId;
+            var tno = btn.dataset.taskNo || ('#' + tid);
+            if (!confirm('确认硬删除任务 ' + tno + '?\n\n会级联删除:\n- 商品明细\n- 图片证据\n- 事件历史\n\n此操作不可撤销。')) {
+                return;
+            }
+            btn.disabled = true;
+            btn.textContent = '删除中…';
+            fetch('/api/v1/tasks/' + tid, {method: 'DELETE'})
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.success) {
+                        var tr = btn.closest('tr');
+                        if (tr) { tr.style.transition = 'opacity 0.3s'; tr.style.opacity = '0'; }
+                        setTimeout(function() { if (tr) tr.remove(); }, 300);
+                    } else {
+                        alert('删除失败: ' + (data.error || '未知错误'));
+                        btn.disabled = false;
+                        btn.textContent = '🗑 删除';
+                    }
+                })
+                .catch(function(err) {
+                    alert('请求失败: ' + err);
+                    btn.disabled = false;
+                    btn.textContent = '🗑 删除';
+                });
+        });
+    });
+});
+</script>
+{% endblock %}
 // 硬删除任务 (测试阶段用). 后端 DELETE /api/v1/tasks/<id>, 权限:调度/文员.
 document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('.btn-del-task').forEach(function(btn) {
