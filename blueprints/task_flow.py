@@ -509,6 +509,31 @@ def driver_release(tid):
     return jsonify(success=True)
 
 
+@bp.route("/api/v1/tasks/<int:tid>", methods=["DELETE"])
+def delete_task():
+    """硬删除任务(测试阶段用)。FK CASCADE 自动删 task_items/images/events。
+    权限:调度/文员。状态不限 — 测试期清理用。生产环境应改为软删除。
+    """
+    op = _current_operator()
+    if op is None:
+        return jsonify(success=False, error="未登录"), 401
+    t = TaskDB.get_by_id(tid)
+    if not t:
+        return jsonify(success=False, error="任务不存在"), 404
+    if op.get("role") not in ("调度", "文员"):
+        return jsonify(success=False, error="无权限:仅调度/文员可删除"), 403
+    from models._db import get_db
+    db = get_db()
+    try:
+        db.execute("DELETE FROM tasks WHERE id=?", (tid,))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        return jsonify(success=False, error=f"删除失败: {e}"), 500
+    logger.info("Task hard-deleted: id=%s by op=%s (%s)", tid, op["id"], op.get("name"))
+    return jsonify(success=True, task_id=tid)
+
+
 @bp.route("/api/v1/tasks/<int:tid>/cancel", methods=["POST"])
 def cancel(tid):
     """任务作废(仅准备中)。权限:调度/文员。设置 is_cancelled=1。"""

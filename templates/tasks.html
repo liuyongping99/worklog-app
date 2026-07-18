@@ -131,6 +131,11 @@
                 <td style="color:#868e96; font-size:0.82rem;">{{ t.created_at or '—' }}</td>
                 <td>
                     <a href="/tasks/{{ t.id }}" class="btn btn-sm" style="background:var(--page-accent); color:#fff; padding:0.25rem 0.7rem; text-decoration:none;">详情</a>
+                    <button type="button" class="btn btn-sm btn-del-task"
+                            data-task-id="{{ t.id }}"
+                            data-task-no="{{ t.task_no }}"
+                            title="硬删除(测试用,会级联删除明细/图片/事件)"
+                            style="background:#fff0f0; color:#d63031; border:1px solid #ffcccc; padding:0.25rem 0.6rem; margin-left:0.3rem; cursor:pointer; border-radius:4px; font-size:0.85rem;">🗑 删除</button>
                 </td>
             </tr>
             {% endfor %}
@@ -145,3 +150,38 @@
     {% endif %}
 </div>
 {% endblock %}
+
+<script>
+// 硬删除任务 (测试阶段用). 后端 DELETE /api/v1/tasks/<id>, 权限:调度/文员.
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.btn-del-task').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var tid = btn.dataset.taskId;
+            var tno = btn.dataset.taskNo || ('#' + tid);
+            if (!confirm('确认硬删除任务 ' + tno + '?\n\n会级联删除:\n- 商品明细\n- 图片证据\n- 事件历史\n\n此操作不可撤销。')) {
+                return;
+            }
+            btn.disabled = true;
+            btn.textContent = '删除中…';
+            fetch('/api/v1/tasks/' + tid, {method: 'DELETE'})
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.success) {
+                        var tr = btn.closest('tr');
+                        if (tr) { tr.style.transition = 'opacity 0.3s'; tr.style.opacity = '0'; }
+                        setTimeout(function() { if (tr) tr.remove(); }, 300);
+                    } else {
+                        alert('删除失败: ' + (data.error || '未知错误'));
+                        btn.disabled = false;
+                        btn.textContent = '🗑 删除';
+                    }
+                })
+                .catch(function(err) {
+                    alert('请求失败: ' + err);
+                    btn.disabled = false;
+                    btn.textContent = '🗑 删除';
+                });
+        });
+    });
+});
+</script>
