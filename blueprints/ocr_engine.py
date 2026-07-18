@@ -12,6 +12,7 @@ import json
 import base64
 import logging
 from abc import ABC, abstractmethod
+import openai  # 提到顶层,避免 except 子句引用 _openai 模块时 UnboundLocalError
 
 # Windows DLL fix: torch's shm.dll needs its lib directory on the DLL search path.
 # Must be called BEFORE any torch import (which happens transitively via PaddleOCR).
@@ -700,7 +701,6 @@ class DeepSeekEngine(BaseOCREngine):
             if not ocr_text:
                 return {'success': True, 'items': [], 'doc_number': ''}
 
-            import openai
             client = openai.OpenAI(api_key=self.API_KEY, base_url=self.BASE_URL)
             response = client.chat.completions.create(
                 model=self.MODEL,
@@ -716,6 +716,8 @@ class DeepSeekEngine(BaseOCREngine):
             raw = re.sub(r'^\s*```[a-zA-Z]*\s*\n?', '', raw)
             raw = re.sub(r'\n?\s*```\s*$', '', raw)
             raw = raw.strip()
+            # 调试日志: 看 DeepSeek 实际返回什么
+            logger.info("DeepSeek raw response (first 500 chars): %s", raw[:500])
             data = json.loads(raw)
 
             # 兼容新旧格式：新格式 {"doc_number":"...", "items":[...]}，旧格式 [...]
