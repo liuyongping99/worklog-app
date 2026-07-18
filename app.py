@@ -94,8 +94,18 @@ def create_app():
             return None
         # 2. 未登录 → 跳 /login
         if session.get("operator_id") is None:
-            # 记住原 URL,登录后跳回(可选;v1 简化直接跳根)
             return redirect(url_for("auth.login"))
+        # 3. session 里的 staff 已被删 / 不存在 / 被停用 → 清 session 再跳 /login
+        # (必须在 before_request 里 redirect, 不能只在 context_processor 清掉 —
+        #  那时请求已经通过闸门,页面会渲染但 current_operator=None, 看起来"什么都没了")
+        try:
+            from models.tasks_flow import StaffDB
+            op = StaffDB.get_by_id(session["operator_id"])
+            if not op or op.get("is_active") != 1:
+                session.pop("operator_id", None)
+                return redirect(url_for("auth.login"))
+        except Exception:
+            pass
         return None
 
     # === 缓存控制 ===
