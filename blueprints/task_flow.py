@@ -510,7 +510,7 @@ def driver_release(tid):
 
 
 @bp.route("/api/v1/tasks/<int:tid>", methods=["DELETE"])
-def delete_task():
+def delete_task(tid):
     """硬删除任务(测试阶段用)。FK CASCADE 自动删 task_items/images/events。
     权限:调度/文员。状态不限 — 测试期清理用。生产环境应改为软删除。
     """
