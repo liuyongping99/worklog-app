@@ -7,29 +7,69 @@
     
 <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
 
-{# 操作员徽标 + 退出按钮(T6) — Tailwind 内联,避免动 static.css #}
+{# 操作员头像 + 下拉菜单 — Tailwind 内联,避免动 static.css #}
 <style>
     .navbar-operator {
-        display: inline-flex; align-items: center; gap: 0.4rem;
-        padding: 0.25rem 0.55rem;
+        position: relative;
+        display: inline-flex; align-items: center; gap: 0.5rem;
+        padding: 0.15rem 0.55rem 0.15rem 0.15rem;
         background: rgba(255,255,255,0.18);
         border: 1px solid rgba(255,255,255,0.28);
         border-radius: 999px;
-        font-size: 0.8rem;
+        font-size: 0.85rem;
         color: #fff;
         margin-left: auto;
+        cursor: pointer;
+        user-select: none;
     }
-    .navbar-operator .op-badge { line-height: 1; }
-    .navbar-operator .op-logout {
+    .navbar-operator:hover { background: rgba(255,255,255,0.26); }
+    .navbar-operator .op-avatar {
         display: inline-flex; align-items: center; justify-content: center;
-        width: 22px; height: 22px;
+        width: 30px; height: 30px;
         border-radius: 50%;
-        background: rgba(255,255,255,0.15);
-        text-decoration: none; color: #fff;
-        font-size: 0.85rem;
-        transition: background 0.15s;
+        color: #fff; font-weight: 700; font-size: 0.95rem;
+        border: 2px solid rgba(255,255,255,0.45);
+        flex-shrink: 0;
     }
-    .navbar-operator .op-logout:hover { background: rgba(255,255,255,0.35); }
+    /* 角色色背景(渐变,辨识度高) */
+    .op-avatar-司机  { background: linear-gradient(135deg, #0984e3, #74b9ff); }
+    .op-avatar-调度  { background: linear-gradient(135deg, #6c5ce7, #a29bfe); }
+    .op-avatar-文员  { background: linear-gradient(135deg, #00b894, #55efc4); }
+    .op-avatar-搬运  { background: linear-gradient(135deg, #e17055, #fab1a0); }
+    .op-avatar-打码  { background: linear-gradient(135deg, #00cec9, #81ecec); }
+    .op-avatar-仓管  { background: linear-gradient(135deg, #d63031, #ff7675); }
+    .navbar-operator .op-name { line-height: 1; padding-right: 0.2rem; }
+    .navbar-operator .op-caret { font-size: 0.7rem; opacity: 0.7; }
+
+    /* 下拉菜单 */
+    .op-menu {
+        display: none;
+        position: absolute; top: calc(100% + 8px); right: 0;
+        min-width: 200px;
+        background: #fff; color: #2d3436;
+        border-radius: 10px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+        padding: 0.4rem 0;
+        z-index: 1100;
+    }
+    .op-menu.open { display: block; }
+    .op-menu-header {
+        padding: 0.6rem 0.9rem;
+        border-bottom: 1px solid #f1f3f5;
+    }
+    .op-menu-name { font-weight: 700; font-size: 0.95rem; }
+    .op-menu-role { font-size: 0.78rem; color: #636e72; margin-top: 0.15rem; }
+    .op-menu-item {
+        display: flex; align-items: center; gap: 0.5rem;
+        width: 100%; padding: 0.55rem 0.9rem;
+        background: none; border: none; text-align: left;
+        color: #2d3436; font-size: 0.9rem;
+        text-decoration: none; cursor: pointer;
+        transition: background 0.12s;
+    }
+    .op-menu-item:hover { background: #f8f9fa; }
+    .op-menu-logout { color: #d63031; }
+    .op-menu-logout:hover { background: #fff5f5; }
 </style>
 </head>
 <body>
@@ -93,13 +133,41 @@
         </ul>
     </div>
     <button class="nav-arrow nav-arrow-right" onclick="navScroll(1)" title="向后">▶</button>
-    {# 操作员信息 + 退出按钮(登录后才有 current_operator) #}
+    {# 操作员头像 + 下拉菜单(登录后才有 current_operator) #}
     {% if current_operator %}
-    <div class="navbar-operator">
-        <span class="op-badge">👤 {{ current_operator.name }} · {{ current_operator.role }}</span>
-        <a href="/logout" class="op-logout" title="退出登录">🚪</a>
+    <div class="navbar-operator" onclick="toggleOpMenu(event)">
+        <span class="op-avatar op-avatar-{{ current_operator.role }}">{{ current_operator.name[0] }}</span>
+        <span class="op-name">{{ current_operator.name }}</span>
+        <span class="op-caret">▾</span>
+        <div class="op-menu" id="opMenu" onclick="event.stopPropagation()">
+            <div class="op-menu-header">
+                <div class="op-menu-name">{{ current_operator.name }}</div>
+                <div class="op-menu-role">{{ current_operator.role }}</div>
+            </div>
+            <a href="/login" class="op-menu-item">🔄 切换登录</a>
+            <button type="button" class="op-menu-item op-menu-logout" onclick="logoutNow()">🚪 退出登录</button>
+        </div>
     </div>
     {% endif %}
+    <script>
+    function toggleOpMenu(e) {
+        e.stopPropagation();
+        var m = document.getElementById('opMenu');
+        if (m) m.classList.toggle('open');
+    }
+    document.addEventListener('click', function(e) {
+        var root = document.querySelector('.navbar-operator');
+        if (!root || !root.contains(e.target)) {
+            var m = document.getElementById('opMenu');
+            if (m) m.classList.remove('open');
+        }
+    });
+    function logoutNow() {
+        fetch('/logout', {method: 'POST', redirect: 'manual'})
+            .then(function() { window.location.href = '/login'; })
+            .catch(function() { window.location.href = '/login'; });
+    }
+    </script>
 </nav>
 
 {% if all_notices %}

@@ -59,9 +59,9 @@ def login_post():
     return redirect(url_for("info_pages.index"))
 
 
-@bp.route("/logout")
+@bp.route("/logout", methods=["GET", "POST"])
 def logout():
-    """清 session,跳回登录页。"""
+    """清 session,跳回登录页。GET 用于 <a> 直链,POST 用于下拉菜单 fetch。"""
     session.pop("operator_id", None)
     flash("已退出登录", "success")
     return redirect(url_for("auth.login"))
