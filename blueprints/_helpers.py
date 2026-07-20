@@ -272,11 +272,41 @@ def summarize_remarks(records):
 # =====================================================================
 
 def extract_pieces_from_remark(remark):
-    """从备注提取件数，如 '3件' → 3，无则返回 None。"""
+    """从备注提取件数 + 散装张数。
+
+    支持格式:
+      "5件"             → pieces=5, loose=0
+      "5件+20张"        → pieces=5, loose=20     # 5件按规格折算 + 20张散
+      "5件*100张+20张"   → pieces=5, per_piece_override=100, loose=20  (乘形式+加形式)
+                            (但当前用法多见 "5件" 配 piece_conversions 表, 暂不强支持 * 形式)
+
+    Returns:
+        dict {pieces, loose, per_piece_override} 或 None (无 "件" 字)
+        per_piece_override: 当备注里用 * 指定每件张数时 (如 "5件*100张"), 用它替代
+                          piece_conversions 表的 units_per_piece
+    """
     if not remark:
         return None
     m = re.search(r'(\d+)件', remark)
-    return int(m.group(1)) if m else None
+    if not m:
+        return None
+    pieces = int(m.group(1))
+
+    per_piece_override = None
+    # 乘法: "5件*100张" 或 "100张*5件"
+    m_mul1 = re.search(r'(\d+)件\s*\*\s*(\d+(?:\.\d+)?)\s*张', remark)
+    m_mul2 = re.search(r'(\d+(?:\.\d+)?)\s*张\s*\*\s*(\d+)件', remark)
+    if m_mul1:
+        per_piece_override = float(m_mul1.group(2))
+    elif m_mul2:
+        per_piece_override = float(m_mul2.group(1))
+
+    # 把 * 形式整段抠掉, 剩下的 [+Zz / 裸 Zz] 才是散装张数
+    no_mul = re.sub(r'(\d+)件\s*\*\s*(\d+(?:\.\d+)?)\s*张', '', remark)
+    no_mul = re.sub(r'(\d+(?:\.\d+)?)\s*张\s*\*\s*(\d+)件', '', no_mul)
+    loose = sum(float(m) for m in re.findall(r'(\d+(?:\.\d+)?)张', no_mul))
+
+    return {'pieces': pieces, 'loose': loose, 'per_piece_override': per_piece_override}
 
 
 def _match_piece_in_cache(product_name, spec, cache):
@@ -321,43 +351,46 @@ def get_piece_conversion(product_name, spec, cache=None):
 
 
 def calc_piece_quantity(remark, conversion):
-    """备注'X件' → 期望数量 X × units_per_piece。
+    """备注'X件' → 期望数量 X × units_per_piece (+ 散装张数)。
 
     Args:
         remark: 备注字符串
-        conversion: get_piece_conversion 返回的 dict
+        conversion: get_piece_conversion 返回的 dict (含 units_per_piece)
 
     Returns:
         float 期望数量，或 None（备注无件数或无换算规则）
     """
-    pieces = extract_pieces_from_remark(remark)
-    if pieces is None or conversion is None:
+    parsed = extract_pieces_from_remark(remark)
+    if parsed is None or conversion is None:
         return None
-    return pieces * conversion['units_per_piece']
+    per_piece = parsed.get('per_piece_override') or conversion['units_per_piece']
+    return parsed['pieces'] * per_piece + parsed['loose']
 
 
 def check_piece_mismatch(remark, quantity_str, conversion):
-    """校验备注件数 vs 实际数量。
+    """校验备注件数 + 散装张数 vs 实际数量。
 
-    规则（与 check_remark 一致）：
-    - 偏差 ≤ 0.01 → ''
-    - 1 件偏差 → 'info'（粉色）
-    - 多件偏差 → 'warn'（红色）
+    规则（与 check_remark 对齐）:
+        expected = 件数 × 每件张数 + 散装张数
+        偏差 ≤ 0.01 → ''
+        1 件偏差 → 'info' (粉)
+        多件偏差 → 'warn' (红)
 
     Returns:
         '' / 'info' / 'warn'
     """
-    pieces = extract_pieces_from_remark(remark)
-    if pieces is None or conversion is None:
+    parsed = extract_pieces_from_remark(remark)
+    if parsed is None or conversion is None:
         return ''
-    expected = pieces * conversion['units_per_piece']
+    per_piece = parsed.get('per_piece_override') or conversion['units_per_piece']
+    expected = parsed['pieces'] * per_piece + parsed['loose']
     try:
         actual = float(quantity_str)
     except (ValueError, TypeError):
         return ''
     if abs(expected - actual) <= 0.01:
         return ''
-    return 'info' if pieces == 1 else 'warn'
+    return 'info' if parsed['pieces'] == 1 else 'warn'
 
 
 # ── 图片内容安全校验(M1 stub) ─────────────────────────
