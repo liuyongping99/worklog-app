@@ -93,22 +93,29 @@ function startEdit(id) {
         if (cells[k] === '—') cells[k] = '';
     });
 
+    // 修 bug: 旧实现把 <form> 开在第 2 个 <td> 里, 但 input 散落在后续 <td> 中,
+    // HTML 非法 — 浏览器在 <td> 边界自动关 form, 导致 submit 时 input 不在 form 内.
+    // 修法: 把整个 row 替换为 单一 <td> 跨列, <form> 干净地包住所有 input.
     row.innerHTML =
-        '<td style="color:#868e96;">' + id + '</td>' +
-        '<td><form id="editForm-' + id + '" method="POST" action="/piece-conversions/edit/' + id + '" class="inline-edit-form">' +
-        '<input type="text" name="product_name" value="' + escHtml(cells.product_name) + '" required></td>' +
-        '<td><input type="text" name="spec_keyword" value="' + escHtml(cells.spec_keyword) + '"></td>' +
-        '<td><input type="text" name="model" value="' + escHtml(cells.model) + '"></td>' +
-        '<td><input type="number" name="units_per_piece" value="' + cells.units + '" step="0.1" required></td>' +
-        '<td><select name="target_unit" required>' +
-            '<option value="张"' + (cells.target === '张' ? ' selected' : '') + '>张</option>' +
-            '<option value="只"' + (cells.target === '只' ? ' selected' : '') + '>只</option>' +
-            '<option value="令"' + (cells.target === '令' ? ' selected' : '') + '>令</option>' +
-        '</select></td>' +
-        '<td>' +
-            '<button type="submit" class="btn-sm btn-save">💾</button> ' +
-            '<button type="button" class="btn-sm btn-cancel" onclick="location.reload()">✖️</button>' +
-        '</td></form>';
+        '<td colspan="7" style="background:#fffbe6; padding:0.6rem 0.8rem;">' +
+            '<form id="editForm-' + id + '" method="POST" action="/piece-conversions/edit/' + id + '" ' +
+                  'style="display:grid; grid-template-columns: 30px 1.5fr 1fr 0.8fr 1fr 80px auto; gap:0.5rem; align-items:center;">' +
+                '<span style="color:#868e96; font-family:monospace;">#' + id + '</span>' +
+                '<input type="text" name="product_name" value="' + escHtml(cells.product_name) + '" placeholder="商品名" required>' +
+                '<input type="text" name="spec_keyword" value="' + escHtml(cells.spec_keyword) + '" placeholder="规格关键词">' +
+                '<input type="text" name="model" value="' + escHtml(cells.model) + '" placeholder="型号">' +
+                '<input type="number" name="units_per_piece" value="' + cells.units + '" placeholder="每件单位数" step="0.1" required>' +
+                '<select name="target_unit" required>' +
+                    '<option value="张"' + (cells.target === '张' ? ' selected' : '') + '>张</option>' +
+                    '<option value="只"' + (cells.target === '只' ? ' selected' : '') + '>只</option>' +
+                    '<option value="令"' + (cells.target === '令' ? ' selected' : '') + '>令</option>' +
+                '</select>' +
+                '<span style="display:flex; gap:0.3rem;">' +
+                    '<button type="submit" class="btn-sm btn-save">💾 保存</button>' +
+                    '<button type="button" class="btn-sm btn-cancel" onclick="location.reload()">✖️</button>' +
+                '</span>' +
+            '</form>' +
+        '</td>';
 }
 
 function escHtml(str) {
