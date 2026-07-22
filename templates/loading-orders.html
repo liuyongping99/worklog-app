@@ -237,8 +237,28 @@
                             <button type="button" class="move-down-btn lock-hide" data-id="{{ record.id }}" onclick="moveRecord({{ record.id }}, 'down', this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;margin-right:0.3rem;" title="下移">▼</button>
                             <button type="button" class="edit-record-btn lock-hide" data-id="{{ record.id }}" onclick="editRecord({{ record.id }}, this)" style="background: none; border: none; color: #00b894; cursor: pointer; font-size: 0.85rem; margin-right: 0.4rem;" title="修改">✏️</button>
                             <button type="button" class="del-record-btn lock-hide" data-id="{{ record.id }}" onclick="deleteRecord({{ record.id }}, this)" style="background: none; border: none; color: #ff7675; cursor: pointer; font-size: 0.85rem;" title="删除">🗑️</button>
+                            <button type="button" class="record-image-btn lock-hide" data-record-id="{{ record.id }}" title="上传图片到此商品" style="background:#74b9ff;border:none;color:#fff;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;margin-left:0.3rem;">🖼️</button>
+                            <input type="file" class="record-image-input" data-record-id="{{ record.id }}" accept="image/*" multiple style="display:none;">
                         </td>
                     </tr>
+                    {% set _rimgs = record_images.get(record.id, []) %}
+                    {% if _rimgs %}
+                    <tr class="record-images-row" data-record-id="{{ record.id }}">
+                        <td colspan="8" style="padding:0.35rem 0.5rem;background:#f8f9fa;border-top:1px dashed #dfe6e9;">
+                            <div class="record-images-grid" data-record-id="{{ record.id }}">
+                                {% for img in _rimgs %}
+                                <div class="thumb-wrapper{% if img.record_pk %} thumb-record{% else %} thumb-order{% endif %}" data-image-id="{{ img.id }}">
+                                    <img src="/upload/{{ img.relative_path }}" alt="商品图片" loading="lazy">
+                                    {% if img.record_pk %}
+                                    <span class="thumb-tooltip" data-pn="{{ record.product_name }}" data-sp="{{ record.specification }}">{{ record.product_name }} / {{ record.specification }}</span>
+                                    {% endif %}
+                                    <button type="button" class="thumb-del-btn lock-hide" data-image-id="{{ img.id }}" title="删除图片">×</button>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% endif %}
                     {% endfor %}
                     {% if group.summary_pieces > 0 or group.summary_loose_pieces > 0 or group.summary_unit_pieces > 0 %}
                     <tr class="summary-row" style="background:#f0fdf4; font-weight:600; border-top:2px solid #00b894;">
@@ -1365,5 +1385,142 @@ window.unmarkRecordVerified = function(recordId, dataRow) {
         }
     }).catch(function(err) { alert('请求失败：' + err); });
 };
+
+// ── 商品行图片上传(🖼️ 按钮 → 选文件 → 批量上传 → 按服务端顺序追加缩略图) ──
+function bindRecordImageButtons() {
+    document.querySelectorAll('.record-image-btn').forEach(function(btn) {
+        if (btn._recordImgBound) return;
+        btn._recordImgBound = true;
+        btn.addEventListener('click', function() {
+            var recordId = btn.getAttribute('data-record-id');
+            var input = document.querySelector('.record-image-input[data-record-id="' + recordId + '"]');
+            if (input) input.click();
+        });
+    });
+    document.querySelectorAll('.record-image-input').forEach(function(input) {
+        if (input._recordInputBound) return;
+        input._recordInputBound = true;
+        input.addEventListener('change', function() {
+            var recordId = input.getAttribute('data-record-id');
+            var files = Array.from(input.files || []);
+            if (!files.length) return;
+            uploadRecordImages(recordId, files, input);
+        });
+    });
+    document.querySelectorAll('.thumb-del-btn').forEach(function(btn) {
+        if (btn._thumbDelBound) return;
+        btn._thumbDelBound = true;
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            var imageId = btn.getAttribute('data-image-id');
+            if (!imageId) return;
+            if (!confirm('确认删除这张图片?')) return;
+            fetch('/api/v1/loading-orders/images/' + imageId, {method: 'DELETE'})
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.success) {
+                        var thumb = btn.closest('.thumb-wrapper');
+                        if (thumb) thumb.remove();
+                        var grid = btn.closest('.record-images-grid');
+                        if (grid && grid.children.length === 0) {
+                            var row = grid.closest('tr.record-images-row');
+                            if (row) row.remove();
+                        }
+                    } else {
+                        alert('删除失败：' + (data.error || '未知错误'));
+                    }
+                })
+                .catch(function(err) { alert('请求失败：' + err); });
+        });
+    });
+}
+
+function uploadRecordImages(recordId, files, inputEl) {
+    var fd = new FormData();
+    files.forEach(function(f) { fd.append('image', f); });
+    if (typeof showLoading === 'function') showLoading('上传中...');
+    fetch('/api/v1/loading-orders/records/' + recordId + '/images', {method: 'POST', body: fd})
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (typeof hideLoading === 'function') hideLoading();
+            if (data.success && data.images) {
+                var dataRow = document.querySelector('tr[data-record-id="' + recordId + '"]:not(.record-images-row):not(.record-warn-row)');
+                var pn = dataRow ? (dataRow.children[1] && dataRow.children[1].textContent || '').trim() : '';
+                var sp = dataRow ? (dataRow.children[2] && dataRow.children[2].textContent || '').trim() : '';
+                appendRecordImagesRow(recordId, data.images, pn, sp);
+            } else {
+                alert('上传失败：' + (data.error || '未知错误'));
+            }
+            inputEl.value = '';
+        })
+        .catch(function(err) {
+            if (typeof hideLoading === 'function') hideLoading();
+            alert('请求失败：' + err);
+            inputEl.value = '';
+        });
+}
+
+function appendRecordImagesRow(recordId, images, pn, sp) {
+    var dataRow = document.querySelector('tr[data-record-id="' + recordId + '"]:not(.record-images-row):not(.record-warn-row)');
+    if (!dataRow) return;
+    var nextSibling = dataRow.nextElementSibling;
+    var imagesRow = document.querySelector('.record-images-row[data-record-id="' + recordId + '"]');
+    if (!imagesRow) {
+        imagesRow = document.createElement('tr');
+        imagesRow.className = 'record-images-row';
+        imagesRow.setAttribute('data-record-id', recordId);
+        var td = document.createElement('td');
+        td.colSpan = dataRow.children.length || 8;
+        td.style.cssText = 'padding:0.35rem 0.5rem;background:#f8f9fa;border-top:1px dashed #dfe6e9;';
+        td.innerHTML = '<div class="record-images-grid" data-record-id="' + recordId + '"></div>';
+        imagesRow.appendChild(td);
+        dataRow.parentNode.insertBefore(imagesRow, dataRow.nextSibling);
+    }
+    var grid = imagesRow.querySelector('.record-images-grid');
+    images.forEach(function(img) {
+        var wrapper = document.createElement('div');
+        var scope = img.record_pk ? 'thumb-record' : 'thumb-order';
+        wrapper.className = 'thumb-wrapper ' + scope;
+        wrapper.setAttribute('data-image-id', img.image_id);
+        var imgEl = document.createElement('img');
+        imgEl.src = '/upload/' + img.image;
+        imgEl.alt = '商品图片';
+        imgEl.loading = 'lazy';
+        wrapper.appendChild(imgEl);
+        if (img.record_pk && pn) {
+            var tip = document.createElement('span');
+            tip.className = 'thumb-tooltip';
+            tip.setAttribute('data-pn', pn);
+            tip.setAttribute('data-sp', sp);
+            tip.textContent = pn + ' / ' + sp;
+            wrapper.appendChild(tip);
+        }
+        var del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'thumb-del-btn lock-hide';
+        del.setAttribute('data-image-id', img.image_id);
+        del.title = '删除图片';
+        del.textContent = '×';
+        del.addEventListener('click', function(e) {
+            e.stopPropagation();
+            if (!confirm('确认删除这张图片?')) return;
+            fetch('/api/v1/loading-orders/images/' + img.image_id, {method: 'DELETE'})
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.success) {
+                        wrapper.remove();
+                        if (grid.children.length === 0) imagesRow.remove();
+                    } else {
+                        alert('删除失败：' + (data.error || '未知错误'));
+                    }
+                })
+                .catch(function(err) { alert('请求失败：' + err); });
+        });
+        wrapper.appendChild(del);
+        grid.appendChild(wrapper);
+    });
+    if (typeof updateNavIndicator === 'function') updateNavIndicator();
+}
+bindRecordImageButtons();
 </script>
 {% endblock %}

@@ -43,9 +43,14 @@ def shipping_records():
         start_date = start.isoformat()
         end_date = end.isoformat()
     groups = ShippingRecord.get_groups(start_date, end_date)
-    # order_pk -> 图片列表
+    # order_pk -> 图片列表(含订单级共享 + 各 record 专属)
     order_ids = [g['id'] for g in groups]
     order_images = {oid: ShippingImage.get_by_order(oid) for oid in order_ids}
+    # record_pk -> 该 record 的合并图片区(订单共享 + record 专属,统一排序)
+    record_images = {}
+    for grp in groups:
+        for rec in grp.get('records', []):
+            record_images[rec['id']] = ShippingImage.get_combined_for_record(grp['id'], rec['id'])
 
     units = ProductUnit.get_all()
     unit_list = [{
@@ -114,6 +119,7 @@ def shipping_records():
         'shipping-records.html',
         groups=groups,
         order_images=order_images,
+        record_images=record_images,
         page_title='出货记录',
         today=today,
         start_date=start_date,
@@ -475,6 +481,122 @@ def api_v1_shipping_orders_delete_image(image_id):
         AuditLog.log('delete_image', 'shipping_order', img['order_pk'], detail={'image_id': image_id})
         return jsonify({'success': True})
     return jsonify({'success': False, 'error': '图片不存在'}), 404
+
+
+# ── 商品行级图片(挂在 record 上,合并订单级共享图展示) ──
+def _save_one_uploaded_file(file, upload_dir):
+    """保存一个上传文件到 upload_dir,返回 (filepath, original_name)。失败抛 ValueError。"""
+    if not file or not file.filename:
+        raise ValueError('未选择文件')
+    ext = check_uploaded_image(file)
+    filename = f"{uuid.uuid4().hex}.{ext}"
+    filepath = os.path.join(upload_dir, filename)
+    file.save(filepath)
+    validate_image_content(filepath)
+    return filepath, file.filename
+
+
+def _save_one_base64_image(data_url, upload_dir):
+    """保存一个 data:image base64 到 upload_dir。失败抛 ValueError。"""
+    if not data_url or not data_url.startswith('data:image'):
+        raise ValueError('无效的图片数据')
+    header, base64_data = data_url.split(',', 1)
+    hl = header.lower()
+    if 'png' in hl: ext = 'png'
+    elif 'gif' in hl: ext = 'gif'
+    elif 'webp' in hl: ext = 'webp'
+    else: ext = 'jpg'
+    img_bytes = base64.b64decode(base64_data)
+    filename = f"{uuid.uuid4().hex}.{ext}"
+    filepath = os.path.join(upload_dir, filename)
+    with open(filepath, 'wb') as f:
+        f.write(img_bytes)
+    validate_image_content(filepath)
+    return filepath, 'pasted_image'
+
+
+@bp.route('/api/v1/shipping-orders/records/<int:record_id>/images', methods=['POST'])
+def api_v1_shipping_orders_record_upload_images(record_id):
+    """上传商品行图片(多文件),按上传顺序赋 sort_order → 201"""
+    record = ShippingRecord.get_by_id(record_id)
+    if not record:
+        return jsonify({'success': False, 'error': '记录不存在'}), 404
+    order = ShippingOrder.get_by_id(record['order_pk'])
+    if order and order.get('is_locked'):
+        return jsonify({'success': False, 'error': '该订单已锁定，无法上传图片'}), 403
+
+    upload_dir, month_str = _get_upload_dir()
+    source = 'upload'
+    saved = []  # [(image_id, rel_path, original_name, sort_order)]
+
+    # 接收两种格式:multipart 多个 'image' 字段,或 JSON 里 images[]/image(单个 base64)
+    files = request.files.getlist('image')
+    if files:
+        # 多个文件:逐个按顺序存,sort_order 自动累加(因 ShippingImage.create 内部 max+1)
+        for f in files:
+            try:
+                filepath, original_name = _save_one_uploaded_file(f, upload_dir)
+            except ValueError as e:
+                return jsonify({'success': False, 'error': str(e)}), 400
+            image_id = ShippingImage.create(
+                order_pk=record['order_pk'],
+                file_path=filepath,
+                original_name=original_name,
+                source=source,
+                record_pk=record_id,
+            )
+            rel_path = os.path.join(month_str, os.path.basename(filepath)).replace('\\', '/')
+            # 取刚插入的 sort_order
+            img = ShippingImage.get_by_id(image_id)
+            saved.append({
+                'image_id': image_id,
+                'image': rel_path,
+                'original_name': original_name,
+                'sort_order': img['sort_order'],
+            })
+        for s in saved:
+            AuditLog.log('upload_image', 'shipping_order', record['order_pk'],
+                         detail={'filename': s['image'], 'source': source, 'record_id': record_id})
+        return jsonify({'success': True, 'images': saved, 'count': len(saved)}), 201
+
+    # 单文件 base64(JSON)
+    if request.is_json:
+        data = request.get_json() or {}
+        try:
+            filepath, original_name = _save_one_base64_image(data.get('image', ''), upload_dir)
+        except ValueError as e:
+            return jsonify({'success': False, 'error': str(e)}), 400
+        source = data.get('source', 'upload')
+        image_id = ShippingImage.create(
+            order_pk=record['order_pk'],
+            file_path=filepath,
+            original_name=original_name,
+            source=source,
+            record_pk=record_id,
+        )
+        rel_path = os.path.join(month_str, os.path.basename(filepath)).replace('\\', '/')
+        img = ShippingImage.get_by_id(image_id)
+        AuditLog.log('upload_image', 'shipping_order', record['order_pk'],
+                     detail={'filename': rel_path, 'source': source, 'record_id': record_id})
+        return jsonify({'success': True, 'images': [{
+            'image_id': image_id, 'image': rel_path,
+            'original_name': original_name, 'sort_order': img['sort_order'],
+        }], 'count': 1}), 201
+
+    return jsonify({'success': False, 'error': '未提供图片'}), 400
+
+
+@bp.route('/api/v1/shipping-orders/records/<int:record_id>/images-area', methods=['GET'])
+def api_v1_shipping_orders_record_images_area(record_id):
+    """某 record 的合并图片区:该 record 专属图 + 订单共享图,统一排序"""
+    record = ShippingRecord.get_by_id(record_id)
+    if not record:
+        return jsonify({'success': False, 'error': '记录不存在'}), 404
+    items = ShippingImage.get_combined_for_record(record['order_pk'], record_id)
+    # 把每条 record_pk=None 的项标 scope=order,非 None 标 scope=record,便于前端 tooltip 决策
+    for it in items:
+        it['scope'] = 'order' if it.get('record_pk') is None else 'record'
+    return jsonify({'success': True, 'images': items, 'count': len(items)})
 
 
 

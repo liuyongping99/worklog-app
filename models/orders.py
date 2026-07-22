@@ -747,12 +747,24 @@ class InboundImage:
 
 class ShippingImage:
     @staticmethod
-    def create(order_pk: int, file_path: str, original_name: str = '', source: str = 'upload'):
+    def create(order_pk: int, file_path: str, original_name: str = '', source: str = 'upload', record_pk: int = None, sort_order: int = None):
+        """插入图片。
+        - record_pk: None=订单级共享图, 非空=某条明细的专属图
+        - sort_order: None 时由本方法在事务内计算 max+1(同事务累加); 显式传入则按用户值
+        """
         conn = get_db()
         cursor = conn.cursor()
+        if sort_order is None:
+            cursor.execute(
+                'SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM shipping_images WHERE order_pk = ?',
+                (order_pk,)
+            )
+            sort_order = cursor.fetchone()['next']
         cursor.execute(
-            'INSERT INTO shipping_images (order_pk, file_path, original_name, source, created_at) VALUES (?, ?, ?, ?, ?)',
-            (order_pk, file_path, original_name, source, datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+            'INSERT INTO shipping_images (order_pk, file_path, original_name, source, record_pk, sort_order, created_at) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?)',
+            (order_pk, file_path, original_name, source, record_pk, sort_order,
+             datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
         )
         conn.commit()
         image_id = cursor.lastrowid
@@ -761,9 +773,53 @@ class ShippingImage:
 
     @staticmethod
     def get_by_order(order_pk: int):
+        """查订单所有图(含订单级 + 记录级),按 sort_order + id 排"""
         conn = get_db()
         cursor = conn.cursor()
-        cursor.execute('SELECT * FROM shipping_images WHERE order_pk = ? ORDER BY id ASC', (order_pk,))
+        cursor.execute(
+            'SELECT * FROM shipping_images WHERE order_pk = ? ORDER BY sort_order ASC, id ASC',
+            (order_pk,)
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item['relative_path'] = ShippingImage.get_relative_path(item['file_path'])
+            result.append(item)
+        return result
+
+    @staticmethod
+    def get_by_record(record_pk: int):
+        """查某条明细专属图片(订单级共享图不算),按 sort_order + id 排"""
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            'SELECT * FROM shipping_images WHERE record_pk = ? ORDER BY sort_order ASC, id ASC',
+            (record_pk,)
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item['relative_path'] = ShippingImage.get_relative_path(item['file_path'])
+            result.append(item)
+        return result
+
+    @staticmethod
+    def get_combined_for_record(order_pk: int, record_pk: int):
+        """合并视图:某 record 专属图 + 订单共享图,按 sort_order + id 统一排"""
+        conn = get_db()
+        cursor = conn.cursor()
+        # UNION ALL 让两表自然合并,再排序
+        cursor.execute(
+            '''SELECT * FROM shipping_images WHERE order_pk = ? AND record_pk IS NULL
+               UNION ALL
+               SELECT * FROM shipping_images WHERE order_pk = ? AND record_pk = ?
+               ORDER BY sort_order ASC, id ASC''',
+            (order_pk, order_pk, record_pk)
+        )
         rows = cursor.fetchall()
         conn.close()
         result = []
@@ -1151,12 +1207,24 @@ class LoadingOrderRecord:
 class LoadingOrderImage:
     """装柜订单图片"""
     @staticmethod
-    def create(order_pk: int, file_path: str, original_name: str = '', source: str = 'upload'):
+    def create(order_pk: int, file_path: str, original_name: str = '', source: str = 'upload', record_pk: int = None, sort_order: int = None):
+        """插入图片。
+        - record_pk: None=订单级共享图, 非空=某条明细的专属图
+        - sort_order: None 时由本方法在事务内计算 max+1; 显式传入则按用户值
+        """
         conn = get_db()
         cursor = conn.cursor()
+        if sort_order is None:
+            cursor.execute(
+                'SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM loading_order_images WHERE order_pk = ?',
+                (order_pk,)
+            )
+            sort_order = cursor.fetchone()['next']
         cursor.execute(
-            'INSERT INTO loading_order_images (order_pk, file_path, original_name, source, created_at) VALUES (?, ?, ?, ?, ?)',
-            (order_pk, file_path, original_name, source, datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+            'INSERT INTO loading_order_images (order_pk, file_path, original_name, source, record_pk, sort_order, created_at) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?)',
+            (order_pk, file_path, original_name, source, record_pk, sort_order,
+             datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
         )
         conn.commit()
         image_id = cursor.lastrowid
@@ -1165,9 +1233,52 @@ class LoadingOrderImage:
 
     @staticmethod
     def get_by_order(order_pk: int):
+        """查订单所有图(含订单级 + 记录级),按 sort_order + id 排"""
         conn = get_db()
         cursor = conn.cursor()
-        cursor.execute('SELECT * FROM loading_order_images WHERE order_pk = ? ORDER BY id ASC', (order_pk,))
+        cursor.execute(
+            'SELECT * FROM loading_order_images WHERE order_pk = ? ORDER BY sort_order ASC, id ASC',
+            (order_pk,)
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item['relative_path'] = LoadingOrderImage.get_relative_path(item['file_path'])
+            result.append(item)
+        return result
+
+    @staticmethod
+    def get_by_record(record_pk: int):
+        """查某条明细专属图片(订单级共享图不算),按 sort_order + id 排"""
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            'SELECT * FROM loading_order_images WHERE record_pk = ? ORDER BY sort_order ASC, id ASC',
+            (record_pk,)
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item['relative_path'] = LoadingOrderImage.get_relative_path(item['file_path'])
+            result.append(item)
+        return result
+
+    @staticmethod
+    def get_combined_for_record(order_pk: int, record_pk: int):
+        """合并视图:某 record 专属图 + 订单共享图,按 sort_order + id 统一排"""
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            '''SELECT * FROM loading_order_images WHERE order_pk = ? AND record_pk IS NULL
+               UNION ALL
+               SELECT * FROM loading_order_images WHERE order_pk = ? AND record_pk = ?
+               ORDER BY sort_order ASC, id ASC''',
+            (order_pk, order_pk, record_pk)
+        )
         rows = cursor.fetchall()
         conn.close()
         result = []

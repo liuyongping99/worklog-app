@@ -160,6 +160,17 @@ def init_db():
         except Exception:
             pass  # 列已存在
 
+    # 迁移：出货/装柜图片表加 record_pk + sort_order 列
+    #   - record_pk: NULL=订单级共享图,非NULL=某条明细的专属图
+    #   - sort_order: 图片显示顺序(ORDER BY sort_order ASC, id ASC)
+    for tbl in ('shipping_images', 'loading_order_images'):
+        for col, default in [('record_pk', 'INTEGER DEFAULT NULL'),
+                            ('sort_order', 'INTEGER NOT NULL DEFAULT 0')]:
+            try:
+                cursor.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} {default}")
+            except Exception:
+                pass  # 列已存在
+
     # ── shipping_images（出货订单图片） ──
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS shipping_images (
@@ -440,10 +451,12 @@ def init_db():
     for ddl in [
         'CREATE INDEX IF NOT EXISTS idx_shipping_records_order_pk ON shipping_records(order_pk)',
         'CREATE INDEX IF NOT EXISTS idx_shipping_images_order_pk ON shipping_images(order_pk)',
+        'CREATE INDEX IF NOT EXISTS idx_shipping_images_record_pk ON shipping_images(record_pk)',
         'CREATE INDEX IF NOT EXISTS idx_inbound_records_order_pk ON inbound_records(order_pk)',
         'CREATE INDEX IF NOT EXISTS idx_inbound_images_order_pk ON inbound_images(order_pk)',
         'CREATE INDEX IF NOT EXISTS idx_loading_records_order_pk ON loading_order_records(order_pk)',
         'CREATE INDEX IF NOT EXISTS idx_loading_images_order_pk ON loading_order_images(order_pk)',
+        'CREATE INDEX IF NOT EXISTS idx_loading_images_record_pk ON loading_order_images(record_pk)',
     ]:
         try:
             cursor.execute(ddl)
