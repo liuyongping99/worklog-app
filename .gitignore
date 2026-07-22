@@ -35,6 +35,10 @@ worklog.db.bak
 # 用户上传的图片（按月分组）
 upload/
 
+# ===== Node.js =====
+node_modules/
+*.log
+
 # ===== 密钥 / 环境变量 =====
 .env
 .env.local

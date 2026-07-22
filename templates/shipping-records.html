@@ -312,7 +312,9 @@
                 </thead>
                 <tbody>
                 {% for item in group.records %}
-                <tr class="{% if item.qty_invalid %}row-out-of-stock{% elif item.mismatch == 'warn' or item.piece_mismatch == 'warn' %}row-warn{% elif item.mismatch == 'info' or item.piece_mismatch == 'info' %}row-info{% endif %}">
+                <tr class="{% if item.qty_invalid %}row-out-of-stock{% elif item.mismatch == 'warn' or item.piece_mismatch == 'warn' %}row-warn{% elif item.mismatch == 'info' or item.piece_mismatch == 'info' %}row-info{% endif %}"
+                    data-record-id="{{ item.id }}"
+                    data-verified="{{ '1' if item.verified else '0' }}">
                     <td style="text-align:center; color:#868e96; font-size:0.85rem;">{% if item.qty_invalid %}<span class="stock-icon" title="数量异常">❌</span>{% elif item.mismatch == 'warn' or item.piece_mismatch == 'warn' %}❌ {% elif item.mismatch == 'info' or item.piece_mismatch == 'info' %}💡 {% endif %}{{ loop.index }}</td>
                     <td style="font-size:0.9rem;">{{ item.product_name }}</td>
                     <td style="color:#636e72; font-size:0.9rem;">{{ item.specification }}</td>
@@ -705,6 +707,28 @@
                 var dg = document.querySelector('.date-group[data-order-id="' + orderId + '"]');
                 if (dg) {
                     dg.setAttribute('data-locked', data.locked ? '1' : '0');
+                    // 局部刷新:data-locked 改了,addRowWarning 的 isOrderLocked 判断会重新生效
+                    // 锁定的:删除已渲染的警告/已核查行
+                    // 解锁的:重新扫描所有数据行加回警告
+                    dg.querySelectorAll('.record-table tbody tr').forEach(function(tr) {
+                        if (tr.classList && tr.classList.contains('record-warn-row')) {
+                            // 警告行本身:无论锁定与否,先清掉
+                            tr.remove();
+                            return;
+                        }
+                        // 数据行:重跑 addRowWarning(锁定时跳过,解锁时加回)
+                        var pn = (tr.children[1] && tr.children[1].textContent || '').trim();
+                        var sp = (tr.children[2] && tr.children[2].textContent || '').trim();
+                        if (!pn) return;
+                        var verified = (tr.dataset && tr.dataset.verified === '1') ? 1 : 0;
+                        var recordId = tr.dataset.recordId || tr.getAttribute('data-record-id') || tr.getAttribute('data-id') || null;
+                        if (typeof addRowWarning === 'function') {
+                            addRowWarning(tr, {
+                                product_name: pn, specification: sp,
+                                verified: verified, record_id: recordId
+                            });
+                        }
+                    });
                 }
             })
             .catch(function(err) {
@@ -1063,6 +1087,15 @@ function bindEditDeleteButtons() {
                         btn.classList.remove('btn-success');
                         btn.classList.add('btn-primary');
                         refreshRemarkSummary(tr.closest('.date-group'));
+                        // inline 编辑后重渲校验警告(落到明细行下方)
+                        if (typeof addRowWarning === 'function') {
+                            addRowWarning(tr, {
+                                product_name: r.product_name,
+                                specification: r.specification || '',
+                                verified: r.verified ? 1 : 0,
+                                record_id: r.id
+                            });
+                        }
                     } else {
                         alert('保存失败：' + (result.error || ''));
                     }
@@ -1101,7 +1134,13 @@ function bindEditDeleteButtons() {
                         var dg = tr.closest('.date-group');
                         tr.style.transition = 'opacity 0.3s';
                         tr.style.opacity = '0';
-                        setTimeout(function() { tr.remove(); refreshRemarkSummary(dg); }, 300);
+                        setTimeout(function() {
+                            if (typeof removeRowWarning === 'function') removeRowWarning(tr);
+                            tr.remove();
+                            refreshRemarkSummary(dg);
+                            // dataRow 已移除,validateAllRows 结果变了,刷新 nav 指示器
+                            if (typeof updateNavIndicator === 'function') updateNavIndicator();
+                        }, 300);
                     } else { alert('删除失败：' + (data.error || '')); }
                 }).catch(function(err) { hideLoading(); alert('请求失败：' + err); });
             });
@@ -1217,6 +1256,49 @@ if (createOrderForm) {
 // 初始化绑定
 bindEditDeleteButtons();
 bindDeleteImageButtons();
+
+// ── "已核查"按钮回调(给 _smart_add_modal.html 的事件代理调用)──
+// markRecordVerified:    点击 .record-warn-verify-btn 触发 → PUT verified=true
+// unmarkRecordVerified:  点击 .record-verified-unverify 触发 → PUT verified=false
+// 两者成功后刷新该行警告状态(addRowWarning 会自动按 verified 切换警告/绿色状态)
+window.markRecordVerified = function(recordId, dataRow) {
+    fetch('/api/v1/shipping-orders/records/' + recordId, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({verified: 1})
+    }).then(function(res) { return res.json(); }).then(function(data) {
+        if (data.success) {
+            // 更新 data-row 的 data-verified
+            dataRow.setAttribute('data-verified', '1');
+            // 读 pn/sp 重新调 addRowWarning,会自动渲染绿色"已核查"行
+            var pn = (dataRow.children[1] && dataRow.children[1].textContent || '').trim();
+            var sp = (dataRow.children[2] && dataRow.children[2].textContent || '').trim();
+            if (typeof addRowWarning === 'function') {
+                addRowWarning(dataRow, {product_name: pn, specification: sp, verified: 1, record_id: recordId});
+            }
+        } else {
+            alert('标记失败：' + (data.error || '未知错误'));
+        }
+    }).catch(function(err) { alert('请求失败：' + err); });
+};
+window.unmarkRecordVerified = function(recordId, dataRow) {
+    fetch('/api/v1/shipping-orders/records/' + recordId, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({verified: 0})
+    }).then(function(res) { return res.json(); }).then(function(data) {
+        if (data.success) {
+            dataRow.setAttribute('data-verified', '0');
+            var pn = (dataRow.children[1] && dataRow.children[1].textContent || '').trim();
+            var sp = (dataRow.children[2] && dataRow.children[2].textContent || '').trim();
+            if (typeof addRowWarning === 'function') {
+                addRowWarning(dataRow, {product_name: pn, specification: sp, verified: 0, record_id: recordId});
+            }
+        } else {
+            alert('取消核查失败：' + (data.error || '未知错误'));
+        }
+    }).catch(function(err) { alert('请求失败：' + err); });
+};
 </script>
 
 {% endblock %}

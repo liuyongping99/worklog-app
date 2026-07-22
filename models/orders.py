@@ -304,7 +304,7 @@ class ShippingRecord:
         cursor = conn.cursor()
         fields = []
         values = []
-        for key in ['product_name', 'specification', 'quantity', 'unit', 'remark']:
+        for key in ['product_name', 'specification', 'quantity', 'unit', 'remark', 'verified']:
             if key in data:
                 fields.append(f'{key} = ?')
                 values.append(data[key])
@@ -1021,7 +1021,7 @@ class LoadingOrderRecord:
         cursor = conn.cursor()
         fields = []
         values = []
-        for key in ['product_name', 'specification', 'quantity', 'unit', 'remark']:
+        for key in ['product_name', 'specification', 'quantity', 'unit', 'remark', 'verified']:
             if key in data:
                 fields.append(f'{key} = ?')
                 values.append(data[key])

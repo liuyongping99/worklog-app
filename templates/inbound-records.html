@@ -1086,6 +1086,10 @@ setTimeout(() => {
                         btn.textContent = '✏️';
                         btn.classList.remove('btn-success');
                         btn.classList.add('btn-primary');
+                        // inline 编辑后重渲校验警告(落到明细行下方)
+                        if (typeof addRowWarning === 'function') {
+                            addRowWarning(tr, {product_name: r.product_name, specification: r.specification || ''});
+                        }
                     } else {
                         alert('保存失败：' + (result.error || ''));
                     }
@@ -1205,7 +1209,12 @@ setTimeout(() => {
                 if (data.success) {
                     var tr = btn.closest('tr');
                     var dateGroup = tr.closest('.date-group');
-                    if (tr) tr.remove();
+                    if (tr) {
+                        if (typeof removeRowWarning === 'function') removeRowWarning(tr);
+                        tr.remove();
+                        // dataRow 已移除,validateAllRows 结果变了,刷新 nav 指示器
+                        if (typeof updateNavIndicator === 'function') updateNavIndicator();
+                    }
                     if (dateGroup) recalcInboundSummary(dateGroup);
                 } else {
                     alert('删除失败: ' + (data.error || '未知错误'));
@@ -1361,6 +1370,10 @@ setTimeout(() => {
                         btn.classList.remove('btn-success');
                         btn.classList.add('btn-primary');
                         recalcInboundSummary(tr.closest('.date-group'));
+                        // inline 编辑后重渲校验警告(落到明细行下方)
+                        if (typeof addRowWarning === 'function') {
+                            addRowWarning(tr, {product_name: r.product_name, specification: r.specification || ''});
+                        }
                     } else { alert('保存失败：' + (result.error || '')); }
                 });
             } else {

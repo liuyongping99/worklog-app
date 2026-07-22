@@ -153,6 +153,13 @@ def init_db():
         except Exception:
             pass  # 列已存在
 
+    # 迁移：出货/装柜订单明细加 verified 列（用户已核查该明细，0/1）
+    for tbl in ('shipping_records', 'loading_order_records'):
+        try:
+            cursor.execute(f"ALTER TABLE {tbl} ADD COLUMN verified INTEGER NOT NULL DEFAULT 0")
+        except Exception:
+            pass  # 列已存在
+
     # ── shipping_images（出货订单图片） ──
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS shipping_images (
@@ -205,6 +212,7 @@ def init_db():
             remark TEXT DEFAULT '',
             created_at TEXT NOT NULL,
             sort_order INTEGER NOT NULL DEFAULT 0,
+            verified INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (order_pk) REFERENCES loading_orders(id)
         )
     ''')
@@ -272,6 +280,7 @@ def init_db():
             unit TEXT NOT NULL DEFAULT '\u652f',
             remark TEXT DEFAULT '',
             created_at TEXT NOT NULL,
+            verified INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (order_pk) REFERENCES shipping_orders(id)
         )
     ''')

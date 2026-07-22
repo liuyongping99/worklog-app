@@ -70,12 +70,108 @@
     .op-menu-item:hover { background: #f8f9fa; }
     .op-menu-logout { color: #d63031; }
     .op-menu-logout:hover { background: #fff5f5; }
+
+    /* ── AI 校验警告行(明细行下方的黄色块) ─────────────────── */
+    .record-warn-row > td { padding: 0 !important; }
+    .record-warn-head {
+        padding: 0.35rem 0.6rem;
+        background: #fff3cd; border: 1px solid #ffc107; border-bottom: none;
+        border-radius: 4px 4px 0 0;
+        color: #856404; font-size: 0.85rem; font-weight: 600;
+    }
+    .record-warn-item {
+        padding: 0.3rem 0.6rem 0.3rem 1.6rem;
+        background: #fffbe6; border: 1px solid #ffeeba; border-top: none;
+        color: #856404; font-size: 0.8rem; line-height: 1.4;
+        position: relative;
+    }
+    .record-warn-item::before {
+        content: '•';
+        position: absolute; left: 1rem; top: 0.3rem;
+        color: #856404;
+    }
+    .record-warn-tail {
+        border: 1px solid #ffc107; border-top: none;
+        border-radius: 0 0 4px 4px;
+        height: 0.3rem; background: #fffbe6;
+    }
+    /* 窄屏(≤768px)适配:警告块跟随表格滚动,不溢出 */
+    @media (max-width: 768px) {
+        .record-warn-head { font-size: 0.78rem; padding: 0.3rem 0.5rem; }
+        .record-warn-item { font-size: 0.75rem; padding: 0.25rem 0.5rem 0.25rem 1.4rem; line-height: 1.35; }
+        .record-warn-item::before { left: 0.7rem; top: 0.25rem; }
+        .record-warn-tail { height: 0.25rem; }
+    }
+
+    /* ── "已核查"按钮 + 已核查状态行 ───────────────────── */
+    .record-warn-head {
+        display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+    }
+    .record-warn-verify-btn {
+        flex-shrink: 0;
+        background: #d4edda; color: #155724;
+        border: 1px solid #c3e6cb; border-radius: 4px;
+        padding: 0.25rem 0.7rem; font-size: 0.8rem;
+        cursor: pointer; font-weight: 600;
+        transition: background 0.15s;
+    }
+    .record-warn-verify-btn:hover { background: #c3e6cb; }
+    .record-warn-verify-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .record-verified-row .record-warn-head,
+    .record-verified-head {
+        padding: 0.35rem 0.6rem;
+        background: #d4edda; border: 1px solid #c3e6cb;
+        border-radius: 4px;
+        color: #155724; font-size: 0.85rem; font-weight: 600;
+    }
+    .record-verified-actions {
+        padding: 0.3rem 0.6rem;
+        background: #f1f9f3; border: 1px solid #c3e6cb;
+        border-top: none; border-radius: 0 0 4px 4px;
+        text-align: right;
+    }
+    .record-verified-unverify {
+        color: #856404; font-size: 0.78rem;
+        text-decoration: underline; cursor: pointer;
+    }
+    .record-verified-unverify:hover { color: #533f03; }
+
+    @media (max-width: 768px) {
+        .record-warn-verify-btn { font-size: 0.75rem; padding: 0.2rem 0.5rem; }
+        .record-verified-head { font-size: 0.78rem; padding: 0.3rem 0.5rem; }
+        .record-verified-actions { padding: 0.25rem 0.5rem; }
+    }
+
+    /* ── Nav 校验状态指示器 ─────────────────────── */
+    .nav-warn-indicator {
+        display: inline-flex; align-items: center; gap: 0.3rem;
+        padding: 0.25rem 0.65rem;
+        margin-left: 0.75rem;
+        background: #fff3cd;
+        border: 1px solid #ffc107;
+        color: #856404;
+        border-radius: 12px;
+        font-size: 0.82rem;
+        font-weight: 600;
+        cursor: help;
+        transition: background 0.2s;
+    }
+    .nav-warn-indicator:hover { background: #ffeeba; }
+    .nav-warn-indicator .nav-warn-count {
+        background: #f0ad4e; color: #fff;
+        padding: 0 0.4rem; border-radius: 8px;
+        font-size: 0.78rem; min-width: 1.4rem; text-align: center;
+    }
 </style>
 </head>
 <body>
 
 <nav class="navbar">
     <a href="/" class="navbar-brand">📋 丰源工作台</a>
+    <span id="validationStatusIndicator" class="nav-warn-indicator" style="display:none;" title="本页无明细需核查">
+        ⚠️ <span class="nav-warn-count" id="navWarnCount">0</span> 条需核查
+    </span>
     <button class="nav-arrow nav-arrow-left" onclick="navScroll(-1)" title="向前">◀</button>
     <div class="nav-container">
         <ul class="nav-links">
@@ -227,6 +323,28 @@
 
 
 <script src="{{ url_for('static', filename='js/common.js') }}"></script>
+<script>
+// Nav 校验状态指示器:扫当前页面所有 .record-table 行,有 N 条需核查就显示 "⚠️ N 条需核查"
+// 无 .record-table 或 0 条需核查 → 隐藏
+function updateNavIndicator() {
+    var el = document.getElementById('validationStatusIndicator');
+    var countEl = document.getElementById('navWarnCount');
+    if (!el || !countEl) return;
+    if (typeof validateAllRows !== 'function') { el.style.display = 'none'; return; }
+    var summary = validateAllRows();
+    if (summary.withWarnings > 0) {
+        el.style.display = 'inline-flex';
+        el.title = '本页有 ' + summary.withWarnings + ' 行商品需核查(共 ' + summary.total + ' 行)';
+        countEl.textContent = summary.withWarnings;
+    } else {
+        el.style.display = 'none';
+    }
+}
+document.addEventListener('DOMContentLoaded', function() {
+    // 延迟一帧调用,确保其他 DOMContentLoaded 监听器(添加警告行)先跑完
+    setTimeout(updateNavIndicator, 0);
+});
+</script>
 </body>
 </html>
 
