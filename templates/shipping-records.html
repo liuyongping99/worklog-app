@@ -1261,11 +1261,20 @@ function bindEditDeleteButtons() {
                     }
                 }).catch(function(err) { hideBtnLoading(btn); alert('请求失败：' + err); });
             } else {
-                // 剥离可能前缀的徽章字符 ✓ ⚠ ✗(行首匹配,避免污染 input value 后保存到 product_name)
-                var nameForEdit = tds[1].textContent.replace(/^[✓⚠✗]\s*/, '').trim();
                 // 保存现有徽章 HTML 到 tr.dataset,编辑保存后能恢复
                 var _badgeEl = tds[1].querySelector('.match-badge');
                 tr.dataset.matchBadgeHtml = _badgeEl ? _badgeEl.outerHTML : '';
+                // 读取 product_name:若有徽章则克隆单元格剔除徽章后再读 textContent,
+                // 避免误删产品名中合法的首字符(如 "⚠ 危险品标签纸")
+                var nameForEdit;
+                if (_badgeEl) {
+                    var clonedCell = tds[1].cloneNode(true);
+                    var clonedBadge = clonedCell.querySelector('.match-badge');
+                    if (clonedBadge) clonedBadge.remove();
+                    nameForEdit = clonedCell.textContent.trim();
+                } else {
+                    nameForEdit = tds[1].textContent.trim();
+                }
                 var vals = [nameForEdit, tds[2].textContent, tds[3].textContent, tds[4].textContent.trim(), tds[5].textContent];
                 tds[1].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:100px;" value="' + escAttr(vals[0]) + '">';
                 tds[2].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:80px;" value="' + escAttr(vals[1]) + '">';
