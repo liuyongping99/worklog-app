@@ -87,17 +87,32 @@ def loading_orders():
     order_images = LoadingOrderImage.get_all_by_orders(
         order_ids=[g['order_pk'] for g in groups]
     )
-    # record_pk -> 该 record 的合并图片区(订单共享 + record 专属,统一排序)
-    record_images = {}
+    # 按 source 拆分:非 AI(商品行下方图区) + AI(商品行上方 AI 图区)
+    # get_all_by_orders 返回"订单级 + record 级"全部图;这里只要订单级(record_pk IS NULL)
+    order_non_ai = {}
+    ai_images = {}
+    for oid, imgs in order_images.items():
+        for img in imgs:
+            if img.get('record_pk') is not None:
+                continue  # record 级图由下面 get_by_record 循环补,避免重复
+            target = ai_images if img.get('source') == 'ai' else order_non_ai
+            target.setdefault(oid, []).append(img)
+    # 合并 record 级图
     for grp in groups:
         for rec in grp.get('records', []):
-            record_images[rec['id']] = LoadingOrderImage.get_combined_for_record(grp['order_pk'], rec['id'])
+            for img in LoadingOrderImage.get_by_record(rec['id']):
+                target = ai_images if img.get('source') == 'ai' else order_non_ai
+                target.setdefault(grp['order_pk'], []).append(img)
+    for oid in order_non_ai:
+        order_non_ai[oid].sort(key=lambda x: (x.get('sort_order', 0), x.get('id', 0)))
+    for oid in ai_images:
+        ai_images[oid].sort(key=lambda x: (x.get('sort_order', 0), x.get('id', 0)))
     current_img_cols = request.cookies.get('loadingImgCols', '3')
     return render_template(
         'loading-orders.html',
         groups=groups,
-        order_images=order_images,
-        record_images=record_images,
+        order_images=order_non_ai,
+        ai_images=ai_images,
         current_img_cols=current_img_cols,
         today=date.today().strftime('%Y-%m-%d'),
         start_date=start_date,

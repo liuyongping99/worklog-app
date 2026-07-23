@@ -137,10 +137,30 @@
     }
     .record-verified-unverify:hover { color: #533f03; }
 
+    /* 商品行右侧"已核查"切换按钮(警告折叠后出现,点击可恢复警告) */
+    .record-verified-toggle {
+        background: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+        border-radius: 4px;
+        padding: 0.15rem 0.4rem;
+        font-size: 0.7rem;
+        cursor: pointer;
+        font-weight: 600;
+        white-space: nowrap;
+        margin-left: 0.2rem;
+        transition: background 0.15s, border-color 0.15s;
+    }
+    .record-verified-toggle:hover {
+        background: #c3e6cb;
+        border-color: #8fceaa;
+    }
+
     @media (max-width: 768px) {
         .record-warn-verify-btn { font-size: 0.75rem; padding: 0.2rem 0.5rem; }
         .record-verified-head { font-size: 0.78rem; padding: 0.3rem 0.5rem; }
         .record-verified-actions { padding: 0.25rem 0.5rem; }
+        .record-verified-toggle { font-size: 0.65rem; padding: 0.1rem 0.35rem; }
     }
 
     /* ── 商品行图片缩略图 + hover tooltip ───────────────────── */

@@ -43,14 +43,33 @@ def shipping_records():
         start_date = start.isoformat()
         end_date = end.isoformat()
     groups = ShippingRecord.get_groups(start_date, end_date)
-    # order_pk -> 图片列表(含订单级共享 + 各 record 专属)
+    # order_pk -> 图片字典,按 source 拆分为:
+    #   order_non_ai: 订单级图 + record 级图(非 AI,展示在"商品行下方"整体图区)
+    #   ai_images:     订单级图 + record 级图(AI 识别图,展示在"商品行上方"AI 图区)
     order_ids = [g['id'] for g in groups]
-    order_images = {oid: ShippingImage.get_by_order(oid) for oid in order_ids}
-    # record_pk -> 该 record 的合并图片区(订单共享 + record 专属,统一排序)
-    record_images = {}
+    order_non_ai = {}  # 订单标题区(商品行下方)显示的图:仅非 AI
+    ai_images = {}     # AI 识别图区(商品行上方)显示
+    # ShippingImage.get_by_order 返回"订单级 + record 级"全部图;
+    # 这里只需要订单级(record_pk IS NULL),record 级的从下面 get_by_record 循环补
+    for oid in order_ids:
+        order_only = [img for img in ShippingImage.get_by_order(oid) if img.get('record_pk') is None]
+        non_ai = [img for img in order_only if img.get('source') != 'ai']
+        ai = [img for img in order_only if img.get('source') == 'ai']
+        if non_ai: order_non_ai[oid] = non_ai
+        if ai: ai_images[oid] = ai
+    # 把每个订单的所有 record 级图也按 source 分到上面两个 dict
     for grp in groups:
+        all_record_imgs = []
         for rec in grp.get('records', []):
-            record_images[rec['id']] = ShippingImage.get_combined_for_record(grp['id'], rec['id'])
+            all_record_imgs.extend(ShippingImage.get_by_record(rec['id']))
+        for img in all_record_imgs:
+            target = ai_images if img.get('source') == 'ai' else order_non_ai
+            target.setdefault(grp['id'], []).append(img)
+    # 按 sort_order + id 排
+    for oid in order_non_ai:
+        order_non_ai[oid].sort(key=lambda x: (x.get('sort_order', 0), x.get('id', 0)))
+    for oid in ai_images:
+        ai_images[oid].sort(key=lambda x: (x.get('sort_order', 0), x.get('id', 0)))
 
     units = ProductUnit.get_all()
     unit_list = [{
@@ -118,8 +137,8 @@ def shipping_records():
     return render_template(
         'shipping-records.html',
         groups=groups,
-        order_images=order_images,
-        record_images=record_images,
+        order_images=order_non_ai,  # 模板里变量名仍叫 order_images,但内容已剔 AI
+        ai_images=ai_images,
         page_title='出货记录',
         today=today,
         start_date=start_date,

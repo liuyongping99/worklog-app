@@ -157,15 +157,38 @@
 </div>
 
 <script>
-// ── 图片上传弹框（共享）──
+// ── 图片上传弹框(共享)──
+// 目标概念:{type: 'order'|'record', pk: int, orderPk: int}
+//   - type='order':  pk 即 order_pk,URL = IMAGE_API/{pk}/images,回调 onImageUploaded
+//   - type='record': pk 是 record_pk,URL = IMAGE_API/records/{pk}/images,回调 recordImageUploaded
+// 这样同一个弹框既支持订单级(老路径)又支持商品级(新路径)。
 var IMAGE_API = '{{ image_api }}';
-var currentImageOrderPk = null;
+var currentUploadTarget = null;  // null | {type, pk, orderPk}
+var currentImageOrderPk = null;  // 向后兼容:派生于 currentUploadTarget(type='order' 时)
 var pasteActive = false;
 var pendingFile = null;
 var uploadImageRotation = 0;
 
+function _setTarget(type, pk, orderPk) {
+    currentUploadTarget = {type: type, pk: pk, orderPk: orderPk};
+    currentImageOrderPk = (type === 'order') ? pk : null;  // 兼容旧全局
+}
+
 window.openImageModal = function(orderPk) {
-    currentImageOrderPk = orderPk;
+    _setTarget('order', orderPk, orderPk);
+    pasteActive = false;
+    pendingFile = null;
+    uploadImageRotation = 0;
+    document.getElementById('imageModal').classList.add('show');
+    document.getElementById('pasteBox').classList.remove('active');
+    clearPreview();
+};
+
+// 商品行(record)级上传入口
+// recordPk:要关联的明细行主键
+// orderPk:  所在订单的主键(后端 INSERT 需要)
+window.openImageModalForRecord = function(recordPk, orderPk) {
+    _setTarget('record', recordPk, orderPk);
     pasteActive = false;
     pendingFile = null;
     uploadImageRotation = 0;
@@ -175,6 +198,7 @@ window.openImageModal = function(orderPk) {
 };
 
 window.closeImageModal = function() {
+    currentUploadTarget = null;
     currentImageOrderPk = null;
     pasteActive = false;
     pendingFile = null;
@@ -193,7 +217,8 @@ window.activatePaste = function() {
 
 // 全局粘贴：仅当弹框打开且已激活粘贴时才拦截
 document.addEventListener('paste', function(e) {
-    if (!pasteActive || !currentImageOrderPk) return;
+    // 用 currentUploadTarget(同时支持 order / record 两种模式)做守卫
+    if (!pasteActive || !currentUploadTarget) return;
     var items = e.clipboardData.items;
     for (var i = 0; i < items.length; i++) {
         if (items[i].type.indexOf('image/') === 0) {
@@ -204,7 +229,8 @@ document.addEventListener('paste', function(e) {
 });
 
 window.handleFileSelect = function(files) {
-    if (!currentImageOrderPk || !files || files.length === 0) return;
+    // 同样改用 currentUploadTarget(支持 record 模式)
+    if (!currentUploadTarget || !files || files.length === 0) return;
     showPreview(files[0]);
 };
 
@@ -273,18 +299,35 @@ function getRotatedImageFile(file, rotation) {
 }
 
 window.confirmUpload = function() {
-    if (!pendingFile || !currentImageOrderPk) { alert('请先选择图片'); return; }
-    var savedOrderPk = currentImageOrderPk;
+    if (!pendingFile || !currentUploadTarget) { alert('请先选择图片'); return; }
+    var savedTarget = currentUploadTarget;
+    // 按 target.type 拼 URL:
+    //   'order'  → IMAGE_API + '/<order_pk>/images'
+    //   'record' → IMAGE_API + '/records/<record_pk>/images'
+    var url = savedTarget.type === 'record'
+        ? IMAGE_API + '/records/' + savedTarget.pk + '/images'
+        : IMAGE_API + '/' + savedTarget.pk + '/images';
     getRotatedImageFile(pendingFile, uploadImageRotation).then(function(fileToUpload) {
         var formData = new FormData();
         formData.append('image', fileToUpload);
-        return fetch(IMAGE_API + '/' + savedOrderPk + '/images', { method: 'POST', body: formData });
+        return fetch(url, { method: 'POST', body: formData });
     }).then(function(res) { return res.json(); })
     .then(function(data) {
         if (data.success) {
             closeImageModal();
-            if (typeof onImageUploaded === 'function') onImageUploaded(data, savedOrderPk);
-            else location.reload();
+            // 按 type 分发回调,新逻辑(record 级)走新回调,旧逻辑(订单级)走老回调
+            if (savedTarget.type === 'record') {
+                if (typeof window.recordImageUploaded === 'function') {
+                    window.recordImageUploaded(data, savedTarget.pk, savedTarget.orderPk);
+                } else if (typeof onImageUploaded === 'function') {
+                    onImageUploaded(data, savedTarget.orderPk);
+                } else {
+                    location.reload();
+                }
+            } else {
+                if (typeof onImageUploaded === 'function') onImageUploaded(data, savedTarget.pk);
+                else location.reload();
+            }
         } else {
             alert('上传失败：' + (data.error || '未知错误'));
         }

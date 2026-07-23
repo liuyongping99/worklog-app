@@ -140,20 +140,28 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // ── 事件代理:已核查按钮点击(动态元素) ──
 // .record-warn-verify-btn   → window.markRecordVerified(recordId, dataRow)
-// .record-verified-unverify → window.unmarkRecordVerified(recordId, dataRow)
+// .record-verified-unverify → window.unmarkRecordVerified(recordId, dataRow)  [旧绿色行,已废弃但保留兼容]
+// .record-verified-toggle   → window.unmarkRecordVerified(recordId, dataRow)  [新折叠模式按钮,在数据行上]
 // 事件代理避免每次 addRowWarning 重新绑定
 function bindRowWarningClickHandler() {
     document.addEventListener('click', function(e) {
-        var btn = e.target.closest('.record-warn-verify-btn, .record-verified-unverify');
+        var btn = e.target.closest('.record-warn-verify-btn, .record-verified-unverify, .record-verified-toggle');
         if (!btn) return;
         e.preventDefault();
         var recordId = btn.getAttribute('data-record-id');
-        var warnRow = btn.closest('tr');
-        var dataRow = warnRow ? warnRow.previousElementSibling : null;
+        // .record-verified-toggle 在数据行操作 cell 上,tr 本身就是 dataRow
+        // .record-warn-verify-btn / .record-verified-unverify 在警告行上,dataRow = previousElementSibling
+        var dataRow;
+        if (btn.classList.contains('record-verified-toggle')) {
+            dataRow = btn.closest('tr');
+        } else {
+            var warnRow = btn.closest('tr');
+            dataRow = warnRow ? warnRow.previousElementSibling : null;
+        }
         if (!recordId || !dataRow) return;
         if (btn.classList.contains('record-warn-verify-btn') && typeof window.markRecordVerified === 'function') {
             window.markRecordVerified(recordId, dataRow);
-        } else if (btn.classList.contains('record-verified-unverify') && typeof window.unmarkRecordVerified === 'function') {
+        } else if ((btn.classList.contains('record-verified-unverify') || btn.classList.contains('record-verified-toggle')) && typeof window.unmarkRecordVerified === 'function') {
             window.unmarkRecordVerified(recordId, dataRow);
         }
     });
@@ -228,74 +236,92 @@ function renderAiResults(items) {
 // 在订单明细行的 tr 下方插入"校验警告"行(独立 tr,跨整行宽度)。
 // 这是新位置:不再在 AI 弹框内渲染,而是落到明细表里,方便查看。
 // 行为:
-//   1) 订单锁定(is_locked=1)时跳过,不显示
-//   2) item.verified=1 → 渲染绿色"已核查"状态行(右侧"取消核查"可切换)
-//   3) item.verified=0 且 getItemWarnings 返回空 → 不渲染
-//   4) item.verified=0 且有警告 → 渲染黄色警告行(右侧"已核查"按钮可切换)
+//   1) 订单锁定(is_locked=1)时清空警告行 + 移除右侧 toggle,不渲染
+//   2) item.verified=1 → 折叠警告行(不渲染),在数据行右侧加 .record-verified-toggle
+//   3) item.verified=0 且 getItemWarnings 返回空 → 清空警告行,移除 toggle
+//   4) item.verified=0 且有警告 → 渲染黄色警告行(右侧"已核查"按钮可切换),移除 toggle
 //   5) item.record_id 用于切换时的回调 (window.markRecordVerified / unmarkRecordVerified)
 function addRowWarning(targetTr, item) {
     if (!targetTr || !item || typeof getItemWarnings !== 'function') return;
-    if (typeof isOrderLocked === 'function' && isOrderLocked(targetTr)) return;
-    // 1) 清理已有的警告行 / 已核查行(都是 .record-warn-row 类)
-    var sib = targetTr.nextElementSibling;
-    while (sib && sib.classList && sib.classList.contains('record-warn-row')) {
-        var toRemove = sib;
-        sib = sib.nextElementSibling;
-        toRemove.remove();
-    }
-    var colSpan = targetTr.children.length || 8;
     var recordId = item.record_id || item.id || null;
-    var recordIdAttr = recordId ? ' data-record-id="' + escHtml(String(recordId)) + '"' : '';
+    // 订单锁定:清掉警告行 + 右侧 toggle,不渲染
+    if (typeof isOrderLocked === 'function' && isOrderLocked(targetTr)) {
+        removeRowWarning(targetTr);
+        removeVerifiedToggle(targetTr);
+        if (typeof updateNavIndicator === 'function') updateNavIndicator();
+        return;
+    }
+    // 1) 清理已有的警告行(都是 .record-warn-row 类)
+    removeRowWarning(targetTr);
+    // 2) 总是清理右侧的 toggle 按钮(下面按需再加)
+    removeVerifiedToggle(targetTr);
+
+    var colSpan = targetTr.children.length || 8;
 
     if (item.verified) {
-        // ── 状态:已核查 ── 绿色状态行
-        var verifiedTr = document.createElement('tr');
-        verifiedTr.className = 'record-warn-row record-verified-row';
-        verifiedTr.setAttribute('data-state', 'verified');
-        var verifiedTd = document.createElement('td');
-        verifiedTd.colSpan = colSpan;
-        verifiedTd.style.padding = '0';
-        var headV = '<div class="record-verified-head">✅ 已核查 — 此条明细的警告已确认</div>';
-        var actionV = recordId
-            ? '<div class="record-verified-actions"><a href="javascript:void(0)" class="record-verified-unverify" data-record-id="' + escHtml(String(recordId)) + '">取消核查</a></div>'
-            : '';
-        verifiedTd.innerHTML = headV + actionV;
-        verifiedTr.appendChild(verifiedTd);
-        if (targetTr.nextSibling) {
-            targetTr.parentNode.insertBefore(verifiedTr, targetTr.nextSibling);
-        } else {
-            targetTr.parentNode.appendChild(verifiedTr);
-        }
+        // ── 状态:已核查 ── 警告区域折叠,在数据行右侧加"已核查"切换按钮
+        if (recordId) addVerifiedToggle(targetTr, recordId);
+        // nav 指示器:verified 行不计入 withWarnings
+        if (typeof updateNavIndicator === 'function') updateNavIndicator();
+        return;
+    }
+    // ── 状态:未核查 ── 警告行(如有)
+    var warnings = getItemWarnings(item);
+    if (!warnings.length) {
+        if (typeof updateNavIndicator === 'function') updateNavIndicator();
+        return;
+    }
+    var warnTr = document.createElement('tr');
+    warnTr.className = 'record-warn-row';
+    warnTr.setAttribute('data-state', 'warnings');
+    var warnTd = document.createElement('td');
+    warnTd.colSpan = colSpan;
+    warnTd.style.padding = '0';
+    var head = '<div class="record-warn-head">' +
+               '<span>⚠️ 检测到 ' + warnings.length + ' 项需核查</span>' +
+               (recordId
+                   ? '<button type="button" class="record-warn-verify-btn" data-record-id="' + escHtml(String(recordId)) + '">✓ 已核查</button>'
+                   : '') +
+               '</div>';
+    var body = warnings.map(function(w){
+        return '<div class="record-warn-item">' + escHtml(w) + '</div>';
+    }).join('');
+    var tail = '<div class="record-warn-tail"></div>';
+    warnTd.innerHTML = head + body + tail;
+    warnTr.appendChild(warnTd);
+    if (targetTr.nextSibling) {
+        targetTr.parentNode.insertBefore(warnTr, targetTr.nextSibling);
     } else {
-        // ── 状态:未核查 ── 警告 + 按钮(如有)
-        var warnings = getItemWarnings(item);
-        if (!warnings.length) return;
-        var warnTr = document.createElement('tr');
-        warnTr.className = 'record-warn-row';
-        warnTr.setAttribute('data-state', 'warnings');
-        var warnTd = document.createElement('td');
-        warnTd.colSpan = colSpan;
-        warnTd.style.padding = '0';
-        var head = '<div class="record-warn-head">' +
-                   '<span>⚠️ 检测到 ' + warnings.length + ' 项需核查</span>' +
-                   (recordId
-                       ? '<button type="button" class="record-warn-verify-btn" data-record-id="' + escHtml(String(recordId)) + '">✓ 已核查</button>'
-                       : '') +
-                   '</div>';
-        var body = warnings.map(function(w){
-            return '<div class="record-warn-item">' + escHtml(w) + '</div>';
-        }).join('');
-        var tail = '<div class="record-warn-tail"></div>';
-        warnTd.innerHTML = head + body + tail;
-        warnTr.appendChild(warnTd);
-        if (targetTr.nextSibling) {
-            targetTr.parentNode.insertBefore(warnTr, targetTr.nextSibling);
-        } else {
-            targetTr.parentNode.appendChild(warnTr);
-        }
+        targetTr.parentNode.appendChild(warnTr);
     }
     // 重渲 nav 校验状态指示器
     if (typeof updateNavIndicator === 'function') updateNavIndicator();
+}
+
+// 在数据行最右侧(操作 cell 末尾)追加"✅ 已核查"小按钮
+// 点击 → window.unmarkRecordVerified(recordId, dataRow) → 取消核查 + 恢复警告行
+function addVerifiedToggle(dataRow, recordId) {
+    if (!dataRow || !recordId) return;
+    var opCell = dataRow.children[dataRow.children.length - 1];
+    if (!opCell) return;
+    // 已有则不重复加(防重复触发)
+    if (opCell.querySelector('.record-verified-toggle')) return;
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn btn-sm record-verified-toggle lock-hide';
+    btn.setAttribute('data-record-id', String(recordId));
+    btn.title = '已核查 — 点击取消核查,恢复警告';
+    btn.textContent = '✅ 已核查';
+    opCell.appendChild(btn);
+}
+
+// 移除数据行上的 .record-verified-toggle 按钮
+function removeVerifiedToggle(dataRow) {
+    if (!dataRow) return;
+    var opCell = dataRow.children[dataRow.children.length - 1];
+    if (!opCell) return;
+    var btn = opCell.querySelector('.record-verified-toggle');
+    if (btn) btn.remove();
 }
 
 // 移除明细行下方紧邻的 .record-warn-row(由 addRowWarning 添加的警告行)

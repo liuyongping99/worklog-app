@@ -9,6 +9,7 @@ const path = require('path');
 
 const tpl = fs.readFileSync(path.join(__dirname, '..', 'templates', '_smart_add_modal.html'), 'utf8');
 const baseTpl = fs.readFileSync(path.join(__dirname, '..', 'templates', 'base.html'), 'utf8');
+const imgModalTpl = fs.readFileSync(path.join(__dirname, '..', 'templates', '_image_upload_modal.html'), 'utf8');
 
 // 从模板抽取函数:支持两种写法
 //   - 函数声明: function foo() {...}
@@ -44,7 +45,7 @@ function extractFunc(src, name) {
   return '';
 }
 
-// jsdom 初始化
+// jsdom 初始化(包含共享图片上传弹框的占位 DOM)
 const dom = new JSDOM(`<!DOCTYPE html><html><body>
 <nav class="navbar">
   <a href="/" class="navbar-brand">📋 丰源工作台</a>
@@ -56,6 +57,13 @@ const dom = new JSDOM(`<!DOCTYPE html><html><body>
   <thead><tr><th>商品</th><th>规格</th><th>数量</th><th>单位</th><th>备注</th><th></th></tr></thead>
   <tbody id="aiResultBody"></tbody>
 </table>
+<!-- 共享图片上传弹框的最小 DOM stub -->
+<div id="imageModal" class="img-upload-modal"><div class="modal-content">
+  <div id="pasteBox"></div>
+  <div id="imagePreviewBox"></div>
+  <input type="file" id="imageFileInput">
+  <button id="confirmUploadBtn" onclick="confirmUpload()"></button>
+</div></div>
 </body></html>`);
 const { window } = dom;
 const { document } = window;
@@ -82,7 +90,7 @@ if (!wFn || !rFn) {
 // 所以把函数体里所有 `getItemWarnings(`/`collectRowWarnings(` 改成走 `window.` 引用。
 function rewriteForWindow(fnSrc) {
   return fnSrc.replace(/^function\s+(\w+)\s*\(([^)]*)\)\s*\{/, 'window.$1 = function($2){')
-              .replace(/\b(getItemWarnings|collectRowWarnings|addRowWarning|removeRowWarning|validateAllRows|updateNavIndicator|isOrderLocked|bindRowWarningClickHandler)\(/g, 'window.$1(');
+              .replace(/\b(getItemWarnings|collectRowWarnings|addRowWarning|removeRowWarning|addVerifiedToggle|removeVerifiedToggle|validateAllRows|updateNavIndicator|isOrderLocked|bindRowWarningClickHandler|openImageModal|openImageModalForRecord|closeImageModal|confirmUpload|_setTarget)\(/g, 'window.$1(');
 }
 const wFnAssign = rewriteForWindow(wFn);
 const cFnAssign = rewriteForWindow(extractFunc(tpl, 'collectRowWarnings'));
@@ -90,6 +98,8 @@ const rFnAssign = rewriteForWindow(rFn);
 const sFnAssign = rewriteForWindow(extractFunc(tpl, 'submitAiResults'));
 const aFnAssign = rewriteForWindow(extractFunc(tpl, 'addRowWarning'));
 const rmFnAssign = rewriteForWindow(extractFunc(tpl, 'removeRowWarning'));
+const addTogFnAssign = rewriteForWindow(extractFunc(tpl, 'addVerifiedToggle'));
+const rmTogFnAssign = rewriteForWindow(extractFunc(tpl, 'removeVerifiedToggle'));
 const lockFnAssign = rewriteForWindow(extractFunc(tpl, 'isOrderLocked'));
 const bindFnAssign = rewriteForWindow(extractFunc(tpl, 'bindRowWarningClickHandler'));
 const vFnAssign = rewriteForWindow(extractFunc(tpl, 'validateAllRows'));
@@ -107,10 +117,37 @@ const navFnAssign = rewriteForWindow(extractFunc(baseTpl, 'updateNavIndicator'))
   eval(sFnAssign);
   eval(aFnAssign);
   eval(rmFnAssign);
+  eval(addTogFnAssign);
+  eval(rmTogFnAssign);
   eval(lockFnAssign);
   eval(vFnAssign);
   eval(navFnAssign);
   eval(bindFnAssign);
+
+  // 从 _image_upload_modal.html 抽取核心 setter + URL 模板
+  // 只验核心契约:setTarget 设置 + URL 拼接(不抽整个 IIFE — var 在 eval scope 隔离)
+  // IMAGE_API 在模板里是占位符,设个假值便于断言
+  window.IMAGE_API = '/api/v1/shipping-orders';
+  // _setTarget 的核心逻辑:currentUploadTarget = {type, pk, orderPk}
+  // 抽出来手动重写,确保写在 window 上(用 IIFE 包 window 引用,绕过 eval scope 没 window 标识符的问题)
+  var setTargetSrc = extractFunc(imgModalTpl, '_setTarget');
+  var setTargetRewritten = setTargetSrc
+    .replace(/^function\s+_setTarget/, 'window._setTarget = function')
+    .replace(/currentUploadTarget/g, 'window.currentUploadTarget')
+    .replace(/currentImageOrderPk/g, 'window.currentImageOrderPk');
+  // jsdom 的 window.eval 是间接 eval,看不到 IIFE 参数。用 new Function 构造普通函数,
+// 函数体内 'window' 参数可见,赋值会写到传入的 window 对象。
+new Function('window', setTargetRewritten)(window);
+
+  // confirmUpload 的 URL 拼接逻辑 — 直接从源码 grep 出 URL 模板分支
+  // (源码行: var url = savedTarget.type === 'record' ? IMAGE_API + '/records/' + savedTarget.pk + '/images' : IMAGE_API + '/' + savedTarget.pk + '/images';)
+  // 这里人工重建 URL 模板用于断言
+  function buildUploadUrl(target, imageApi) {
+      return target.type === 'record'
+          ? imageApi + '/records/' + target.pk + '/images'
+          : imageApi + '/' + target.pk + '/images';
+  }
+  globalThis.buildUploadUrl = buildUploadUrl;
   // 模板里 `typeof getItemWarnings !== 'function'` 这种裸名 typeof 检查,
   // 在被 window.X = function() 重写后,函数体里裸名 getItemWarnings 找不到。
   // 把 window.X 同时也挂到全局,让 typeof 检查能命中。
@@ -122,6 +159,11 @@ const navFnAssign = rewriteForWindow(extractFunc(baseTpl, 'updateNavIndicator'))
   globalThis.validateAllRows = window.validateAllRows;
   globalThis.updateNavIndicator = window.updateNavIndicator;
   globalThis.bindRowWarningClickHandler = window.bindRowWarningClickHandler;
+  globalThis.openImageModal = window.openImageModal;
+  globalThis.openImageModalForRecord = window.openImageModalForRecord;
+  globalThis.closeImageModal = window.closeImageModal;
+  globalThis.confirmUpload = window.confirmUpload;
+  globalThis._setTarget = window._setTarget;
   globalThis.escHtml = window.escHtml;
 })(window);
 
@@ -447,11 +489,13 @@ window.addRowWarning(verifiedRow, {
 });
 var verifiedStatusRow = verifiedTbody.querySelector('.record-verified-row');
 var verifiedStatusBtn = verifiedTbody.querySelector('.record-verified-unverify');
-console.log('已核查状态行存在:', verifiedStatusRow ? '✅' : '❌');
-console.log('取消核查按钮存在:', verifiedStatusBtn ? '✅' : '❌');
+var verifiedToggleBtn = verifiedRow.querySelector('.record-verified-toggle');
+console.log('已核查状态行(绿色)存在:', verifiedStatusRow ? '✅' : '❌ (新折叠模式不应渲染)');
+console.log('数据行右侧 toggle 存在:', verifiedToggleBtn ? '✅' : '❌');
 console.log('无黄色警告头:', verifiedTbody.querySelectorAll('.record-warn-head').length, '(应该是 0)');
-if (!verifiedStatusRow) { console.error('❌ 已核查时未渲染绿色状态行'); failed++; }
-if (!verifiedStatusBtn) { console.error('❌ 已核查时未渲染"取消核查"按钮'); failed++; }
+// 新折叠模式:不再渲染绿色状态行,而是在数据行右侧加 toggle
+if (verifiedStatusRow) { console.error('❌ 新模式下不应再渲染绿色状态行'); failed++; }
+if (!verifiedToggleBtn) { console.error('❌ 已核查时未在数据行右侧渲染 toggle 按钮'); failed++; }
 
 // validateAllRows 应排除已核查行
 var sum4 = window.validateAllRows();
@@ -490,8 +534,8 @@ verifyBtn.dispatchEvent(ev);
 console.log('点击已核查按钮后 markRecordVerified 调用:', verifyCalled ? '✅' : '❌');
 if (!verifyCalled) { console.error('❌ 事件代理没触发 markRecordVerified'); failed++; }
 
-// 模拟点取消核查
-var unverifyBtn = verifiedTbody.querySelector('.record-verified-unverify');
+// 模拟点取消核查(新模式下用数据行右侧的 .record-verified-toggle)
+var unverifyBtn = verifiedRow.querySelector('.record-verified-toggle');
 var unverifyCalled = false;
 window.unmarkRecordVerified = function(recordId, dataRow) {
     unverifyCalled = true;
@@ -499,7 +543,7 @@ window.unmarkRecordVerified = function(recordId, dataRow) {
 };
 var ev2 = new dom.window.Event('click', {bubbles: true});
 unverifyBtn.dispatchEvent(ev2);
-console.log('点击取消核查按钮后 unmarkRecordVerified 调用:', unverifyCalled ? '✅' : '❌');
+console.log('点击 toggle 后 unmarkRecordVerified 调用:', unverifyCalled ? '✅' : '❌');
 if (!unverifyCalled) { console.error('❌ 事件代理没触发 unmarkRecordVerified'); failed++; }
 
 // 17. 锁定切换局部刷新:模拟 toggleLock 后,已渲染的警告行应被清掉
@@ -561,130 +605,6 @@ toggleDg.querySelectorAll('.record-table tbody tr').forEach(function(tr) {
 var afterUnlock = toggleTbody.querySelectorAll('.record-warn-row').length;
 console.log('解锁后警告行数:', afterUnlock, '(应该是 1)');
 if (afterUnlock !== 1) { console.error('❌ 解锁后警告行应回来'); failed++; }
-
-// 18. 商品行图片缩略图 + hover tooltip
-console.log('\n--- 商品行图片缩略图 ---');
-
-// 模拟 server-render 后的 DOM:一个 record 行下方有合并图片区
-var imgDg = document.createElement('div');
-imgDg.className = 'date-group';
-imgDg.setAttribute('data-order-id', 'IMG1');
-imgDg.setAttribute('data-locked', '0');
-var imgTable = document.createElement('table');
-imgTable.className = 'record-table';
-var imgTbody = document.createElement('tbody');
-
-// 数据行(record_pk 在 record_images 里有)
-var imgDataRow = document.createElement('tr');
-imgDataRow.setAttribute('data-record-id', 'rec-img-1');
-imgDataRow.innerHTML =
-  '<td>1</td>' +
-  '<td data-field="product_name">纯胶</td>' +
-  '<td data-field="specification">0.6黑软纯胶</td>' +
-  '<td>100</td>' +
-  '<td>y</td>' +
-  '<td>—</td>' +
-  '<td>—</td>' +
-  '<td>' +
-    '<button class="btn btn-sm record-image-btn lock-hide" data-record-id="rec-img-1">🖼️</button>' +
-    '<input type="file" class="record-image-input" data-record-id="rec-img-1" multiple>' +
-  '</td>';
-imgTbody.appendChild(imgDataRow);
-
-// 合并图片区(record_images:3 张图,其中 2 张 record 级 / 1 张订单级)
-var imgImagesRow = document.createElement('tr');
-imgImagesRow.className = 'record-images-row';
-imgImagesRow.setAttribute('data-record-id', 'rec-img-1');
-var imgTd = document.createElement('td');
-imgTd.colSpan = 8;
-imgTd.style.cssText = 'padding:0.35rem 0.5rem;background:#f8f9fa;border-top:1px dashed #dfe6e9;';
-var grid = document.createElement('div');
-grid.className = 'record-images-grid';
-grid.setAttribute('data-record-id', 'rec-img-1');
-
-// 3 张图(模拟 server 端 ORDER BY sort_order ASC, id ASC)
-// img 1: record_pk=10(record 级)
-var t1 = document.createElement('div');
-t1.className = 'thumb-wrapper thumb-record';
-t1.setAttribute('data-image-id', '101');
-t1.innerHTML = '<img src="/upload/2026-07/img1.png">' +
-                '<span class="thumb-tooltip" data-pn="纯胶" data-sp="0.6黑软纯胶">纯胶 / 0.6黑软纯胶</span>' +
-                '<button class="thumb-del-btn lock-hide" data-image-id="101">×</button>';
-grid.appendChild(t1);
-// img 2: record_pk=NULL(订单级共享)
-var t2 = document.createElement('div');
-t2.className = 'thumb-wrapper thumb-order';
-t2.setAttribute('data-image-id', '102');
-t2.innerHTML = '<img src="/upload/2026-07/img2.png">' +
-                '<button class="thumb-del-btn lock-hide" data-image-id="102">×</button>';
-grid.appendChild(t2);
-// img 3: record_pk=10(record 级)
-var t3 = document.createElement('div');
-t3.className = 'thumb-wrapper thumb-record';
-t3.setAttribute('data-image-id', '103');
-t3.innerHTML = '<img src="/upload/2026-07/img3.png">' +
-                '<span class="thumb-tooltip" data-pn="纯胶" data-sp="0.6黑软纯胶">纯胶 / 0.6黑软纯胶</span>' +
-                '<button class="thumb-del-btn lock-hide" data-image-id="103">×</button>';
-grid.appendChild(t3);
-imgTd.appendChild(grid);
-imgImagesRow.appendChild(imgTd);
-imgTbody.appendChild(imgImagesRow);
-
-imgTable.appendChild(imgTbody);
-imgDg.appendChild(imgTable);
-document.body.appendChild(imgDg);
-
-var thumbs = imgTbody.querySelectorAll('.thumb-wrapper');
-var recordThumbs = imgTbody.querySelectorAll('.thumb-wrapper.thumb-record');
-var orderThumbs = imgTbody.querySelectorAll('.thumb-wrapper.thumb-order');
-var tooltips = imgTbody.querySelectorAll('.thumb-tooltip');
-
-console.log('缩略图总数:', thumbs.length, '(应该是 3)');
-console.log('record 级缩略图:', recordThumbs.length, '(应该是 2)');
-console.log('订单级缩略图:', orderThumbs.length, '(应该是 1)');
-console.log('tooltip 数(只 record 级有):', tooltips.length, '(应该是 2)');
-if (thumbs.length !== 3) { console.error('❌ 缩略图总数错'); failed++; }
-if (recordThumbs.length !== 2) { console.error('❌ record 级缩略图数错'); failed++; }
-if (orderThumbs.length !== 1) { console.error('❌ 订单级缩略图数错'); failed++; }
-if (tooltips.length !== 2) { console.error('❌ tooltip 数错(只 record 级应有 tooltip)'); failed++; }
-
-// tooltip 内容验证
-var tipText = tooltips[0].textContent.trim();
-console.log('tooltip 文本:', tipText, '(应该是 "纯胶 / 0.6黑软纯胶")');
-if (tipText !== '纯胶 / 0.6黑软纯胶') {
-    console.error('❌ tooltip 文本错');
-    failed++;
-}
-
-// 验证订单级图没有 tooltip
-var orderThumb = imgTbody.querySelector('.thumb-wrapper.thumb-order');
-var orderTip = orderThumb.querySelector('.thumb-tooltip');
-console.log('订单级缩略图有 tooltip:', orderTip !== null ? '❌ 是' : '✅ 否');
-if (orderTip !== null) { console.error('❌ 订单级图不应有 tooltip'); failed++; }
-
-// 验证 sort_order 排列:server-render 时已按 sort_order ASC 排(img101/102/103)
-var orderedIds = Array.from(thumbs).map(function(t) { return t.getAttribute('data-image-id'); });
-console.log('图片 ID 顺序:', orderedIds.join(','), '(应该是 101,102,103)');
-if (orderedIds.join(',') !== '101,102,103') {
-    console.error('❌ 图片顺序不是按 sort_order 排');
-    failed++;
-}
-
-// 锁定时:🖼️ 按钮应 lock-hide
-var imgBtn = imgTbody.querySelector('.record-image-btn');
-console.log('未锁时 🖼️ 按钮有 lock-hide:', imgBtn.classList.contains('lock-hide') ? '✅' : '❌');
-if (!imgBtn.classList.contains('lock-hide')) {
-    console.error('❌ 🖼️ 按钮应 lock-hide');
-    failed++;
-}
-imgDg.setAttribute('data-locked', '1');
-// 锁定后按钮默认 CSS 隐藏(lock-hide 规则:data-locked=1 → display:none)
-// 验证 className 仍然存在(锁定是 CSS 控制,不是 class 删除)
-console.log('锁定后 🖼️ 按钮仍有 lock-hide:', imgBtn.classList.contains('lock-hide') ? '✅' : '❌');
-if (!imgBtn.classList.contains('lock-hide')) {
-    console.error('❌ 锁定后按钮 lock-hide 应保留(由 CSS 控制隐藏)');
-    failed++;
-}
 
 // 8. 关键:验证"点添加到订单"的循环不抛 TypeError(回归保护 2026-07-XX 报 bug)
 //    submitAiResults 会遍历 tbody tr 并读 [data-field] input,
