@@ -685,6 +685,44 @@ class DeepSeekEngine(BaseOCREngine):
         'OCR 识别的文字如下：\n'
     )
 
+    COMPARE_PROMPT = (
+        '你是出货单核对助手。下面给你两份数据：\n'
+        '1) 从实物商品标签照片 OCR 出来的文字（可能顺序乱、有噪声）。\n'
+        '2) 该订单已录入的明细行列表（每行有 record_id、品名、规格）。\n'
+        '请逐行判断：OCR 文字里是否出现了该明细行的商品（品名为主、规格为辅，'
+        '规格因拍摄可能残缺，不必强求全中）。\n'
+        '对每一行返回一个对象：{"record_id":<原样返回>,"match_status":"green|yellow|red","reason":"简述"}。\n'
+        '  green=文字里明确出现该商品；yellow=部分线索但不确定；red=文字里找不到该商品。\n'
+        '只返回 JSON 数组，不要 markdown 代码块、不要多余解释。\n'
+    )
+
+    def compare_rows(self, ocr_text, rows):
+        """OCR 文字 vs 明细行列表 → 逐行 {record_id, match_status, reason}。
+
+        Args:
+            ocr_text: PaddleOCR 提取的纯文本（多行用 \\n 分隔）。
+            rows: [{'record_id': int, 'product_name': str, 'specification': str}, ...]
+
+        Returns:
+            list[dict] - 每项 {'record_id', 'match_status', 'reason'}
+        """
+        rows_json = json.dumps(
+            [{'record_id': r['record_id'], 'product_name': r.get('product_name', ''),
+              'specification': r.get('specification', '')} for r in rows],
+            ensure_ascii=False)
+        client = openai.OpenAI(api_key=self.API_KEY, base_url=self.BASE_URL)
+        response = client.chat.completions.create(
+            model=self.MODEL,
+            messages=[{'role': 'user', 'content':
+                       self.COMPARE_PROMPT + '\n【OCR文字】\n' + ocr_text +
+                       '\n【明细行】\n' + rows_json}],
+            max_tokens=self.MAX_TOKENS, timeout=self.TIMEOUT)
+        raw = response.choices[0].message.content.strip()
+        raw = re.sub(r'^\s*```[a-zA-Z]*\s*\n?', '', raw)
+        raw = re.sub(r'\n?\s*```\s*$', '', raw).strip()
+        data = json.loads(raw)
+        return data if isinstance(data, list) else data.get('results', [])
+
     def __init__(self):
         self._ocr_engine = PaddleOCREngine()
 

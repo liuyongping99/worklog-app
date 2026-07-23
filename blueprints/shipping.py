@@ -20,7 +20,8 @@ from blueprints._helpers import (
     validate_image_content, check_uploaded_image,
     match_label_to_row,
 )
-from blueprints.ocr_engine import PaddleOCREngine
+from blueprints.ocr_engine import PaddleOCREngine, get_ocr_engine
+from blueprints import _helpers
 
 bp = Blueprint('shipping', __name__)
 
@@ -722,3 +723,70 @@ def shipping_records_ai_recognize():
         if '未安装' in error_msg:
             return jsonify(result), 500
         return jsonify(result), 500
+
+
+# ── 整单 AI 匹配(PaddleOCR 提字 + DeepSeek 逐行比对) ──────
+@bp.route('/api/v1/shipping-orders/<int:order_id>/ai-match', methods=['POST'])
+def api_v1_shipping_orders_ai_match(order_id):
+    """整单 AI 匹配:OCR 该单所有行级图 → DeepSeek 逐行比对 → 回写 match_status。
+
+    Returns:
+        404 - 订单不存在
+        400 - 没有可识别的行级图片
+        200 - {'success': True, 'results': [...], 'summary': 'N 行已核对:G ✓ / Y ⚠ / R ✗'}
+        500 - DeepSeek 调用失败
+    """
+    order = ShippingOrder.get_by_id(order_id)
+    if not order:
+        return jsonify({'success': False, 'error': '订单不存在'}), 404
+
+    # 拉取该单所有明细行(ShippingRecord 没有 get_by_order,内联 SQL 最稳)
+    from models._db import get_db as _get_db
+    conn = _get_db()
+    cur = conn.cursor()
+    cur.execute(
+        'SELECT * FROM shipping_records WHERE order_pk = ? ORDER BY sort_order, id',
+        (order_id,)
+    )
+    records = [dict(r) for r in cur.fetchall()]
+    conn.close()
+
+    # 汇总该单所有行级图片的 OCR 文字
+    paddle = PaddleOCREngine()
+    texts = []
+    for rec in records:
+        for img in ShippingImage.get_by_record(rec['id']):
+            abspath = os.path.join(_helpers.BASE_DIR, 'upload', img['relative_path'])
+            try:
+                with open(abspath, 'rb') as f:
+                    texts.append(paddle.extract_text(f.read()))
+            except Exception:
+                current_app.logger.exception('AI 匹配读图失败: %s', abspath)
+    ocr_text = '\n'.join(t for t in texts if t)
+    if not ocr_text:
+        return jsonify({'success': False, 'error': '没有可识别的行级图片'}), 400
+
+    rows = [{'record_id': r['id'], 'product_name': r['product_name'],
+             'specification': r['specification']} for r in records]
+    try:
+        engine = get_ocr_engine('deepseek')
+        verdicts = engine.compare_rows(ocr_text, rows)
+    except Exception as e:
+        current_app.logger.exception('DeepSeek 比对失败: %s', e)
+        return jsonify({'success': False, 'error': f'AI 比对失败:{type(e).__name__}'}), 500
+
+    _SCORE = {'green': 90.0, 'yellow': 70.0, 'red': 30.0}
+    results = []
+    for v in verdicts:
+        rid = v.get('record_id')
+        status = v.get('match_status', 'red')
+        score = _SCORE.get(status, 30.0)
+        for img in ShippingImage.get_by_record(rid):
+            ShippingImage.set_match(img['id'], status, score)
+        results.append({'record_id': rid, 'match_status': status, 'match_score': score})
+
+    g = sum(1 for r in results if r['match_status'] == 'green')
+    y = sum(1 for r in results if r['match_status'] == 'yellow')
+    rd = sum(1 for r in results if r['match_status'] == 'red')
+    summary = f'{len(results)} 行已核对:{g} ✓ / {y} ⚠ / {rd} ✗'
+    return jsonify({'success': True, 'results': results, 'summary': summary})
