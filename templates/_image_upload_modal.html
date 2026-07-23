@@ -307,6 +307,13 @@ window.confirmUpload = function() {
     var url = savedTarget.type === 'record'
         ? IMAGE_API + '/records/' + savedTarget.pk + '/images'
         : IMAGE_API + '/' + savedTarget.pk + '/images';
+    // ── loading 状态: OCR 跑分需 ~1-3s, 给用户即时反馈避免以为卡死
+    var _confirmBtn = document.querySelector('.preview-actions .btn-confirm');
+    var _origBtnText = _confirmBtn ? _confirmBtn.textContent : '';
+    if (_confirmBtn) { _confirmBtn.disabled = true; _confirmBtn.textContent = '⏳ 识别中...'; }
+    var _restoreBtn = function() {
+        if (_confirmBtn) { _confirmBtn.disabled = false; _confirmBtn.textContent = _origBtnText; }
+    };
     getRotatedImageFile(pendingFile, uploadImageRotation).then(function(fileToUpload) {
         var formData = new FormData();
         formData.append('image', fileToUpload);
@@ -314,6 +321,7 @@ window.confirmUpload = function() {
     }).then(function(res) { return res.json(); })
     .then(function(data) {
         if (data.success) {
+            _restoreBtn();
             closeImageModal();
             // 按 type 分发回调,新逻辑(record 级)走新回调,旧逻辑(订单级)走老回调
             if (savedTarget.type === 'record') {
@@ -329,9 +337,11 @@ window.confirmUpload = function() {
                 else location.reload();
             }
         } else {
+            _restoreBtn();
             alert('上传失败：' + (data.error || '未知错误'));
         }
     }).catch(function(err) {
+        _restoreBtn();
         console.error('图片上传 error:', err);
         alert('图片上传失败：' + (err && err.message ? err.message : err));
     });
