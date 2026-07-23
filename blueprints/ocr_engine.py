@@ -564,6 +564,21 @@ class PaddleOCREngine(BaseOCREngine):
             # 缩放失败就直接用原图
             return image_bytes
 
+    def extract_text(self, image_bytes):
+        """只做 OCR 提取纯文本（换行拼接），供行级/整单匹配复用。"""
+        self._ensure_model()
+        resized = self._resize_if_needed(image_bytes)
+        result = self._ocr.ocr(resized, cls=True)
+        if not result or not result[0]:
+            return ''
+        lines = []
+        for item in result[0]:
+            if item and len(item) >= 2:
+                text = item[1][0]
+                if text and text.strip():
+                    lines.append(text.strip())
+        return '\n'.join(lines)
+
     def recognize(self, image_bytes, filename=''):
         try:
             self._ensure_model()
