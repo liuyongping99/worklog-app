@@ -420,7 +420,7 @@
             </table>
             {% set all_order_imgs = order_images.get(group.id, []) %}
             {% if all_order_imgs %}
-            <div class="order-images-area" data-cols="{{ group.img_cols | default(5) }}" data-order-id="{{ group.id }}">
+            <div class="order-images-area columns-{{ group.img_cols | default(5) }}" data-cols="{{ group.img_cols | default(5) }}" data-order-id="{{ group.id }}">
                 <div style="grid-column: 1 / -1; display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.25rem;">
                     <span style="font-size:0.8rem;color:#888;">显示：</span>
                     <button class="img-col-btn" onclick="setImgCols(this, 1)">1</button>
