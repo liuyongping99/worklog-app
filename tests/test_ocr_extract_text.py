@@ -34,6 +34,15 @@ class ExtractTextTests(unittest.TestCase):
         eng._ocr.ocr = mock.MagicMock(return_value=[[]])
         self.assertEqual(eng.extract_text(b'x'), '')
 
+    def test_ocr_exception_returns_empty(self):
+        """PaddleOCR 抛异常时应被吞掉、记日志并返回空串，不向上传播。"""
+        eng = PaddleOCREngine()
+        eng._ensure_model = mock.MagicMock()
+        eng._resize_if_needed = mock.MagicMock(return_value=b'x')
+        eng._ocr = mock.MagicMock()
+        eng._ocr.ocr = mock.MagicMock(side_effect=RuntimeError('paddle boom'))
+        self.assertEqual(eng.extract_text(b'x'), '')
+
 
 if __name__ == '__main__':
     unittest.main()
