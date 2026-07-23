@@ -67,6 +67,36 @@ class AiMatchEndpointTests(unittest.TestCase):
         imgs = ShippingImage.get_by_record(self.rid)
         self.assertEqual(imgs[0]['match_status'], 'green')
 
+    @mock.patch('blueprints.shipping.PaddleOCREngine')
+    @mock.patch('blueprints.shipping.get_ocr_engine')
+    def test_ai_match_normalizes_off_spec_status(self, mock_get_engine, MockPaddle):
+        """LLM 返回 'GREEN'/'Yellow'/'OK'/'foo' 等不规范值时,端点必须归一为小写并计入 summary。"""
+        MockPaddle.return_value.extract_text.return_value = '硬加面 黑色'
+        fake_ds = mock.MagicMock()
+        fake_ds.compare_rows.return_value = [
+            {'record_id': self.rid, 'match_status': 'GREEN', 'reason': ''},
+            {'record_id': self.rid, 'match_status': 'Yellow', 'reason': ''},
+            {'record_id': self.rid, 'match_status': 'OK', 'reason': ''},
+            {'record_id': self.rid, 'match_status': 'foo', 'reason': ''},
+        ]
+        mock_get_engine.return_value = fake_ds
+
+        resp = self.client.post(f'/api/v1/shipping-orders/{self.oid}/ai-match')
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        statuses = [r['match_status'] for r in body['results']]
+        self.assertEqual(statuses, ['green', 'yellow', 'green', 'red'])
+        # OK→green, foo→red, GREEN→green, Yellow→yellow: 2 ✓ / 1 ⚠ / 1 ✗
+        self.assertIn('4 行已核对', body['summary'])
+        self.assertIn('2 ✓', body['summary'])
+        self.assertIn('1 ⚠', body['summary'])
+        self.assertIn('1 ✗', body['summary'])
+
+        from models import ShippingImage
+        imgs = ShippingImage.get_by_record(self.rid)
+        # 所有 set_match 调用都用规范化值,最后一条是 'red'
+        self.assertIn(imgs[0]['match_status'], {'green', 'yellow', 'red'})
+
 
 if __name__ == '__main__':
     unittest.main()

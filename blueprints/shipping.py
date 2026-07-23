@@ -779,7 +779,12 @@ def api_v1_shipping_orders_ai_match(order_id):
     results = []
     for v in verdicts:
         rid = v.get('record_id')
-        status = v.get('match_status', 'red')
+        raw_status = v.get('match_status', 'red')
+        # Normalize: lowercase + small synonym map (LLMs drift on casing/abbrev)
+        status = {'g': 'green', 'y': 'yellow', 'r': 'red',
+                  'green': 'green', 'yellow': 'yellow', 'red': 'red',
+                  'ok': 'green', 'yes': 'green', 'no': 'red', 'unknown': 'yellow'}.get(
+            str(raw_status).strip().lower(), 'red')
         score = _SCORE.get(status, 30.0)
         for img in ShippingImage.get_by_record(rid):
             ShippingImage.set_match(img['id'], status, score)
