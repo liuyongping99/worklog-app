@@ -198,6 +198,15 @@
             <button type="button" id="dateRangeBtn" style="padding:0.35rem 0.8rem; background:#e8f5e9; color:#00b894; border:1px solid #b2dfdb; border-radius:6px; font-size:0.82rem; cursor:pointer; font-weight:600; display:flex; align-items:center; gap:0.3rem;">⚙️ <span id="dateRangeLabel">{{ start_date }} ~ {{ end_date }}</span></button>
         </div>
     </div>
+    {# ── 徽章图例(行级标签 OCR 匹配) ── #}
+    <div style="display:flex; align-items:center; gap:1rem; padding:0.5rem 0.75rem; background:#f8f9fa; border:1px solid #e9ecef; border-radius:6px; font-size:0.78rem; color:#495057; margin-bottom:0.75rem;">
+        <span style="font-weight:600; color:#2d3436;">🏷️ 行级标签 OCR 匹配：</span>
+        <span title="置信度 ≥ 85%：OCR 文字与本行 品名+规格 一致或高相似(忽略顺序/噪声)" style="cursor:help;">✅ <span style="color:#16a34a; font-weight:600;">✓ 绿</span> 图文相符</span>
+        <span title="置信度 60-84%：部分命中(品名对但规格残缺/有噪声/有近义差异)" style="cursor:help;">⚠ <span style="color:#d97706; font-weight:600;">⚠ 黄</span> 存疑,需人工核对</span>
+        <span title="置信度 < 60%：OCR 文字里找不到本行商品,或识别为另一商品" style="cursor:help;">❌ <span style="color:#dc2626; font-weight:600;">✗ 红</span> 可能不符,建议复查</span>
+        <span style="margin-left:auto; color:#868e96; font-size:0.72rem;">(行级=本地 fuzzy 模糊匹配; 整单 "🤖 AI 匹配" = PaddleOCR + DeepSeek 语义比对)</span>
+    </div>
+    </div>
 
     <script>
     // 客户/商品搜索过滤
