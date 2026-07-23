@@ -171,6 +171,14 @@ def init_db():
             except Exception:
                 pass  # 列已存在
 
+    # 迁移：shipping_images 加 match_status/match_score（标签 OCR 匹配徽章）
+    for col, default in [('match_status', "TEXT DEFAULT NULL"),
+                         ('match_score', 'REAL DEFAULT NULL')]:
+        try:
+            cursor.execute(f"ALTER TABLE shipping_images ADD COLUMN {col} {default}")
+        except Exception:
+            pass  # 列已存在
+
     # ── shipping_images（出货订单图片） ──
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS shipping_images (
@@ -179,6 +187,11 @@ def init_db():
             file_path TEXT NOT NULL,
             original_name TEXT DEFAULT '',
             created_at TEXT NOT NULL,
+            source TEXT DEFAULT 'upload',
+            record_pk INTEGER DEFAULT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            match_status TEXT DEFAULT NULL,
+            match_score REAL DEFAULT NULL,
             FOREIGN KEY (order_pk) REFERENCES shipping_orders(id)
         )
     ''')

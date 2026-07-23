@@ -849,6 +849,18 @@ class ShippingImage:
         return dict(row) if row else None
 
     @staticmethod
+    def set_match(image_id: int, status: str, score: float):
+        """写入标签匹配结果（match_status/match_score）。"""
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            'UPDATE shipping_images SET match_status = ?, match_score = ? WHERE id = ?',
+            (status, score, image_id)
+        )
+        conn.commit()
+        conn.close()
+
+    @staticmethod
     def delete(image_id: int):
         conn = get_db()
         cursor = conn.cursor()
