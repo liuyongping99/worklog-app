@@ -8,6 +8,7 @@ import uuid
 import base64
 from datetime import datetime
 from flask import request
+from rapidfuzz import fuzz
 
 
 # 仓库根目录
@@ -429,3 +430,61 @@ def check_uploaded_image(file_storage):
     if size > _MAX_IMAGE_BYTES:
         raise ValueError(f"文件过大(>{_MAX_IMAGE_BYTES // 1024 // 1024}MB)")
     return ext
+
+
+# =====================================================================
+#  标签图片 OCR 匹配（方案 A：只打徽章，不改数据）
+# =====================================================================
+
+def _normalize_for_match(text):
+    """归一化：全角→半角、码→y、去空白/标点、转小写。"""
+    if not text:
+        return ''
+    out = []
+    for ch in text:
+        code = ord(ch)
+        if code == 0x3000:            # 全角空格
+            code = 0x20
+        elif 0xFF01 <= code <= 0xFF5E:  # 全角 ASCII
+            code -= 0xFEE0
+        out.append(chr(code))
+    s = ''.join(out).lower()
+    s = s.replace('码', 'y')
+    s = re.sub(r'[\s\-_/、，,。.·:：;；()（）\[\]【】#＃*]+', '', s)
+    return s
+
+
+def _char_tokens(s):
+    """把连续字符串按字符切成空格分隔的 token 串，供 token_set_ratio 无视顺序比较。"""
+    return ' '.join(list(s))
+
+
+def match_label_to_row(ocr_text, product_name, specification=''):
+    """标签 OCR 文本 vs 本行 品名+规格 的模糊匹配（品名为主 + 规格加分）。
+
+    Returns:
+        (status, score): status ∈ {'green', 'yellow', 'red'}, score ∈ 0.0~100.0
+    """
+    text = _normalize_for_match(ocr_text)
+    name = _normalize_for_match(product_name)
+    spec = _normalize_for_match(specification)
+    if not text or not name:
+        return ('red', 0.0)
+
+    # 品名：字符级 token_set_ratio（无视顺序）与 partial_ratio（容忍目标只是文本的一段）取大
+    name_score = max(
+        fuzz.token_set_ratio(_char_tokens(name), _char_tokens(text)),
+        fuzz.partial_ratio(name, text),
+    )
+    score = float(name_score)
+
+    # 规格加分：命中则往上抬（最多约 +15，封顶 100）
+    if spec:
+        spec_score = fuzz.partial_ratio(spec, text)
+        score = min(100.0, name_score + spec_score * 0.15)
+
+    if score >= 85:
+        return ('green', score)
+    if score >= 60:
+        return ('yellow', score)
+    return ('red', score)
