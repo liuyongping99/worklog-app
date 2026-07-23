@@ -18,11 +18,28 @@ from blueprints._helpers import (
     get_ypp, calc_hint, check_remark, summarize_remarks,
     get_piece_conversion, calc_piece_quantity, check_piece_mismatch,
     validate_image_content, check_uploaded_image,
+    match_label_to_row,
 )
+from blueprints.ocr_engine import PaddleOCREngine
 
 bp = Blueprint('shipping', __name__)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _run_label_match(image_abspath, record):
+    """对一张行级图跑 OCR + 本地匹配，返回 (status, score)。失败则 ('', None) 不阻断上传。"""
+    try:
+        with open(image_abspath, 'rb') as f:
+            img_bytes = f.read()
+        text = PaddleOCREngine().extract_text(img_bytes)
+        status, score = match_label_to_row(
+            text, record.get('product_name', ''), record.get('specification', '')
+        )
+        return status, score
+    except Exception:
+        current_app.logger.exception('行级图片 OCR 匹配失败（不阻断上传）')
+        return '', None
 
 
 def _get_upload_dir():
@@ -567,11 +584,16 @@ def api_v1_shipping_orders_record_upload_images(record_id):
             rel_path = os.path.join(month_str, os.path.basename(filepath)).replace('\\', '/')
             # 取刚插入的 sort_order
             img = ShippingImage.get_by_id(image_id)
+            status, score = _run_label_match(filepath, record)
+            if status:
+                ShippingImage.set_match(image_id, status, score)
             saved.append({
                 'image_id': image_id,
                 'image': rel_path,
                 'original_name': original_name,
                 'sort_order': img['sort_order'],
+                'match_status': status or None,
+                'match_score': score,
             })
         for s in saved:
             AuditLog.log('upload_image', 'shipping_order', record['order_pk'],
@@ -595,11 +617,15 @@ def api_v1_shipping_orders_record_upload_images(record_id):
         )
         rel_path = os.path.join(month_str, os.path.basename(filepath)).replace('\\', '/')
         img = ShippingImage.get_by_id(image_id)
+        status, score = _run_label_match(filepath, record)
+        if status:
+            ShippingImage.set_match(image_id, status, score)
         AuditLog.log('upload_image', 'shipping_order', record['order_pk'],
                      detail={'filename': rel_path, 'source': source, 'record_id': record_id})
         return jsonify({'success': True, 'images': [{
             'image_id': image_id, 'image': rel_path,
             'original_name': original_name, 'sort_order': img['sort_order'],
+            'match_status': status or None, 'match_score': score,
         }], 'count': 1}), 201
 
     return jsonify({'success': False, 'error': '未提供图片'}), 400
