@@ -327,6 +327,7 @@
                 {% if group.doc_number %}<span id="docNumber{{ group.id }}" style="font-size:0.75rem; color:#0984e3; background:#e8f4fd; padding:0.15rem 0.5rem; border-radius:10px; margin-left:0.25rem;">{{ group.doc_number }}</span>{% endif %}
                 <span class="lock-hide smart-add-btn btn btn-sm" style="background:#ffeaa7; color:#2d3436;" data-pk="{{ group.id }}" data-date="{{ group.date }}" data-customer="{{ group.customer }}">🧠 智能添加</span>
                 <button type="button" class="btn btn-sm note-btn lock-hide" style="background:#a29bfe; color:#fff;{% if group.order_note %} box-shadow: 0 0 0 2px #6c5ce7;{% endif %}" data-pk="{{ group.id }}" data-note="{{ group.order_note|e }}" title="{% if group.order_note %}修改备注{% else %}添加备注{% endif %}">📝 备注</button>
+                <button type="button" class="btn btn-sm ai-match-btn lock-hide" data-order-id="{{ group.id }}" style="background:#00b894; color:#fff;" title="整单 OCR + DeepSeek 比对所有行级标签">🤖 AI 匹配</button>
                 <button type="button" class="btn btn-sm lock-hide" style="background:#6c5ce7; color:#fff;" onclick="openImageModal('{{ group.id }}')">📷 图片</button>
                 {% if order_images.get(group.id) %}
                 <span style="font-size:0.7rem; color:#6c5ce7; margin-left:0.25rem;"> ({{ order_images.get(group.id)|length }})</span>
@@ -374,7 +375,7 @@
                     data-record-id="{{ item.id }}"
                     data-verified="{{ '1' if item.verified else '0' }}">
                     <td style="text-align:center; color:#868e96; font-size:0.85rem;">{% if item.qty_invalid %}<span class="stock-icon" title="数量异常">❌</span>{% elif item.mismatch == 'warn' or item.piece_mismatch == 'warn' %}❌ {% elif item.mismatch == 'info' or item.piece_mismatch == 'info' %}💡 {% endif %}{{ loop.index }}</td>
-                    <td style="font-size:0.9rem;">{% if '环保' in item.product_name %}<span class="eco-icon" title="环保产品">🌿</span>{% endif %}{{ item.product_name }}</td>
+                    <td class="product-name-cell" style="font-size:0.9rem;" data-record-id-cell="{{ item.id }}">{% if '环保' in item.product_name %}<span class="eco-icon" title="环保产品">🌿</span>{% endif %}{% set _bst = record_best_status_map.get(item.id) %}{% if _bst == 'green' %}<span class="match-badge" title="图文相符" style="color:#16a34a;">✓</span>{% elif _bst == 'yellow' %}<span class="match-badge" title="存疑，请人工核对" style="color:#d97706;">⚠</span>{% elif _bst == 'red' %}<span class="match-badge" title="可能不符" style="color:#dc2626;">✗</span>{% endif %}{{ item.product_name }}</td>
                     <td style="color:#636e72; font-size:0.9rem;">{{ item.specification }}</td>
                     <td><span class="qty-badge">{{ item.quantity }}</span></td>
                     <td><span class="unit-badge">{{ item.unit }}</span></td>
@@ -469,6 +470,32 @@
 {% with image_api="/api/v1/shipping-orders" %}{% include "_image_upload_modal.html" %}{% endwith %}
 
 <script>
+    // ── 行级 OCR 匹配徽章（任务流 OCR-Match 前端） ──
+    // 给一行商品的产品名 cell 旁边贴 ✓/⚠/✗,status 取后端 match_status 档位(green/yellow/red)
+    // JS 路径同时被 recordImageUploaded(行级上传后)与 ai-match(整单比对后)复用
+    function badgeHtml(status) {
+        if (status === 'green')  return '<span class="match-badge" title="图文相符" style="color:#16a34a;">✓</span>';
+        if (status === 'yellow') return '<span class="match-badge" title="存疑，请人工核对" style="color:#d97706;">⚠</span>';
+        if (status === 'red')    return '<span class="match-badge" title="可能不符" style="color:#dc2626;">✗</span>';
+        return '';
+    }
+    // 把徽章贴到某行产品名 cell 上:先清掉旧徽章,再插入新徽章(status 为空则只清)
+    function setRowMatchBadge(recordId, status) {
+        var tr = document.querySelector('.record-table tr[data-record-id="' + recordId + '"]');
+        if (!tr) return;
+        var cell = tr.querySelector('.product-name-cell');
+        if (!cell) return;
+        // 清旧
+        cell.querySelectorAll('.match-badge').forEach(function(b) { b.remove(); });
+        var html = badgeHtml(status);
+        if (html) {
+            cell.insertAdjacentHTML('afterbegin', html);
+            tr.dataset.matchBadgeHtml = html;  // 让编辑保存时仍能恢复
+        } else {
+            delete tr.dataset.matchBadgeHtml;
+        }
+    }
+
     // 商品辅助单位列表（含规格匹配，由后端传入）
     var UNIT_LIST = {{ unit_list | tojson }};
 
@@ -989,6 +1016,41 @@
         });
     });
 
+    // ── "🤖 AI 匹配" 按钮：整单行级图重跑 OCR + DeepSeek 比对 → 逐行更新徽章 ──
+    document.querySelectorAll('.ai-match-btn').forEach(function(btn) {
+        if (btn._aiMatchBound) return;
+        btn._aiMatchBound = true;
+        btn.addEventListener('click', function() {
+            var oid = btn.getAttribute('data-order-id');
+            if (!oid) return;
+            btn.disabled = true;
+            var _oldText = btn.textContent;
+            btn.textContent = '识别中…';
+            fetch('/api/v1/shipping-orders/' + oid + '/ai-match', {method: 'POST'})
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    btn.disabled = false;
+                    btn.textContent = _oldText;
+                    if (!data.success) {
+                        alert('AI 匹配失败：' + (data.error || '未知错误'));
+                        return;
+                    }
+                    // 逐行更新徽章
+                    (data.results || []).forEach(function(r) {
+                        if (r && r.record_id && r.match_status) {
+                            setRowMatchBadge(r.record_id, r.match_status);
+                        }
+                    });
+                    alert(data.summary || ('已核对 ' + (data.results || []).length + ' 行'));
+                })
+                .catch(function(err) {
+                    btn.disabled = false;
+                    btn.textContent = _oldText;
+                    alert('请求失败：' + err);
+                });
+        });
+    });
+
     // 删除订单按钮（事件监听器方式）
     document.querySelectorAll('.delete-order-btn').forEach(function(btn) {
         btn.addEventListener('click', function() {
@@ -1085,6 +1147,19 @@
             product_name: productName,
             specification: specification,
         });
+        // 行级上传后:拿后端返回的最新 match_status 刷新该行徽章
+        // (一次上传可能多张,score 高的覆盖,这里只取最近一次结果——单次上传上限 1 张 OR 取最优)
+        var bestStatus = '';
+        var bestScore = -1;
+        data.images.forEach(function(img) {
+            var s = img.match_status || '';
+            var sc = (typeof img.match_score === 'number') ? img.match_score : -1;
+            if (s && (sc > bestScore || (sc === bestScore && s === 'green'))) {
+                bestStatus = s;
+                bestScore = sc;
+            }
+        });
+        if (bestStatus) setRowMatchBadge(recordPk, bestStatus);
     };
     // 图片列数切换（每订单独立记忆，持久化到数据库）
     window.setImgCols = function(btn, cols) {
@@ -1154,7 +1229,10 @@ function bindEditDeleteButtons() {
                         if (newMismatch === 'warn' || newPieceMismatch === 'warn') combinedMismatch = 'warn';
                         else if (newMismatch === 'info' || newPieceMismatch === 'info') combinedMismatch = 'info';
                         tds[0].innerHTML = (bad ? invalidQtyIcon() : mismatchIcon(combinedMismatch)) + rowNum;
+                        // 编辑保存后保留原行徽章(stash 在 tr.dataset.matchBadgeHtml;无则不带)
+                        var _oldBadgeHtml = tr.dataset.matchBadgeHtml || '';
                         tds[1].textContent = r.product_name;
+                        if (_oldBadgeHtml) tds[1].insertAdjacentHTML('afterbegin', _oldBadgeHtml);
                         tds[2].textContent = r.specification || '';
                         tds[3].innerHTML = '<span class="qty-badge">' + escHtml(r.quantity) + '</span>';
                         tds[4].innerHTML = '<span class="unit-badge">' + escHtml(r.unit) + '</span>';
@@ -1183,7 +1261,12 @@ function bindEditDeleteButtons() {
                     }
                 }).catch(function(err) { hideBtnLoading(btn); alert('请求失败：' + err); });
             } else {
-                var vals = [tds[1].textContent, tds[2].textContent, tds[3].textContent, tds[4].textContent.trim(), tds[5].textContent];
+                // 剥离可能前缀的徽章字符 ✓ ⚠ ✗(行首匹配,避免污染 input value 后保存到 product_name)
+                var nameForEdit = tds[1].textContent.replace(/^[✓⚠✗]\s*/, '').trim();
+                // 保存现有徽章 HTML 到 tr.dataset,编辑保存后能恢复
+                var _badgeEl = tds[1].querySelector('.match-badge');
+                tr.dataset.matchBadgeHtml = _badgeEl ? _badgeEl.outerHTML : '';
+                var vals = [nameForEdit, tds[2].textContent, tds[3].textContent, tds[4].textContent.trim(), tds[5].textContent];
                 tds[1].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:100px;" value="' + escAttr(vals[0]) + '">';
                 tds[2].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:80px;" value="' + escAttr(vals[1]) + '">';
                 tds[3].innerHTML = '<input type="number" class="form-control form-control-sm edit-input" style="min-width:70px;" value="' + escAttr(vals[2]) + '">';

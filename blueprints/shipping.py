@@ -76,10 +76,22 @@ def shipping_records():
         if non_ai: order_non_ai[oid] = non_ai
         if ai: ai_images[oid] = ai
     # 把每个订单的所有 record 级图也按 source 分到上面两个 dict
+    # 同时按 record 汇总 match_status 最高分那张的档位(green > yellow > red),
+    # 给到前端做「行级徽章」首屏渲染(刷新不丢)。
+    record_best_status_map = {}  # record_id -> 'green'/'yellow'/'red'
+    _status_rank = {'green': 3, 'yellow': 2, 'red': 1}
     for grp in groups:
         all_record_imgs = []
         for rec in grp.get('records', []):
-            all_record_imgs.extend(ShippingImage.get_by_record(rec['id']))
+            record_imgs = ShippingImage.get_by_record(rec['id'])
+            all_record_imgs.extend(record_imgs)
+            for img in record_imgs:
+                status = img.get('match_status') or ''
+                if not status:
+                    continue
+                cur = record_best_status_map.get(rec['id'])
+                if cur is None or _status_rank.get(status, 0) > _status_rank.get(cur, 0):
+                    record_best_status_map[rec['id']] = status
         for img in all_record_imgs:
             target = ai_images if img.get('source') == 'ai' else order_non_ai
             target.setdefault(grp['id'], []).append(img)
@@ -157,6 +169,7 @@ def shipping_records():
         groups=groups,
         order_images=order_non_ai,  # 模板里变量名仍叫 order_images,但内容已剔 AI
         ai_images=ai_images,
+        record_best_status_map=record_best_status_map,
         page_title='出货记录',
         today=today,
         start_date=start_date,
