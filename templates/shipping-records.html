@@ -25,6 +25,12 @@
 .shipping-page .record-table tr.row-eco:not(.row-out-of-stock):not(.row-warn):not(.row-info):hover td { background-color: #e3f5e8; }
 .shipping-page .record-table tr.row-eco td:first-child { border-left-color: #2d8c4a; }
 .shipping-page .eco-icon { color: #2d8c4a; margin-right: 0.25rem; font-size: 0.95rem; vertical-align: middle; }
+/* 环保标识独立列:整组无环保时整列隐藏(避免空列占位) */
+.shipping-page .record-table .eco-col { text-align: center; padding: 0.25rem; }
+.shipping-page .record-table.no-eco .eco-col { display: none; }
+/* AI 比对结果独立列:整组无 AI 比对结果时整列隐藏 */
+.shipping-page .record-table .match-col { text-align: center; padding: 0.25rem; }
+.shipping-page .record-table.no-match .match-col { display: none; }
 .shipping-page .quick-add { display: grid; grid-template-columns: 1fr 90px 80px 70px auto; align-items: end; }
 .shipping-page .quick-add input:focus, .shipping-page .quick-add select:focus { border-color: var(--page-accent); }
 .shipping-page .form-grid { display: grid; grid-template-columns: 150px 1fr; gap: var(--space-md); align-items: end; }
@@ -52,6 +58,45 @@
 .shipping-page .order-images-area img:hover { transform: scale(1.01); }
 .shipping-page .img-item { position: relative; overflow: hidden; border-radius: 8px; }
 .shipping-page .img-item:hover .del-img-btn { opacity: 1; }
+/* 2026-07-24 改造:record 级图片改 flex column,顶部叠加文字,底部 img-meta 条 */
+.shipping-page .img-item-record {
+    display: flex; flex-direction: column;
+    background: #fff; border: 1px solid #ced4da;
+    /* position: relative 由 .img-item 父规则继承(用于定位 del-btn) */
+}
+.shipping-page .img-item-record .img-photo {
+    position: relative;
+    width: 100%;
+    height: 180px;              /* 固定高度,确保 flex column 子项有高度让 absolute overlay 定位 */
+    overflow: hidden;
+    background: #f8f9fa;
+}
+.shipping-page .img-item-record .img-photo > img {
+    border-radius: 0; border: none; /* 图区自己控制圆角,避免双重 */
+    position: absolute;          /* 兜底:绝对定位覆盖 img-photo 全区域 */
+    top: 0; left: 0; width: 100%; height: 100%;
+    object-fit: cover;
+}
+.shipping-page .img-meta {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 6px;
+    padding: 4px 8px;
+    border-top: 1px solid #eee;
+    min-height: 32px;
+    font-size: 0.78rem;
+}
+.shipping-page .img-meta .match-badge { font-size: 1.05rem; font-weight: 700; cursor: help; }
+.shipping-page .img-meta .manual-confirm-btn {
+    background: #10b981; color: #fff; border: none;
+    padding: 3px 8px; border-radius: 4px; cursor: pointer;
+    font-size: 0.72rem; font-weight: 600;
+    transition: background 0.15s;
+}
+.shipping-page .img-meta .manual-confirm-btn:hover { background: #059669; }
+.shipping-page .img-meta .manual-confirm-btn:disabled { background: #9ca3af; cursor: not-allowed; }
+.shipping-page .img-meta .manual-verified-marker {
+    color: #10b981; font-weight: 600; font-size: 0.72rem;
+}
 .shipping-page .del-img-btn {
     position: absolute; top: 8px; right: 8px;
     background: rgba(200,30,30,0.85); color: white;
@@ -366,12 +411,16 @@
                 {% endfor %}
             </div>
             {% endif %}
-            <table class="record-table">
+            {% set has_eco = group.has_eco|default(false) %}
+            {% set has_match = group.has_match|default(false) %}
+            <table class="record-table{% if not has_eco %} no-eco{% endif %}{% if not has_match %} no-match{% endif %}">
                 <thead>
                     <tr>
                         <th style="width:35px;">序号</th>
+                        <th class="eco-col" style="width:35px;">环保</th>
                         <th style="width:22%;">商品名称</th>
                         <th style="width:18%;">规格</th>
+                        <th class="match-col" style="width:55px;">AI 比对</th>
                         <th style="width:12%;">数量</th>
                         <th style="width:8%;">单位</th>
                         <th style="width:15%;">备注</th>
@@ -385,13 +434,15 @@
                     data-record-id="{{ item.id }}"
                     data-verified="{{ '1' if item.verified else '0' }}">
                     <td style="text-align:center; color:#868e96; font-size:0.85rem;">{% if item.qty_invalid %}<span class="stock-icon" title="数量异常">❌</span>{% elif item.mismatch == 'warn' or item.piece_mismatch == 'warn' %}❌ {% elif item.mismatch == 'info' or item.piece_mismatch == 'info' %}💡 {% endif %}{{ loop.index }}</td>
-                    <td class="product-name-cell" style="font-size:0.9rem;" data-record-id-cell="{{ item.id }}">{% if '环保' in item.product_name %}<span class="eco-icon" title="环保产品">🌿</span>{% endif %}{% set _bst = record_best_status_map.get(item.id) %}{% if _bst == 'green' %}<span class="match-badge" title="图文相符" style="color:#16a34a;">✓</span>{% elif _bst == 'yellow' %}<span class="match-badge" title="存疑，请人工核对" style="color:#d97706;">⚠</span>{% elif _bst == 'red' %}<span class="match-badge" title="可能不符" style="color:#dc2626;">✗</span>{% endif %}{{ item.product_name }}</td>
-                    <td style="color:#636e72; font-size:0.9rem;">{{ item.specification }}</td>
-                    <td><span class="qty-badge">{{ item.quantity }}</span></td>
-                    <td><span class="unit-badge">{{ item.unit }}</span></td>
+                    <td class="eco-col">{% if '环保' in item.product_name %}<span class="eco-icon" title="环保产品">🌿</span>{% endif %}</td>
+                    <td class="product-name-cell" style="font-size:0.9rem;" data-record-id-cell="{{ item.id }}">{{ item.product_name }}</td>
+                    <td class="spec-cell" style="color:#636e72; font-size:0.9rem;">{{ item.specification }}</td>
+                    <td class="match-col">{% set _bst = record_best_status_map.get(item.id) %}{% set _reason = record_best_reason_map.get(item.id, '') %}{% if _bst == 'green' %}<span class="match-badge" data-match-status="green" title="图文相符{% if _reason %} — {{ _reason }}{% endif %}" style="color:#16a34a;">✓</span>{% elif _bst == 'yellow' %}<span class="match-badge" data-match-status="yellow" title="存疑，请人工核对{% if _reason %} — {{ _reason }}{% endif %}" style="color:#d97706;">⚠</span>{% elif _bst == 'red' %}<span class="match-badge" data-match-status="red" title="可能不符{% if _reason %} — {{ _reason }}{% endif %}" style="color:#dc2626;">✗</span>{% endif %}</td>
+                    <td class="qty-cell"><span class="qty-badge">{{ item.quantity }}</span></td>
+                    <td class="unit-cell"><span class="unit-badge">{{ item.unit }}</span></td>
                     <td class="remark-cell {% if item.remark %}has-content{% endif %}">{{ item.remark or '—' }}</td>
                     <td class="unit-hint-cell" style="font-size:0.85rem;color:#e17055;">{{ item.unit_hint or '—' }}{% if item.piece_hint %}<br><span style="color:#0984e3;">{{ item.piece_hint }}</span>{% endif %}</td>
-                    <td style="white-space:nowrap;">
+                    <td class="actions-cell" style="white-space:nowrap;">
                         <button type="button" class="btn btn-sm move-up-btn lock-hide" data-id="{{ item.id }}" title="上移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.1rem 0.35rem;font-size:0.75rem;">▲</button>
                         <button type="button" class="btn btn-sm move-down-btn lock-hide" data-id="{{ item.id }}" title="下移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.1rem 0.35rem;font-size:0.75rem;">▼</button>
                         <button type="button" class="btn btn-primary btn-sm edit-record-btn lock-hide" data-id="{{ item.id }}">✏️</button>
@@ -431,9 +482,32 @@
                     <button class="img-col-btn active" onclick="setImgCols(this, 5)">5</button>
                 </div>
                 {% for img in all_order_imgs %}
-                <div class="img-item{% if img.record_pk %} img-item-record{% else %} img-item-order{% endif %}"{% if img.record_pk %} data-record-pk="{{ img.record_pk }}"{% endif %}>
-                    <img src="/upload/{{ img.relative_path }}" alt="{{ img.original_name or '图片' }}" onclick="showImgPreview('/upload/{{ img.relative_path }}')">
-                    <button class="del-img-btn lock-hide" data-image-id="{{ img.id }}">× 删除</button>
+                <div class="img-item{% if img.record_pk %} img-item-record{% else %} img-item-order{% endif %}"{% if img.record_pk %} data-record-pk="{{ img.record_pk }}"{% endif %} data-image-id="{{ img.id }}">
+                    <div class="img-photo">
+                        <img src="/upload/{{ img.relative_path }}" alt="{{ img.original_name or '图片' }}" onclick="showImgPreview('/upload/{{ img.relative_path }}')">
+                        <button class="del-img-btn lock-hide" data-image-id="{{ img.id }}">× 删除</button>
+                        {# 2026-07-24:服务端直接渲染叠加文字,不依赖 JS 加载 (applyAllRecordImageOverlays 兜底动态上传场景) #}
+                        {% if img.record_pk and record_by_pk and record_by_pk.get(img.record_pk) %}
+                            {% set _overlay_rec = record_by_pk[img.record_pk] %}
+                            {% if _overlay_rec.product_name %}<div class="img-overlay-name">{{ _overlay_rec.product_name }}</div>{% endif %}
+                            {% if _overlay_rec.specification %}<div class="img-overlay-spec">{{ _overlay_rec.specification }}</div>{% endif %}
+                        {% endif %}
+                    </div>
+                    {% if img.record_pk %}
+                    <div class="img-meta">
+                        {% if img.match_status == 'green' %}<span class="match-badge" data-match-status="green" title="图文相符{% if img.reason %} — {{ img.reason }}{% endif %}" style="color:#16a34a;">✓</span>
+                        {% elif img.match_status == 'yellow' %}<span class="match-badge" data-match-status="yellow" title="存疑，请人工核对{% if img.reason %} — {{ img.reason }}{% endif %}" style="color:#d97706;">⚠</span>
+                        {% elif img.match_status == 'red' %}<span class="match-badge" data-match-status="red" title="可能不符{% if img.reason %} — {{ img.reason }}{% endif %}" style="color:#dc2626;">✗</span>
+                        {% endif %}
+                        {% if img.match_status == 'red' %}
+                            {% if img.human_verified %}
+                                <span class="manual-verified-marker" data-verified-marker="{{ img.id }}">✓ 已人工确认</span>
+                            {% else %}
+                                <button class="manual-confirm-btn lock-hide" data-image-id="{{ img.id }}" data-confirm-btn="{{ img.id }}">✓ 确认通过</button>
+                            {% endif %}
+                        {% endif %}
+                    </div>
+                    {% endif %}
                 </div>
                 {% endfor %}
             </div>
@@ -483,26 +557,70 @@
     // ── 行级 OCR 匹配徽章（任务流 OCR-Match 前端） ──
     // 给一行商品的产品名 cell 旁边贴 ✓/⚠/✗,status 取后端 match_status 档位(green/yellow/red)
     // JS 路径同时被 recordImageUploaded(行级上传后)与 ai-match(整单比对后)复用
-    function badgeHtml(status) {
-        if (status === 'green')  return '<span class="match-badge" title="图文相符" style="color:#16a34a;">✓</span>';
-        if (status === 'yellow') return '<span class="match-badge" title="存疑，请人工核对" style="color:#d97706;">⚠</span>';
-        if (status === 'red')    return '<span class="match-badge" title="可能不符" style="color:#dc2626;">✗</span>';
+    function badgeHtml(status, reason) {
+        // reason: AI 给出的判定依据(中文),可空;空时只显示状态标签
+        reason = reason || '';
+        var suffix = reason ? ' — ' + reason : '';
+        if (status === 'green')  return '<span class="match-badge" title="图文相符' + suffix + '" style="color:#16a34a;">✓</span>';
+        if (status === 'yellow') return '<span class="match-badge" title="存疑，请人工核对' + suffix + '" style="color:#d97706;">⚠</span>';
+        if (status === 'red')    return '<span class="match-badge" title="可能不符' + suffix + '" style="color:#dc2626;">✗</span>';
         return '';
     }
-    // 把徽章贴到某行产品名 cell 上:先清掉旧徽章,再插入新徽章(status 为空则只清)
-    function setRowMatchBadge(recordId, status) {
+    // 把徽章贴到某行的 AI 比对 cell 上:先清掉旧徽章,再插入新徽章(status 为空则只清)
+    function setRowMatchBadge(recordId, status, reason) {
         var tr = document.querySelector('.record-table tr[data-record-id="' + recordId + '"]');
         if (!tr) return;
-        var cell = tr.querySelector('.product-name-cell');
+        var cell = tr.querySelector('.match-col');
         if (!cell) return;
         // 清旧
         cell.querySelectorAll('.match-badge').forEach(function(b) { b.remove(); });
-        var html = badgeHtml(status);
+        var html = badgeHtml(status, reason);
         if (html) {
             cell.insertAdjacentHTML('afterbegin', html);
             tr.dataset.matchBadgeHtml = html;  // 让编辑保存时仍能恢复
         } else {
             delete tr.dataset.matchBadgeHtml;
+        }
+    }
+
+    // 重算并刷新某个 record 的行级 AI 比对徽章
+    // 规则:扫描该 record 所有 img-item-record 里的 .match-badge[data-match-status],
+    //      红牌 + 已人工确认 → 视为 green;其他按原值。取最高(green > yellow > red)。
+    // 调用时机:① 人工确认按钮成功后 ② ai-match 后(未来扩展)
+    function refreshRowMatchBadge(recordPk) {
+        var imgs = document.querySelectorAll('.img-item-record[data-record-pk="' + recordPk + '"]');
+        if (!imgs.length) return;
+        var rank = {green: 3, yellow: 2, red: 1};
+        var best = 'red';
+        var bestCount = {green: 0, yellow: 0, red: 0};
+        imgs.forEach(function(img) {
+            var badge = img.querySelector('.match-badge[data-match-status]');
+            if (!badge) return;
+            var s = badge.getAttribute('data-match-status');
+            // 红牌 + 已人工确认 → 视为 green(覆盖 AI 判 ✗)
+            if (s === 'red' && img.querySelector('.manual-verified-marker')) {
+                s = 'green';
+            }
+            if (rank[s] > rank[best]) best = s;
+            bestCount[s] += 1;
+        });
+        var tr = document.querySelector('.record-table tr[data-record-id="' + recordPk + '"]');
+        if (!tr) return;
+        var cell = tr.querySelector('.match-col');
+        if (!cell) return;
+        cell.querySelectorAll('.match-badge').forEach(function(b) { b.remove(); });
+        // 构造 reason:含"已人工确认"标记的张数
+        var verifiedCount = document.querySelectorAll('.img-item-record[data-record-pk="' + recordPk + '"] .manual-verified-marker').length;
+        var reason;
+        if (verifiedCount > 0) {
+            reason = '含 ' + verifiedCount + ' 张图已人工确认';
+        } else {
+            reason = '本行 ' + bestCount.green + '绿 / ' + bestCount.yellow + '黄 / ' + bestCount.red + '红';
+        }
+        var html = badgeHtml(best, reason);
+        if (html) {
+            cell.insertAdjacentHTML('afterbegin', html);
+            tr.dataset.matchBadgeHtml = html;
         }
     }
 
@@ -1209,6 +1327,13 @@ function bindEditDeleteButtons() {
             var recordId = this.getAttribute('data-id');
             var tr = this.closest('tr');
             var tds = tr.querySelectorAll('td');
+            // 用 class 选(列位置不再耦合,加列/挪列不会断)
+            var nameTd = tr.querySelector('.product-name-cell');
+            var specTd = tr.querySelector('.spec-cell');
+            var qtyTd = tr.querySelector('.qty-cell');
+            var unitTd = tr.querySelector('.unit-cell');
+            var remarkTd = tr.querySelector('.remark-cell');
+            var unitHintTd = tr.querySelector('.unit-hint-cell');
             if (this.textContent.trim() === '💾') {
                 var inputs = tr.querySelectorAll('.edit-input');
                 var data = {
@@ -1241,14 +1366,16 @@ function bindEditDeleteButtons() {
                         tds[0].innerHTML = (bad ? invalidQtyIcon() : mismatchIcon(combinedMismatch)) + rowNum;
                         // 编辑保存后保留原行徽章(stash 在 tr.dataset.matchBadgeHtml;无则不带)
                         var _oldBadgeHtml = tr.dataset.matchBadgeHtml || '';
-                        tds[1].textContent = r.product_name;
-                        if (_oldBadgeHtml) tds[1].insertAdjacentHTML('afterbegin', _oldBadgeHtml);
-                        tds[2].textContent = r.specification || '';
-                        tds[3].innerHTML = '<span class="qty-badge">' + escHtml(r.quantity) + '</span>';
-                        tds[4].innerHTML = '<span class="unit-badge">' + escHtml(r.unit) + '</span>';
-                        tds[5].textContent = r.remark || '—';
+                        if (nameTd) {
+                            nameTd.textContent = r.product_name;
+                            if (_oldBadgeHtml) nameTd.insertAdjacentHTML('afterbegin', _oldBadgeHtml);
+                        }
+                        if (specTd) specTd.textContent = r.specification || '';
+                        if (qtyTd) qtyTd.innerHTML = '<span class="qty-badge">' + escHtml(r.quantity) + '</span>';
+                        if (unitTd) unitTd.innerHTML = '<span class="unit-badge">' + escHtml(r.unit) + '</span>';
+                        if (remarkTd) remarkTd.textContent = r.remark || '—';
                         var hint = getUnitHint(r.product_name, r.specification || '', r.quantity, r.unit, r.remark) || '—';
-                        tds[6].innerHTML = escHtml(hint) + (newPieceHint ? '<br><span style="color:#0984e3;">' + escHtml(newPieceHint) + '</span>' : '');
+                        if (unitHintTd) unitHintTd.innerHTML = escHtml(hint) + (newPieceHint ? '<br><span style="color:#0984e3;">' + escHtml(newPieceHint) + '</span>' : '');
                         if (newMismatch === 'warn' || newPieceMismatch === 'warn') { applyMismatchClass(tr, 'warn'); }
                         else if (newMismatch === 'info' || newPieceMismatch === 'info') { applyMismatchClass(tr, 'info'); }
                         else { applyMismatchClass(tr, ''); }
@@ -1272,29 +1399,35 @@ function bindEditDeleteButtons() {
                 }).catch(function(err) { hideBtnLoading(btn); alert('请求失败：' + err); });
             } else {
                 // 保存现有徽章 HTML 到 tr.dataset,编辑保存后能恢复
-                var _badgeEl = tds[1].querySelector('.match-badge');
+                var _badgeEl = nameTd ? nameTd.querySelector('.match-badge') : null;
                 tr.dataset.matchBadgeHtml = _badgeEl ? _badgeEl.outerHTML : '';
                 // 读取 product_name:若有徽章则克隆单元格剔除徽章后再读 textContent,
                 // 避免误删产品名中合法的首字符(如 "⚠ 危险品标签纸")
                 var nameForEdit;
                 if (_badgeEl) {
-                    var clonedCell = tds[1].cloneNode(true);
+                    var clonedCell = nameTd.cloneNode(true);
                     var clonedBadge = clonedCell.querySelector('.match-badge');
                     if (clonedBadge) clonedBadge.remove();
                     nameForEdit = clonedCell.textContent.trim();
                 } else {
-                    nameForEdit = tds[1].textContent.trim();
+                    nameForEdit = nameTd ? nameTd.textContent.trim() : '';
                 }
-                var vals = [nameForEdit, tds[2].textContent, tds[3].textContent, tds[4].textContent.trim(), tds[5].textContent];
-                tds[1].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:100px;" value="' + escAttr(vals[0]) + '">';
-                tds[2].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:80px;" value="' + escAttr(vals[1]) + '">';
-                tds[3].innerHTML = '<input type="number" class="form-control form-control-sm edit-input" style="min-width:70px;" value="' + escAttr(vals[2]) + '">';
+                var vals = [
+                    nameForEdit,
+                    specTd ? specTd.textContent : '',
+                    qtyTd ? qtyTd.textContent : '',
+                    unitTd ? unitTd.textContent.trim() : '',
+                    remarkTd ? remarkTd.textContent : ''
+                ];
+                if (nameTd) nameTd.innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:100px;" value="' + escAttr(vals[0]) + '">';
+                if (specTd) specTd.innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:80px;" value="' + escAttr(vals[1]) + '">';
+                if (qtyTd) qtyTd.innerHTML = '<input type="number" class="form-control form-control-sm edit-input" style="min-width:70px;" value="' + escAttr(vals[2]) + '">';
                 var unitOpts = ['支','kg','y','桶','张','件','箱','卷','块','令','斤'];
                 var unitHtml = '<select class="form-control form-control-sm edit-input" style="width:70px;">';
                 unitOpts.forEach(function(u) { unitHtml += '<option value="' + u + '"' + (u === vals[3] ? ' selected' : '') + '>' + u + '</option>'; });
                 unitHtml += '</select>';
-                tds[4].innerHTML = unitHtml;
-                tds[5].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + escAttr(vals[4]) + '" oninput="autoFillQtyFromRemark(this)">';
+                if (unitTd) unitTd.innerHTML = unitHtml;
+                if (remarkTd) remarkTd.innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + escAttr(vals[4]) + '" oninput="autoFillQtyFromRemark(this)">';
                 btn.textContent = '💾';
                 btn.classList.remove('btn-primary');
                 btn.classList.add('btn-success');
@@ -1441,6 +1574,7 @@ if (createOrderForm) {
 bindEditDeleteButtons();
 bindDeleteImageButtons();
 bindRecordImageButtons();
+bindManualConfirmButtons();
 applyAllRecordImageOverlays();
 
 // 给 record 级图片（🖼️ 按钮上传）叠加"商品名 + 规格"文字
@@ -1452,28 +1586,30 @@ function applyRecordImageOverlay(imgItem, recordPk, productName, specification) 
     if (productName === undefined || specification === undefined) {
         var row = document.querySelector('.record-table tr[data-record-id="' + recordPk + '"]');
         if (row) {
-            var tds = row.querySelectorAll('td');
-            productName = (tds[1] ? tds[1].textContent : '').trim();
-            specification = (tds[2] ? tds[2].textContent : '').trim();
+            // 用 class 选(不再依赖 td 位置)
+            productName = ((row.querySelector('.product-name-cell') || {}).textContent || '').trim();
+            specification = ((row.querySelector('.spec-cell') || {}).textContent || '').trim();
         } else {
             productName = '';
             specification = '';
         }
     }
     if (!productName && !specification) return;
+    // 找到图区容器(.img-photo),叠加文字需要相对它定位;不在则兜底用 imgItem
+    var photoEl = imgItem.querySelector('.img-photo') || imgItem;
     // 顶部：商品名（textContent 赋值天然防 XSS）
     if (productName) {
         var nameEl = document.createElement('div');
         nameEl.className = 'img-overlay-name';
         nameEl.textContent = productName;
-        imgItem.appendChild(nameEl);
+        photoEl.appendChild(nameEl);
     }
     // 底部：规格
     if (specification) {
         var specEl = document.createElement('div');
         specEl.className = 'img-overlay-spec';
         specEl.textContent = specification;
-        imgItem.appendChild(specEl);
+        photoEl.appendChild(specEl);
     }
 }
 
@@ -1540,15 +1676,76 @@ function appendOrderImageArea(orderPk, images, recordInfo) {
         if (recordInfo && recordInfo.record_pk) {
             div.setAttribute('data-record-pk', recordInfo.record_pk);
         }
-        div.innerHTML = '<img src="/upload/' + escAttr(img.image) + '" alt="商品图片" onclick="showImgPreview(\'/upload/' + escAttr(img.image) + '\')">' +
-            '<button class="del-img-btn lock-hide" data-image-id="' + escAttr(img.image_id) + '">× 删除</button>';
+        div.setAttribute('data-image-id', img.image_id);
+        // 2026-07-24 改造:套 .img-photo + .img-meta 两层结构(与服务端模板一致)
+        var badgeHtml = '';
+        var status = (img.match_status || '').trim();
+        var reason = img.reason || '';
+        if (status === 'green') {
+            badgeHtml = '<span class="match-badge" data-match-status="green" title="图文相符' + (reason ? ' — ' + reason : '') + '" style="color:#16a34a;">✓</span>';
+        } else if (status === 'yellow') {
+            badgeHtml = '<span class="match-badge" data-match-status="yellow" title="存疑，请人工核对' + (reason ? ' — ' + reason : '') + '" style="color:#d97706;">⚠</span>';
+        } else if (status === 'red') {
+            badgeHtml = '<span class="match-badge" data-match-status="red" title="可能不符' + (reason ? ' — ' + reason : '') + '" style="color:#dc2626;">✗</span>';
+        }
+        var btnHtml = '';
+        if (status === 'red' && !img.human_verified) {
+            btnHtml = '<button class="manual-confirm-btn lock-hide" data-image-id="' + escAttr(img.image_id) + '" data-confirm-btn="' + escAttr(img.image_id) + '">✓ 确认通过</button>';
+        } else if (status === 'red' && img.human_verified) {
+            btnHtml = '<span class="manual-verified-marker" data-verified-marker="' + escAttr(img.image_id) + '">✓ 已人工确认</span>';
+        }
+        div.innerHTML = '<div class="img-photo">' +
+                '<img src="/upload/' + escAttr(img.image) + '" alt="商品图片" onclick="showImgPreview(\'/upload/' + escAttr(img.image) + '\')">' +
+                '<button class="del-img-btn lock-hide" data-image-id="' + escAttr(img.image_id) + '">× 删除</button>' +
+            '</div>' +
+            '<div class="img-meta">' + badgeHtml + btnHtml + '</div>';
         imgArea.appendChild(div);
         // 给新上传的 record 图叠加商品名 + 规格
         if (recordInfo && (recordInfo.product_name || recordInfo.specification)) {
             applyRecordImageOverlay(div, recordInfo.record_pk, recordInfo.product_name, recordInfo.specification);
         }
     });
-    bindDeleteImageButtons();  // 复用现有删除按钮绑定
+    bindDeleteImageButtons();
+    bindManualConfirmButtons();   // 复用新上传图的确认按钮绑定
+}
+
+// 手工确认按钮 click handler(把红牌标记为人工已确认)
+function bindManualConfirmButtons() {
+    document.querySelectorAll('.manual-confirm-btn:not([data-bound])').forEach(function(btn) {
+        btn.setAttribute('data-bound', '1');
+        btn.addEventListener('click', function() {
+            var imgId = this.getAttribute('data-image-id');
+            var self = this;
+            self.disabled = true;
+            self.textContent = '确认中...';
+            fetch('/api/v1/shipping-orders/images/' + imgId + '/manual-verify', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({verified: true})
+            }).then(function(res) { return res.json(); }).then(function(data) {
+                if (data.success) {
+                    // 把按钮替换成 "✓ 已人工确认" 标记
+                    var marker = document.createElement('span');
+                    marker.className = 'manual-verified-marker';
+                    marker.setAttribute('data-verified-marker', imgId);
+                    marker.textContent = '✓ 已人工确认';
+                    self.parentNode.replaceChild(marker, self);
+                    // 同步刷新该 record 行级徽章(图红牌→绿后,行 best 可能也变绿)
+                    var imgItem = marker.closest('.img-item-record');
+                    var recordPk = imgItem && imgItem.getAttribute('data-record-pk');
+                    if (recordPk) refreshRowMatchBadge(recordPk);
+                } else {
+                    self.disabled = false;
+                    self.textContent = '✓ 确认通过';
+                    alert('确认失败: ' + (data.error || ''));
+                }
+            }).catch(function() {
+                self.disabled = false;
+                self.textContent = '✓ 确认通过';
+                alert('请求失败');
+            });
+        });
+    });
 }
 
 // ── "已核查"按钮回调(给 _smart_add_modal.html 的事件代理调用)──
