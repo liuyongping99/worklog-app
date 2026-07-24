@@ -29,18 +29,18 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _run_label_match(image_abspath, record):
-    """对一张行级图跑 OCR + 本地匹配，返回 (status, score)。失败则 ('', None) 不阻断上传。"""
+    """对一张行级图跑 OCR + 本地匹配，返回 (status, score, reason)。失败则 ('', None, '') 不阻断上传。"""
     try:
         with open(image_abspath, 'rb') as f:
             img_bytes = f.read()
         text = PaddleOCREngine().extract_text(img_bytes)
-        status, score = match_label_to_row(
+        status, score, reason = match_label_to_row(
             text, record.get('product_name', ''), record.get('specification', '')
         )
-        return status, score
+        return status, score, reason
     except Exception:
         current_app.logger.exception('行级图片 OCR 匹配失败（不阻断上传）')
-        return '', None
+        return '', None, ''
 
 
 def _get_upload_dir():
@@ -78,8 +78,8 @@ def shipping_records():
     # 把每个订单的所有 record 级图也按 source 分到上面两个 dict
     # 同时按 record 汇总 match_status 最高分那张的档位(green > yellow > red),
     # 给到前端做「行级徽章」首屏渲染(刷新不丢)。
-    record_best_status_map = {}  # record_id -> 'green'/'yellow'/'red'
     _status_rank = {'green': 3, 'yellow': 2, 'red': 1}
+    record_best_reason_map = {}  # record_id -> 该 record 最高分档图对应的 reason(给 hover 用)
     for grp in groups:
         all_record_imgs = []
         for rec in grp.get('records', []):
@@ -89,9 +89,14 @@ def shipping_records():
                 status = img.get('match_status') or ''
                 if not status:
                     continue
+                # 2026-07-24:human_verified=1 的红牌视为已通过(等价 green)
+                # 这样:刷新页面时,人工确认过的红牌不会让行级徽章仍然是 ✗
+                if status == 'red' and img.get('human_verified'):
+                    status = 'green'
                 cur = record_best_status_map.get(rec['id'])
                 if cur is None or _status_rank.get(status, 0) > _status_rank.get(cur, 0):
                     record_best_status_map[rec['id']] = status
+                    record_best_reason_map[rec['id']] = img.get('reason') or ''
         for img in all_record_imgs:
             target = ai_images if img.get('source') == 'ai' else order_non_ai
             target.setdefault(grp['id'], []).append(img)
@@ -163,6 +168,15 @@ def shipping_records():
                 item['piece_hint'] = ''
                 item['piece_mismatch'] = ''
         group.update(summarize_remarks(group['records']))
+        group['has_eco'] = any('环保' in r.get('product_name', '') for r in group['records'])
+        group['has_match'] = any(record_best_status_map.get(r['id']) for r in group['records'])
+
+    # 2026-07-24: 把所有 group 的 records 合并成 record_by_pk,模板里给图片叠加品名/规格用
+    # (服务端渲染,不依赖 JS 加载 — 之前靠 JS append 在某些场景下不稳定)
+    record_by_pk = {}
+    for grp in groups:
+        for r in grp.get('records', []):
+            record_by_pk[r['id']] = r
 
     return render_template(
         'shipping-records.html',
@@ -170,6 +184,8 @@ def shipping_records():
         order_images=order_non_ai,  # 模板里变量名仍叫 order_images,但内容已剔 AI
         ai_images=ai_images,
         record_best_status_map=record_best_status_map,
+        record_best_reason_map=record_best_reason_map,
+        record_by_pk=record_by_pk,   # 2026-07-24 新增:图片叠加文字用的 record 查表
         page_title='出货记录',
         today=today,
         start_date=start_date,
@@ -533,6 +549,29 @@ def api_v1_shipping_orders_delete_image(image_id):
     return jsonify({'success': False, 'error': '图片不存在'}), 404
 
 
+@bp.route('/api/v1/shipping-orders/images/<int:image_id>/manual-verify', methods=['POST'])
+def api_v1_shipping_orders_manual_verify_image(image_id):
+    """人工覆盖 AI 比对结果(把红牌标记为已确认)→ 200
+
+    Body (可选): {"verified": true|false}，默认 true。
+    副作用:写 shipping_images.human_verified + 写审计日志。
+    """
+    img = ShippingImage.get_by_id(image_id)
+    if not img:
+        return jsonify({'success': False, 'error': '图片不存在'}), 404
+    order = ShippingOrder.get_by_id(img['order_pk'])
+    if order and order.get('is_locked'):
+        return jsonify({'success': False, 'error': '订单已锁定，无法操作'}), 403
+    data = request.get_json(silent=True) or {}
+    verified = bool(data.get('verified', True))
+    ShippingImage.set_human_verified(image_id, verified)
+    AuditLog.log(
+        'manual_verify_image', 'shipping_order', img['order_pk'],
+        detail={'image_id': image_id, 'human_verified': 1 if verified else 0},
+    )
+    return jsonify({'success': True, 'image_id': image_id, 'human_verified': verified})
+
+
 # ── 商品行级图片(挂在 record 上,合并订单级共享图展示) ──
 def _save_one_uploaded_file(file, upload_dir):
     """保存一个上传文件到 upload_dir,返回 (filepath, original_name)。失败抛 ValueError。"""
@@ -598,9 +637,9 @@ def api_v1_shipping_orders_record_upload_images(record_id):
             rel_path = os.path.join(month_str, os.path.basename(filepath)).replace('\\', '/')
             # 取刚插入的 sort_order
             img = ShippingImage.get_by_id(image_id)
-            status, score = _run_label_match(filepath, record)
+            status, score, reason = _run_label_match(filepath, record)
             if status:
-                ShippingImage.set_match(image_id, status, score)
+                ShippingImage.set_match(image_id, status, score, reason)
             saved.append({
                 'image_id': image_id,
                 'image': rel_path,
@@ -631,9 +670,9 @@ def api_v1_shipping_orders_record_upload_images(record_id):
         )
         rel_path = os.path.join(month_str, os.path.basename(filepath)).replace('\\', '/')
         img = ShippingImage.get_by_id(image_id)
-        status, score = _run_label_match(filepath, record)
+        status, score, reason = _run_label_match(filepath, record)
         if status:
-            ShippingImage.set_match(image_id, status, score)
+            ShippingImage.set_match(image_id, status, score, reason)
         AuditLog.log('upload_image', 'shipping_order', record['order_pk'],
                      detail={'filename': rel_path, 'source': source, 'record_id': record_id})
         return jsonify({'success': True, 'images': [{
@@ -799,9 +838,11 @@ def api_v1_shipping_orders_ai_match(order_id):
                   'ok': 'green', 'yes': 'green', 'no': 'red', 'unknown': 'yellow'}.get(
             str(raw_status).strip().lower(), 'red')
         score = _SCORE.get(status, 30.0)
+        reason = v.get('reason', '') or ''
         for img in ShippingImage.get_by_record(rid):
-            ShippingImage.set_match(img['id'], status, score)
-        results.append({'record_id': rid, 'match_status': status, 'match_score': score})
+            ShippingImage.set_match(img['id'], status, score, reason)
+        results.append({'record_id': rid, 'match_status': status, 'match_score': score,
+                        'reason': reason})
 
     g = sum(1 for r in results if r['match_status'] == 'green')
     y = sum(1 for r in results if r['match_status'] == 'yellow')

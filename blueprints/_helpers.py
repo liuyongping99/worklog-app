@@ -463,13 +463,16 @@ def match_label_to_row(ocr_text, product_name, specification=''):
     """标签 OCR 文本 vs 本行 品名+规格 的模糊匹配（品名为主 + 规格加分）。
 
     Returns:
-        (status, score): status ∈ {'green', 'yellow', 'red'}, score ∈ 0.0~100.0
+        (status, score, reason): status ∈ {'green', 'yellow', 'red'},
+                                score ∈ 0.0~100.0,
+                                reason: 中文判定依据,前端 hover 提示用
+                                        统一前缀"本地模糊匹配"与 DeepSeek 区分。
     """
     text = _normalize_for_match(ocr_text)
     name = _normalize_for_match(product_name)
     spec = _normalize_for_match(specification)
     if not text or not name:
-        return ('red', 0.0)
+        return ('red', 0.0, '本地模糊匹配失败: 标签或品名为空')
 
     # 品名：字符级 token_set_ratio（无视顺序）与 partial_ratio（容忍目标只是文本的一段）取大
     name_score = max(
@@ -479,12 +482,25 @@ def match_label_to_row(ocr_text, product_name, specification=''):
     score = float(name_score)
 
     # 规格加分：命中则往上抬（最多约 +15，封顶 100）
+    spec_score = 0.0
     if spec:
         spec_score = fuzz.partial_ratio(spec, text)
         score = min(100.0, name_score + spec_score * 0.15)
 
     if score >= 85:
-        return ('green', score)
-    if score >= 60:
-        return ('yellow', score)
-    return ('red', score)
+        status = 'green'
+    elif score >= 60:
+        status = 'yellow'
+    else:
+        status = 'red'
+
+    # 构造中文 reason: "本地模糊匹配 92分 (品名命中, 规格命中)"
+    score_str = f'{score:.0f}'
+    name_hit = '命中' if name_score >= 60 else '未命中'
+    parts = [f'品名{name_hit}']
+    if spec:
+        spec_hit = '命中' if spec_score >= 60 else '未命中'
+        parts.append(f'规格{spec_hit}')
+    reason = f'本地模糊匹配 {score_str}分 ({", ".join(parts)})'
+
+    return (status, score, reason)

@@ -849,13 +849,32 @@ class ShippingImage:
         return dict(row) if row else None
 
     @staticmethod
-    def set_match(image_id: int, status: str, score: float):
-        """写入标签匹配结果（match_status/match_score）。"""
+    def set_match(image_id: int, status: str, score: float, reason: str = ''):
+        """写入标签匹配结果（match_status/match_score/reason）。
+
+        reason: DeepSeek 返回的中文判定依据(给前端 hover 提示用),行级 RapidFuzz
+                上传时为空字符串(本地算法不产出 reason)。
+        """
         conn = get_db()
         cursor = conn.cursor()
         cursor.execute(
-            'UPDATE shipping_images SET match_status = ?, match_score = ? WHERE id = ?',
-            (status, score, image_id)
+            'UPDATE shipping_images SET match_status = ?, match_score = ?, reason = ? WHERE id = ?',
+            (status, score, reason or None, image_id)
+        )
+        conn.commit()
+        conn.close()
+
+    @staticmethod
+    def set_human_verified(image_id: int, verified: bool = True):
+        """人工覆盖 AI 比对结果(目前仅用于红牌的"确认通过")。
+
+        写入后前端应把红牌徽章视为已确认(可隐藏确认按钮,或展示"已确认"标记)。
+        """
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            'UPDATE shipping_images SET human_verified = ? WHERE id = ?',
+            (1 if verified else 0, image_id)
         )
         conn.commit()
         conn.close()

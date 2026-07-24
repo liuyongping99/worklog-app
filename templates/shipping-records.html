@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
+<div class="shipping-page">
 <style>
 /* ── 出货页专属色：成功绿 ── */
 :root { --page-accent: #00b894; --page-accent-bg: #d4f5e9; --page-accent-light-bg: #f8fff8; }
@@ -1593,5 +1594,7 @@ window.unmarkRecordVerified = function(recordId, dataRow) {
     }).catch(function(err) { alert('请求失败：' + err); });
 };
 </script>
+
+</div><!-- /.shipping-page -->
 
 {% endblock %}

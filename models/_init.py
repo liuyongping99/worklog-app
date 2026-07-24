@@ -179,6 +179,18 @@ def init_db():
         except Exception:
             pass  # 列已存在
 
+    # 迁移：shipping_images 加 reason（AI 比对详细理由，hover 提示用）
+    try:
+        cursor.execute("ALTER TABLE shipping_images ADD COLUMN reason TEXT DEFAULT NULL")
+    except Exception:
+        pass  # 列已存在
+
+    # 迁移：shipping_images 加 human_verified（人工覆盖 AI 红牌:0=未确认,1=已人工确认）
+    try:
+        cursor.execute("ALTER TABLE shipping_images ADD COLUMN human_verified INTEGER DEFAULT 0")
+    except Exception:
+        pass  # 列已存在
+
     # ── shipping_images（出货订单图片） ──
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS shipping_images (
@@ -192,6 +204,8 @@ def init_db():
             sort_order INTEGER NOT NULL DEFAULT 0,
             match_status TEXT DEFAULT NULL,
             match_score REAL DEFAULT NULL,
+            reason TEXT DEFAULT NULL,
+            human_verified INTEGER DEFAULT 0,
             FOREIGN KEY (order_pk) REFERENCES shipping_orders(id)
         )
     ''')
