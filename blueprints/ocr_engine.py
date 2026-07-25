@@ -315,6 +315,36 @@ def _filter_summary_items(items):
 # 引擎接口
 # ═══════════════════════════════════════════════════════════════════
 
+
+def _api_error_detail(e):
+    """从 OpenAI SDK 的 APIStatusError 提取服务端 body.message。
+
+    不抛异常,失败返回空串。便于把"模型不存在/余额不足/参数非法"等
+    具体原因透传到前端 error 字段,避免只看 400/401/422 还要查日志。
+
+    兼容两种 body 结构:
+      - OpenAI / Moonshot: {"error": {"message": "..."}}
+      - DeepSeek:          {"message": "...", "type": "...", "code": "..."}
+    """
+    try:
+        body = getattr(e, 'body', None) or {}
+        if not isinstance(body, dict):
+            return ''
+        # 优先找嵌套结构 (OpenAI / Moonshot 风格)
+        err = body.get('error')
+        if isinstance(err, dict):
+            msg = err.get('message')
+            if isinstance(msg, str) and msg:
+                return f' - {msg}'
+        # 兜底:找顶层 message (DeepSeek 风格)
+        msg = body.get('message')
+        if isinstance(msg, str) and msg:
+            return f' - {msg}'
+    except Exception:
+        pass
+    return ''
+
+
 class BaseOCREngine(ABC):
     """OCR 引擎基类。"""
 
@@ -329,11 +359,15 @@ class BaseOCREngine(ABC):
 # ═══════════════════════════════════════════════════════════════════
 
 class MoonshotEngine(BaseOCREngine):
-    """Moonshot Kimi k2.6 Vision API 引擎。"""
+    """Moonshot Kimi k2.6 Vision API 引擎。
+
+    维护提示(2026-07-25):Moonshot 也会下线旧模型,如果未来出现 400 "model not found",
+    先到 https://platform.moonshot.cn/docs 查看当前可用模型清单再改这里。
+    """
 
     API_KEY = os.environ.get('MOONSHOT_API_KEY', '')
     BASE_URL = 'https://api.moonshot.cn/v1'
-    MODEL = 'kimi-k2.6'
+    MODEL = 'kimi-k2.6'  # Moonshot 当前视觉模型;下线时改这里
     MAX_TOKENS = 4000
     TEMPERATURE = 1  # Kimi k2.6 锁死 temperature 必须为 1
     TIMEOUT = 60
@@ -499,8 +533,8 @@ class MoonshotEngine(BaseOCREngine):
         except openai.APIStatusError as e:
             return {
                 'success': False,
-                'error': f'AI 服务返回异常（{e.status_code}）',
-                'hint': '请稍后重试，或检查 Moonshot 平台状态'
+                'error': f'AI 服务返回异常（{e.status_code}）{_api_error_detail(e)}',
+                'hint': '请根据错误信息检查请求参数,或检查 Moonshot 平台状态'
             }
         except json.JSONDecodeError:
             return {
@@ -626,11 +660,15 @@ class DeepSeekEngine(BaseOCREngine):
 
     兼具离线 OCR 的免费优势和云端 LLM 的语义理解能力，
     文字 token 极便宜（单次约 0.0001 元）。
+
+    维护提示(2026-07-25):DeepSeek 已把 deepseek-chat 废弃,当前仅支持
+    deepseek-v4-pro / deepseek-v4-flash。如果未来 v4 也下线,先到
+    https://api-docs.deepseek.com 查看 error_codes 和模型清单再改 MODEL。
     """
 
     API_KEY = os.environ.get('DEEPSEEK_API_KEY', '')
     BASE_URL = 'https://api.deepseek.com/v1'
-    MODEL = 'deepseek-chat'
+    MODEL = 'deepseek-v4-flash'  # 当前活跃;v4-flash 比 v4-pro 便宜约 10 倍,纯文本结构化够用
     MAX_TOKENS = 4000
     TIMEOUT = 30
 
@@ -893,8 +931,8 @@ class DeepSeekEngine(BaseOCREngine):
         except openai.APIStatusError as e:
             return {
                 'success': False,
-                'error': f'DeepSeek 服务返回异常（{e.status_code}）',
-                'hint': '请稍后重试，或检查 DeepSeek 平台状态'
+                'error': f'DeepSeek 服务返回异常（{e.status_code}）{_api_error_detail(e)}',
+                'hint': '请根据错误信息检查请求参数,或检查 DeepSeek 平台状态'
             }
         except json.JSONDecodeError:
             return {
@@ -917,6 +955,15 @@ class DeepSeekEngine(BaseOCREngine):
 
 _engine_cache = {}
 _VALID_ENGINES = ('moonshot', 'paddleocr', 'deepseek')
+
+# 引擎 → 当前活跃模型(防回归参考表)
+# 维护原则:DeepSeek/Moonshot 偶尔下线旧模型,出现 400 + "model not found" 时来这里对照,
+# 到对应平台 docs 查最新清单后改对应引擎类的 MODEL 常量。
+_ACTIVE_MODELS = {
+    'moonshot': 'kimi-k2.6',
+    'deepseek': 'deepseek-v4-flash',  # v4-pro 备选,价格 10x
+    'paddleocr': '(本地模型,无需 token)',
+}
 
 
 def get_ocr_engine(engine_name=None):
