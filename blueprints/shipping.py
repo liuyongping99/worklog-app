@@ -79,6 +79,7 @@ def shipping_records():
     # 同时按 record 汇总 match_status 最高分那张的档位(green > yellow > red),
     # 给到前端做「行级徽章」首屏渲染(刷新不丢)。
     _status_rank = {'green': 3, 'yellow': 2, 'red': 1}
+    record_best_status_map = {}  # record_id -> 'green'/'yellow'/'red'(行级徽章)
     record_best_reason_map = {}  # record_id -> 该 record 最高分档图对应的 reason(给 hover 用)
     for grp in groups:
         all_record_imgs = []
