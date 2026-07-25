@@ -417,7 +417,8 @@
             {% endif %}
             {% set has_eco = group.has_eco|default(false) %}
             {% set has_match = group.has_match|default(false) %}
-            <table class="record-table{% if not has_eco %} no-eco{% endif %}{% if not has_match %} no-match{% endif %}">
+            {% set has_jia_mian = group.has_jia_mian|default(false) %}
+            <table class="record-table{% if not has_eco and not has_jia_mian %} no-eco{% endif %}{% if not has_match %} no-match{% endif %}">
                 <thead>
                     <tr>
                         <th style="width:35px;">序号</th>

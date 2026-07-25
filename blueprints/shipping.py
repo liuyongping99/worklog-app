@@ -169,6 +169,11 @@ def shipping_records():
                 item['piece_mismatch'] = ''
         group.update(summarize_remarks(group['records']))
         group['has_eco'] = any('环保' in r.get('product_name', '') for r in group['records'])
+        group['has_jia_mian'] = any(
+            '杂胶' in r.get('product_name', '')
+            and '加面' in r.get('specification', '')
+            for r in group['records']
+        )
         group['has_match'] = any(record_best_status_map.get(r['id']) for r in group['records'])
 
     # 2026-07-24: 把所有 group 的 records 合并成 record_by_pk,模板里给图片叠加品名/规格用
