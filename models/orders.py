@@ -911,6 +911,106 @@ class ShippingImage:
             _safe_remove_file(file_path)
 
 
+class OcrMatchEvent:
+    """出货 OCR/AI/人工核查三类事件的 append-only 日志。
+
+    三类事件:
+      - 'record_ocr':  行级图片上传后,本地 OCR + fuzzy 匹配结果
+      - 'ai_match':    整单 ai-match 后,DeepSeek 比对结果(每个 record 一条)
+      - 'human_verify':人工核查 manual-verify 时,该图的 AI 裁决 vs 人裁决
+    """
+    # 允许写入字段白名单(防 SQL 注入,只接受已知列)
+    _ALLOWED_FIELDS = {
+        'ocr_text', 'ocr_engine', 'product_name', 'specification',
+        'prompt_payload', 'ai_match_status', 'ai_match_score',
+        'ai_match_reason', 'ai_raw_response', 'ai_engine',
+        'prompt_version', 'human_status', 'human_reason',
+        'human_verified_by', 'created_at',
+    }
+
+    @staticmethod
+    def create(event_type: str, record_id: int, order_id: int, image_id: int = None, **fields) -> int:
+        """写一条事件。失败时 logger.error,不抛回。"""
+        import logging
+        from datetime import datetime as _dt
+        from . import _db as _db_mod
+        conn = None
+        try:
+            conn = _db_mod.get_db()
+            cursor = conn.cursor()
+            data = {
+                'event_type': event_type,
+                'record_id': record_id,
+                'order_id': order_id,
+                'image_id': image_id,
+            }
+            for k, v in fields.items():
+                if k in OcrMatchEvent._ALLOWED_FIELDS:
+                    data[k] = v
+            # created_at 默认 = 现在
+            data.setdefault('created_at', _dt.now().strftime('%Y-%m-%d %H:%M:%S'))
+            cols = list(data.keys())
+            placeholders = ','.join('?' for _ in cols)
+            sql = f'INSERT INTO ocr_match_event ({",".join(cols)}) VALUES ({placeholders})'
+            cursor.execute(sql, [data[k] for k in cols])
+            eid = cursor.lastrowid
+            conn.commit()
+            conn.close()
+            return eid
+        except Exception:
+            logging.getLogger(__name__).exception(
+                'OcrMatchEvent.create 失败 (event=%s record=%s):', event_type, record_id,
+            )
+            try:
+                if conn:
+                    conn.close()
+            except Exception:
+                pass
+            return None
+
+    @staticmethod
+    def get_by_record(record_id: int, event_type: str = None) -> list:
+        """查某明细行的所有事件(老→新)。event_type 过滤可选。"""
+        conn = get_db()
+        cursor = conn.cursor()
+        if event_type:
+            cursor.execute(
+                'SELECT * FROM ocr_match_event WHERE record_id = ? AND event_type = ? ORDER BY created_at ASC, id ASC',
+                (record_id, event_type),
+            )
+        else:
+            cursor.execute(
+                'SELECT * FROM ocr_match_event WHERE record_id = ? ORDER BY created_at ASC, id ASC',
+                (record_id,),
+            )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+
+    @staticmethod
+    def get_by_order(order_id: int, event_type: str = None) -> list:
+        """查某订单所有事件(老→新;先 record_id 内排序、再合并)。"""
+        conn = get_db()
+        cursor = conn.cursor()
+        if event_type:
+            cursor.execute(
+                'SELECT * FROM ocr_match_event WHERE order_id = ? AND event_type = ? ORDER BY record_id ASC, created_at ASC, id ASC',
+                (order_id, event_type),
+            )
+        else:
+            cursor.execute(
+                'SELECT * FROM ocr_match_event WHERE order_id = ? ORDER BY record_id ASC, created_at ASC, id ASC',
+                (order_id,),
+            )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+
+    @staticmethod
+    def get_ai_human_delta(record_id: int) -> list:
+        """取同 record 的所有事件;分析 AI vs 人裁决一致率时用。"""
+        return OcrMatchEvent.get_by_record(record_id)
+
 class LoadingOrder:
     """装柜订单主表"""
     @staticmethod
