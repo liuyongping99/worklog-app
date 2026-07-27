@@ -97,7 +97,8 @@ class ComparePromptOrder575Tests(unittest.TestCase):
                 'DEEPSEEK_API_KEY 未设置,跳过(本测试需要真实 API 调用)'
             )
         cls.engine = DeepSeekEngine()
-        cls.actual = cls.engine.compare_rows(cls.ocr_text, ROWS)
+        # compare_rows 现在返回 {'verdicts': [...], 'prompt': '...'} 取 verdicts 部分
+        cls.actual = cls.engine.compare_rows(cls.ocr_text, ROWS)['verdicts']
         # 打印对照表,无论 pass/fail 都输出,方便调试
         _print_verdict_table(cls.actual, cls.ocr_text)
 

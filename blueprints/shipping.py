@@ -8,6 +8,7 @@ import os
 import uuid
 import base64
 import re
+import json
 from datetime import date as date_cls, timedelta, datetime
 from flask import Blueprint, render_template, request, jsonify, current_app
 from models import (
@@ -21,7 +22,7 @@ from blueprints._helpers import (
     validate_image_content, check_uploaded_image,
     match_label_to_row,
 )
-from blueprints.ocr_engine import PaddleOCREngine, get_ocr_engine
+from blueprints.ocr_engine import PaddleOCREngine, get_ocr_engine, OCR_MATCH_PROMPT_VERSION
 from blueprints import _helpers
 
 bp = Blueprint('shipping', __name__)
@@ -867,7 +868,9 @@ def api_v1_shipping_orders_ai_match(order_id):
              'specification': r['specification']} for r in records]
     try:
         engine = get_ocr_engine('deepseek')
-        verdicts = engine.compare_rows(ocr_text, rows)
+        ai_result = engine.compare_rows(ocr_text, rows)
+        verdicts = ai_result.get('verdicts', []) if isinstance(ai_result, dict) else ai_result
+        prompt_payload_text = ai_result.get('prompt', '') if isinstance(ai_result, dict) else ''
     except Exception as e:
         current_app.logger.exception('DeepSeek 比对失败: %s', e)
         return jsonify({'success': False, 'error': f'AI 比对失败:{type(e).__name__}'}), 500
@@ -888,6 +891,28 @@ def api_v1_shipping_orders_ai_match(order_id):
             ShippingImage.set_match(img['id'], status, score, reason)
         results.append({'record_id': rid, 'match_status': status, 'match_score': score,
                         'reason': reason})
+        # append-only ai_match 事件(每个 record 一条;image_id 留空,代表聚合 OCR 比对结果)
+        try:
+            rec_lookup = {r['id']: r for r in records}
+            rec = rec_lookup.get(rid, {})
+            OcrMatchEvent.create(
+                'ai_match',
+                record_id=rid, order_id=order_id, image_id=None,
+                ocr_text=ocr_text,
+                ocr_engine='paddleocr',
+                product_name=rec.get('product_name', ''),
+                specification=rec.get('specification', ''),
+                prompt_payload=prompt_payload_text or None,
+                ai_match_status=status,
+                ai_match_score=score,
+                ai_match_reason=reason or None,
+                ai_raw_response=json.dumps(v, ensure_ascii=False) if v else None,
+                ai_engine='deepseek',
+                prompt_version=OCR_MATCH_PROMPT_VERSION,
+            )
+        except Exception:
+            # OcrMatchEvent.create 内部已 try/except,这里再兜一层,绝不让事件写库失败影响主流程
+            current_app.logger.exception('ai_match 事件写库失败 (order=%s, record=%s)', order_id, rid)
 
     g = sum(1 for r in results if r['match_status'] == 'green')
     y = sum(1 for r in results if r['match_status'] == 'yellow')

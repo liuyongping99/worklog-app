@@ -814,24 +814,27 @@ class DeepSeekEngine(BaseOCREngine):
             rows: [{'record_id': int, 'product_name': str, 'specification': str}, ...]
 
         Returns:
-            list[dict] - 每项 {'record_id', 'match_status', 'reason'}
+            {'verdicts': list[dict], 'prompt': str} -
+                verdicts 每项 {'record_id', 'match_status', 'reason'};
+                prompt 是实际发给 DeepSeek 的完整 prompt 文本（事件日志审计用）。
         """
         rows_json = json.dumps(
             [{'record_id': r['record_id'], 'product_name': r.get('product_name', ''),
               'specification': r.get('specification', '')} for r in rows],
             ensure_ascii=False)
+        prompt_text = (self.COMPARE_PROMPT + '\n【OCR文字】\n' + ocr_text +
+                       '\n【明细行】\n' + rows_json)
         client = openai.OpenAI(api_key=self.API_KEY, base_url=self.BASE_URL)
         response = client.chat.completions.create(
             model=self.MODEL,
-            messages=[{'role': 'user', 'content':
-                       self.COMPARE_PROMPT + '\n【OCR文字】\n' + ocr_text +
-                       '\n【明细行】\n' + rows_json}],
+            messages=[{'role': 'user', 'content': prompt_text}],
             max_tokens=self.MAX_TOKENS, timeout=self.TIMEOUT)
         raw = response.choices[0].message.content.strip()
         raw = re.sub(r'^\s*```[a-zA-Z]*\s*\n?', '', raw)
         raw = re.sub(r'\n?\s*```\s*$', '', raw).strip()
         data = json.loads(raw)
-        return data if isinstance(data, list) else data.get('results', [])
+        verdicts = data if isinstance(data, list) else data.get('results', [])
+        return {'verdicts': verdicts, 'prompt': prompt_text}
 
     def __init__(self):
         self._ocr_engine = PaddleOCREngine()
