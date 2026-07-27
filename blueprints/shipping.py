@@ -11,7 +11,8 @@ import re
 from datetime import date as date_cls, timedelta, datetime
 from flask import Blueprint, render_template, request, jsonify, current_app
 from models import (
-    ShippingOrder, ShippingRecord, ShippingImage, ProductUnit, PieceConversion, AuditLog
+    ShippingOrder, ShippingRecord, ShippingImage, ProductUnit, PieceConversion, AuditLog,
+    OcrMatchEvent,
 )
 from blueprints._helpers import (
     get_upload_dir as get_helpers_upload_dir,
@@ -643,9 +644,28 @@ def api_v1_shipping_orders_record_upload_images(record_id):
             rel_path = os.path.join(month_str, os.path.basename(filepath)).replace('\\', '/')
             # 取刚插入的 sort_order
             img = ShippingImage.get_by_id(image_id)
+            # 提取 OCR 文本(用于事件记录)—— 直接调 paddleocr engine,不去碰 _run_label_match 的现有契约
+            ocr_text = ''
+            try:
+                with open(filepath, 'rb') as _f:
+                    ocr_text = get_ocr_engine('paddleocr').extract_text(_f.read()) or ''
+            except Exception:
+                current_app.logger.exception('记录 OCR 文本失败(不阻断): %s', filepath)
             status, score, reason = _run_label_match(filepath, record)
             if status:
                 ShippingImage.set_match(image_id, status, score, reason)
+            # 新增:append-only record_ocr 事件
+            OcrMatchEvent.create(
+                'record_ocr', record_id=record_id, order_id=record['order_pk'], image_id=image_id,
+                ocr_text=ocr_text,
+                ocr_engine='paddleocr',
+                ai_engine='local_fuzzy',
+                ai_match_status=status or None,
+                ai_match_score=score,
+                ai_match_reason=reason or None,
+                product_name=record.get('product_name', ''),
+                specification=record.get('specification', ''),
+            )
             saved.append({
                 'image_id': image_id,
                 'image': rel_path,
@@ -676,9 +696,28 @@ def api_v1_shipping_orders_record_upload_images(record_id):
         )
         rel_path = os.path.join(month_str, os.path.basename(filepath)).replace('\\', '/')
         img = ShippingImage.get_by_id(image_id)
+        # 跑 OCR 拿文本(用于事件记录) + 跑匹配(供徽章)
+        ocr_text = ''
+        try:
+            with open(filepath, 'rb') as _f:
+                ocr_text = get_ocr_engine('paddleocr').extract_text(_f.read()) or ''
+        except Exception:
+            current_app.logger.exception('记录 OCR 文本失败(不阻断): %s', filepath)
         status, score, reason = _run_label_match(filepath, record)
         if status:
             ShippingImage.set_match(image_id, status, score, reason)
+        # 新增:append-only record_ocr 事件
+        OcrMatchEvent.create(
+            'record_ocr', record_id=record_id, order_id=record['order_pk'], image_id=image_id,
+            ocr_text=ocr_text,
+            ocr_engine='paddleocr',
+            ai_engine='local_fuzzy',
+            ai_match_status=status or None,
+            ai_match_score=score,
+            ai_match_reason=reason or None,
+            product_name=record.get('product_name', ''),
+            specification=record.get('specification', ''),
+        )
         AuditLog.log('upload_image', 'shipping_order', record['order_pk'],
                      detail={'filename': rel_path, 'source': source, 'record_id': record_id})
         return jsonify({'success': True, 'images': [{
