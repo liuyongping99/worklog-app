@@ -191,6 +191,35 @@ def init_db():
     except Exception:
         pass  # 列已存在
 
+    # 迁移(2026-07-27):出货 OCR 比对事件 append-only 日志,供未来提示词优化用
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS ocr_match_event (
+        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+        record_id           INTEGER NOT NULL,
+        image_id            INTEGER,
+        order_id            INTEGER NOT NULL,
+        event_type          TEXT NOT NULL,
+        ocr_text            TEXT,
+        ocr_engine          TEXT,
+        product_name        TEXT,
+        specification       TEXT,
+        prompt_payload      TEXT,
+        ai_match_status     TEXT,
+        ai_match_score      REAL,
+        ai_match_reason     TEXT,
+        ai_raw_response     TEXT,
+        ai_engine           TEXT,
+        prompt_version      TEXT,
+        human_status        TEXT,
+        human_reason        TEXT,
+        human_verified_by   INTEGER,
+        created_at          TEXT NOT NULL,
+        FOREIGN KEY (record_id) REFERENCES shipping_records(id) ON DELETE CASCADE
+    )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_ocr_match_record ON ocr_match_event(record_id, event_type, created_at DESC)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_ocr_match_order  ON ocr_match_event(order_id, created_at DESC)')
+
     # ── shipping_images（出货订单图片） ──
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS shipping_images (
