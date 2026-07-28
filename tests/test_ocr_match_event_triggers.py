@@ -225,5 +225,62 @@ class HumanVerifyEventTriggerTests(_Base):
             pass
 
 
+class WriteFailureResilienceTests(_Base):
+    """防御测试:即便 OcrMatchEvent.create 抛错(模拟 DB 故障/重构漏 try/except),
+    主端点仍按正常路径返 200/201,事件丢失是审计可接受的代价。"""
+
+    @mock.patch('blueprints.shipping.get_ocr_engine')
+    def test_record_ocr_event_db_failure_doesnt_block(self, mock_factory):
+        """multipart 上传时事件写库失败,主端点仍返 201。"""
+        # 1) 让 OCR 跑成功
+        fake_paddle = mock.MagicMock()
+        fake_paddle.extract_text.return_value = '硬加面 黑色'
+        mock_factory.side_effect = lambda name: fake_paddle if name == 'paddleocr' else mock.DEFAULT
+
+        # 2) 在事件写库时让 OcrMatchEvent.create 抛 DB 错误
+        from models import OcrMatchEvent, ShippingImage
+        from blueprints.shipping import BASE_DIR
+        def boom(*a, **kw):
+            raise RuntimeError('db connection lost')
+        with mock.patch.object(OcrMatchEvent, 'create', side_effect=boom):
+            data = {'image': (io.BytesIO(b'\x89PNG\r\n\x1a\n' + b'0' * 64), 'x.png')}
+            resp = self.client.post(
+                f'/api/v1/shipping-orders/records/{self.rid}/images',
+                data=data, content_type='multipart/form-data',
+            )
+        self.assertEqual(resp.status_code, 201, '主端点不应被审计失败阻断')
+
+        # 清理
+        try:
+            imgs = ShippingImage.get_by_record(self.rid)
+            for i in imgs:
+                abspath = os.path.join(BASE_DIR, i['file_path'].replace('/', os.sep))
+                try:
+                    os.unlink(abspath)
+                except OSError:
+                    pass
+        except Exception:
+            pass
+
+
+class CascadeTests(_Base):
+    """FK ON DELETE CASCADE 验证:删 shipping_record 时,关联 ocr_match_event 自动清掉。"""
+
+    def test_delete_record_cascades_to_events(self):
+        from models import ShippingRecord, OcrMatchEvent
+        # 先写 3 条
+        OcrMatchEvent.create('record_ocr', self.rid, self.oid, ai_match_status='green')
+        OcrMatchEvent.create('ai_match', self.rid, self.oid, ai_match_status='red')
+        OcrMatchEvent.create('human_verify', self.rid, self.oid, human_status='green')
+        self.assertEqual(len(OcrMatchEvent.get_by_record(self.rid)), 3)
+
+        # 删 record
+        ShippingRecord.delete(self.rid)
+
+        # 应为 0
+        self.assertEqual(len(OcrMatchEvent.get_by_record(self.rid)), 0,
+                         'FK CASCADE 应自动清理事件')
+
+
 if __name__ == '__main__':
     unittest.main()

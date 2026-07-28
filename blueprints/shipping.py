@@ -675,18 +675,21 @@ def api_v1_shipping_orders_record_upload_images(record_id):
             status, score, reason = _run_label_match(filepath, record)
             if status:
                 ShippingImage.set_match(image_id, status, score, reason)
-            # 新增:append-only record_ocr 事件
-            OcrMatchEvent.create(
-                'record_ocr', record_id=record_id, order_id=record['order_pk'], image_id=image_id,
-                ocr_text=ocr_text,
-                ocr_engine='paddleocr',
-                ai_engine='local_fuzzy',
-                ai_match_status=status or None,
-                ai_match_score=score,
-                ai_match_reason=reason or None,
-                product_name=record.get('product_name', ''),
-                specification=record.get('specification', ''),
-            )
+            # 新增:append-only record_ocr 事件(写入失败不阻断主流程)
+            try:
+                OcrMatchEvent.create(
+                    'record_ocr', record_id=record_id, order_id=record['order_pk'], image_id=image_id,
+                    ocr_text=ocr_text,
+                    ocr_engine='paddleocr',
+                    ai_engine='local_fuzzy',
+                    ai_match_status=status or None,
+                    ai_match_score=score,
+                    ai_match_reason=reason or None,
+                    product_name=record.get('product_name', ''),
+                    specification=record.get('specification', ''),
+                )
+            except Exception:
+                current_app.logger.exception('record_ocr 事件写库失败(不阻断)')
             saved.append({
                 'image_id': image_id,
                 'image': rel_path,
@@ -727,18 +730,21 @@ def api_v1_shipping_orders_record_upload_images(record_id):
         status, score, reason = _run_label_match(filepath, record)
         if status:
             ShippingImage.set_match(image_id, status, score, reason)
-        # 新增:append-only record_ocr 事件
-        OcrMatchEvent.create(
-            'record_ocr', record_id=record_id, order_id=record['order_pk'], image_id=image_id,
-            ocr_text=ocr_text,
-            ocr_engine='paddleocr',
-            ai_engine='local_fuzzy',
-            ai_match_status=status or None,
-            ai_match_score=score,
-            ai_match_reason=reason or None,
-            product_name=record.get('product_name', ''),
-            specification=record.get('specification', ''),
-        )
+        # 新增:append-only record_ocr 事件(写入失败不阻断主流程)
+        try:
+            OcrMatchEvent.create(
+                'record_ocr', record_id=record_id, order_id=record['order_pk'], image_id=image_id,
+                ocr_text=ocr_text,
+                ocr_engine='paddleocr',
+                ai_engine='local_fuzzy',
+                ai_match_status=status or None,
+                ai_match_score=score,
+                ai_match_reason=reason or None,
+                product_name=record.get('product_name', ''),
+                specification=record.get('specification', ''),
+            )
+        except Exception:
+            current_app.logger.exception('record_ocr 事件写库失败(不阻断)')
         AuditLog.log('upload_image', 'shipping_order', record['order_pk'],
                      detail={'filename': rel_path, 'source': source, 'record_id': record_id})
         return jsonify({'success': True, 'images': [{
