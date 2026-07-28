@@ -156,5 +156,74 @@ class RecordOcrTriggerTests(_Base):
         self.assertIsNone(events[0]['ai_match_status'])
 
 
+class HumanVerifyEventTriggerTests(_Base):
+    def test_human_verify_writes_event(self):
+        """人工核查后写 human_verify 事件,含 AI 之前怎么说的快照。"""
+        from models import ShippingImage, OcrMatchEvent
+        from models.tasks_flow import StaffDB
+        from blueprints.shipping import BASE_DIR
+        # 准备:上传一张图,设 AI=红牌,设人工=绿牌通过
+        upload_dir = os.path.join(BASE_DIR, 'upload', '2026-07')
+        os.makedirs(upload_dir, exist_ok=True)
+        abspath = os.path.join(upload_dir, 'v.png')
+        with open(abspath, 'wb') as f:
+            f.write(b'\x89PNG\r\n\x1a\n' + b'0' * 64)
+        iid = ShippingImage.create(order_pk=self.oid, file_path='upload/2026-07/v.png', record_pk=self.rid)
+        ShippingImage.set_match(iid, 'red', 30.0, 'AI 觉得规格冲突')
+
+        # 登录拿到 staff_id
+        sid = StaffDB.create('测试员', '调度')['id']
+        with self.client.session_transaction() as s:
+            s['operator_id'] = sid
+
+        # 触发 manual-verify (verified=true)
+        resp = self.client.post(f'/api/v1/shipping-orders/images/{iid}/manual-verify',
+                                json={'verified': True})
+        self.assertEqual(resp.status_code, 200)
+
+        events = OcrMatchEvent.get_by_record(self.rid, event_type='human_verify')
+        self.assertEqual(len(events), 1)
+        e = events[0]
+        self.assertEqual(e['human_status'], 'green')
+        self.assertEqual(e['human_verified_by'], sid)
+        # AI 之前的裁决也快照进了事件(便于算 delta)
+        self.assertEqual(e['ai_match_status'], 'red')
+        self.assertEqual(e['ai_match_reason'], 'AI 觉得规格冲突')
+        self.assertEqual(e['image_id'], iid)
+
+        # 清理
+        try:
+            os.unlink(abspath)
+        except OSError:
+            pass
+
+    def test_human_verify_unverify_also_records(self):
+        """取消核查(verified=false) 也写一条记录。"""
+        from models import ShippingImage, OcrMatchEvent
+        from models.tasks_flow import StaffDB
+        from blueprints.shipping import BASE_DIR
+        upload_dir = os.path.join(BASE_DIR, 'upload', '2026-07')
+        os.makedirs(upload_dir, exist_ok=True)
+        abspath = os.path.join(upload_dir, 'u.png')
+        with open(abspath, 'wb') as f:
+            f.write(b'\x89PNG\r\n\x1a\n' + b'0' * 64)
+        iid = ShippingImage.create(order_pk=self.oid, file_path='upload/2026-07/u.png', record_pk=self.rid)
+        sid = StaffDB.create('测试员', '调度')['id']
+        with self.client.session_transaction() as s:
+            s['operator_id'] = sid
+
+        resp = self.client.post(f'/api/v1/shipping-orders/images/{iid}/manual-verify',
+                                json={'verified': False})
+        self.assertEqual(resp.status_code, 200)
+        events = OcrMatchEvent.get_by_record(self.rid, event_type='human_verify')
+        self.assertEqual(len(events), 1)
+        self.assertIsNone(events[0]['human_status'])  # 取消核查不指定 human_status
+
+        try:
+            os.unlink(abspath)
+        except OSError:
+            pass
+
+
 if __name__ == '__main__':
     unittest.main()

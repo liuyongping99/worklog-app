@@ -10,7 +10,7 @@ import base64
 import re
 import json
 from datetime import date as date_cls, timedelta, datetime
-from flask import Blueprint, render_template, request, jsonify, current_app
+from flask import Blueprint, render_template, request, jsonify, current_app, session
 from models import (
     ShippingOrder, ShippingRecord, ShippingImage, ProductUnit, PieceConversion, AuditLog,
     OcrMatchEvent,
@@ -572,6 +572,26 @@ def api_v1_shipping_orders_manual_verify_image(image_id):
         return jsonify({'success': False, 'error': '订单已锁定，无法操作'}), 403
     data = request.get_json(silent=True) or {}
     verified = bool(data.get('verified', True))
+
+    # 新增:append-only human_verify 事件(先读 AI 当前状态快照)
+    # 写入失败不阻断主流程 — 与 AuditLog 哲学一致
+    try:
+        ai_snapshot = ShippingImage.get_by_id(image_id)
+        ai_status = ai_snapshot.get('match_status') if ai_snapshot else None
+        ai_reason = ai_snapshot.get('reason') if ai_snapshot else None
+        OcrMatchEvent.create(
+            'human_verify',
+            record_id=img.get('record_pk'),  # 行级图才有 record_pk,订单级共享图为 None
+            order_id=img['order_pk'],
+            image_id=image_id,
+            ai_match_status=ai_status,
+            ai_match_reason=ai_reason,
+            human_status='green' if verified else None,  # 取消核查不写状态
+            human_verified_by=session.get('operator_id'),
+        )
+    except Exception:
+        current_app.logger.exception('human_verify 事件写库失败(不阻断)')
+
     ShippingImage.set_human_verified(image_id, verified)
     AuditLog.log(
         'manual_verify_image', 'shipping_order', img['order_pk'],
