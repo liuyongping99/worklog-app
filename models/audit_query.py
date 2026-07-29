@@ -116,3 +116,98 @@ class OcrEventAudit:
         rows = cursor.fetchall()
         conn.close()
         return [dict(r) for r in rows]
+
+    @staticmethod
+    def record_pairs(*, prompt_version, start_date=None, end_date=None,
+                     limit=500, offset=0):
+        """按 prompt_version 列出每个 record 的配对详情(用于钻入明细)。
+
+        配对定义:同一 record 必须同时存在 ai_match(指定 prompt_version)
+        和 human_verify 事件,各取 latest(created_at DESC, id DESC 兜底)
+        配成一对;只有 ai 没有 human_verify 的 record 不计入。
+
+        Args:
+          prompt_version: 必填,只查该版本下的 ai_match 事件
+          start_date, end_date: 'YYYY-MM-DD',仅对 ai_match 行过滤时间
+          limit, offset: 分页(默认 500/0,上限 2000 在蓝图层 enforce)
+
+        Returns:
+          (rows, total)
+          rows: [{record_id, order_id, order_date, customer, product_name,
+                  specification, quantity, unit,
+                  ai_status, ai_reason, ai_time,
+                  human_status, human_reason, operator_name, human_time,
+                  is_consistent}, ...]
+          按 ai_time DESC, record_id DESC 排序。
+          total: COUNT(*),已 JOIN human_verify,代表有配对的 record 数。
+        """
+        # 日期过滤只对 ai_match 行生效(human_verify 不带 prompt_version)
+        ai_predicates = ["e.event_type = 'ai_match'", "e.prompt_version = ?"]
+        ai_params = [prompt_version]
+        if start_date:
+            ai_predicates.append("e.created_at >= ?")
+            ai_params.append(f"{start_date} 00:00:00")
+        if end_date:
+            ai_predicates.append("e.created_at <= ?")
+            ai_params.append(f"{end_date} 23:59:59")
+        ai_where = ' AND '.join(ai_predicates)
+
+        base_cte = f"""
+        WITH latest_ai AS (
+          SELECT record_id, ai_match_status, ai_match_reason, created_at,
+            ROW_NUMBER() OVER (PARTITION BY record_id ORDER BY created_at DESC, id DESC) AS rn
+          FROM ocr_match_event e
+          WHERE {ai_where}
+        ),
+        latest_hv AS (
+          SELECT record_id, human_status, human_reason, human_verified_by, created_at,
+            ROW_NUMBER() OVER (PARTITION BY record_id ORDER BY created_at DESC, id DESC) AS rn
+          FROM ocr_match_event
+          WHERE event_type = 'human_verify'
+        )
+        """
+
+        # total: 要求两侧都存在(JOIN latest_hv WHERE rn=1)
+        total_sql = base_cte + """
+        SELECT COUNT(*) FROM latest_ai lai
+        JOIN latest_hv lhv ON lhv.record_id = lai.record_id AND lhv.rn = 1
+        WHERE lai.rn = 1
+        """
+
+        # rows: 同上 + JOIN 元数据 + 排序分页
+        rows_sql = base_cte + """
+        SELECT
+          sr.id AS record_id, sr.order_pk AS order_id,
+          so.date AS order_date, so.customer AS customer,
+          sr.product_name, sr.specification, sr.quantity, sr.unit,
+          lai.ai_match_status AS ai_status,
+          lai.ai_match_reason AS ai_reason,
+          lai.created_at AS ai_time,
+          lhv.human_status AS human_status,
+          lhv.human_reason AS human_reason,
+          staff.name AS operator_name,
+          lhv.created_at AS human_time,
+          CASE
+            WHEN lai.ai_match_status IS NULL OR lhv.human_status IS NULL THEN NULL
+            WHEN lai.ai_match_status = lhv.human_status THEN 1
+            ELSE 0
+          END AS is_consistent
+        FROM latest_ai lai
+        JOIN latest_hv lhv ON lhv.record_id = lai.record_id AND lhv.rn = 1
+        JOIN shipping_records sr ON sr.id = lai.record_id AND lai.rn = 1
+        JOIN shipping_orders so ON so.id = sr.order_pk
+        LEFT JOIN staff ON staff.id = lhv.human_verified_by
+        WHERE lai.rn = 1
+        ORDER BY lai.created_at DESC, sr.id DESC
+        LIMIT ? OFFSET ?
+        """
+        rows_params = ai_params + [limit, offset]
+
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(total_sql, ai_params)
+        total = cursor.fetchone()[0]
+        cursor.execute(rows_sql, rows_params)
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(r) for r in rows], total

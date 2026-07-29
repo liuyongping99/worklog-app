@@ -81,5 +81,56 @@ class PromptStatsTests(_Base):
         self.assertEqual(rows, [])
 
 
+class RecordPairsTests(_Base):
+    def test_join_logic(self):
+        """同 record 有 ai_match + human_verify 时配对;只有 ai 没有 human_verify 时不出现。"""
+        from models.audit_query import OcrEventAudit
+        from models import ShippingRecord
+        rid2 = ShippingRecord.create('2026-07-25', 'C', 'P', 'S', '1', 'y', '', self.oid)
+        # rid: 配对一致
+        self._seed_pair(self.rid, self.oid, 'green', 'green')
+        # rid2: 配对不一致
+        self._seed_pair(rid2, self.oid, 'red', 'green')
+
+        rows, total = OcrEventAudit.record_pairs(prompt_version='compare_rows_v1')
+        self.assertEqual(total, 2)
+        self.assertEqual(len(rows), 2)
+        # 按 ai_time DESC 排序:两条同秒插入,按 record_id DESC 兜底
+        self.assertEqual(rows[0]['record_id'], rid2)  # 较后插入
+        self.assertEqual(rows[1]['record_id'], self.rid)
+        self.assertEqual(rows[0]['ai_status'], 'red')
+        self.assertEqual(rows[0]['human_status'], 'green')
+        self.assertEqual(rows[0]['is_consistent'], 0)
+        self.assertEqual(rows[1]['is_consistent'], 1)
+
+    def test_only_ai_no_human_excluded(self):
+        """只有 ai_match 没有 human_verify 的 record 不出现在结果里。"""
+        from models.audit_query import OcrEventAudit
+        from models import OcrMatchEvent
+        OcrMatchEvent.create('ai_match', self.rid, self.oid,
+                             ai_match_status='red', prompt_version='v1')
+        # 没有 human_verify
+
+        rows, total = OcrEventAudit.record_pairs(prompt_version='v1')
+        self.assertEqual(total, 0)
+        self.assertEqual(rows, [])
+
+    def test_latest_wins_for_human(self):
+        """同一 record 多次核查,取 latest human_verify。"""
+        from models.audit_query import OcrEventAudit
+        from models import OcrMatchEvent
+        OcrMatchEvent.create('ai_match', self.rid, self.oid,
+                             ai_match_status='green', prompt_version='v1')
+        # 第一次核查:红
+        OcrMatchEvent.create('human_verify', self.rid, self.oid, human_status='red')
+        # 第二次核查(覆盖):绿
+        OcrMatchEvent.create('human_verify', self.rid, self.oid, human_status='green')
+
+        rows, total = OcrEventAudit.record_pairs(prompt_version='v1')
+        self.assertEqual(total, 1)
+        self.assertEqual(rows[0]['human_status'], 'green')  # latest wins
+        self.assertEqual(rows[0]['is_consistent'], 1)
+
+
 if __name__ == '__main__':
     unittest.main()
