@@ -17,6 +17,7 @@ from .stock import StockOutItem
 from .products import ProductUnit, ProductCategory, Product
 from .piece_conversion import PieceConversion
 from .audit import AuditLog
+from .audit_query import OcrEventAudit
 
 __all__ = [
     'get_db', 'DB_PATH', 'init_db',
@@ -30,4 +31,5 @@ __all__ = [
     'ProductUnit', 'ProductCategory', 'Product',
     'PieceConversion',
     'AuditLog',
+    'OcrEventAudit',
 ]
