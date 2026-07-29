@@ -233,5 +233,39 @@ class ExportRowsTests(_Base):
         self.assertEqual(rows[0]['event_type'], 'ai_match')
 
 
+class AuditPageRenderTests(_Base):
+    """审计页 HTML 渲染回归 — 防止 `renderRecordsTable` 第二参数再次缺失."""
+
+    def setUp(self):
+        super().setUp()
+        from app import create_app
+        from models.tasks_flow import StaffDB
+        # 创建并登录任意 active staff(登录闸门绕过需要)
+        self.clerk = StaffDB.create(name="审计测试员", role="文员")
+        self.client = create_app().test_client()
+        with self.client.session_transaction() as sess:
+            sess["operator_id"] = self.clerk["id"]
+
+    def test_page_renders_with_fixed_render_records_table_signature(self):
+        """Fix Round 1: renderRecordsTable 的第三参数 `data` 必须从 drillDown 传过来;
+        否则模板 script 会在浏览器里抛 `data is not defined` ReferenceError,
+        #records_pagination 永远不会写 textContent。
+        """
+        # 写 1 对事件,确保后端有数据(本断言只关心 HTML 自身)
+        self._seed_pair(self.rid, self.oid, 'green', 'green')
+
+        r = self.client.get('/audit/ocr-events')
+        self.assertEqual(r.status_code, 200)
+        body = r.data.decode('utf-8')
+        # 1. 页面含 renderRecordsTable 函数定义
+        self.assertIn('function renderRecordsTable', body)
+        # 2. 新签名:函数定义带 `, data` 第三参数
+        self.assertIn('function renderRecordsTable(rows, total, data)', body)
+        # 3. 修复点:函数体里的 `data.limit` 不再是自由变量,需要从参数 `data` 解构
+        self.assertIn('data.limit', body)
+        # 4. drillDown 调用点已传第三参数
+        self.assertIn('renderRecordsTable(data.rows, data.total, data)', body)
+
+
 if __name__ == '__main__':
     unittest.main()

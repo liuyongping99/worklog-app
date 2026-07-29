@@ -168,12 +168,12 @@ async function drillDown(pv) {
   const data = await resp.json();
   if (!data.success) { alert(data.error || '查询失败'); return; }
   document.querySelector('#drill_pv').textContent = pv;
-  renderRecordsTable(data.rows, data.total);
+  renderRecordsTable(data.rows, data.total, data);
   document.querySelector('#drill_panel').hidden = false;
   document.querySelector('#drill_panel').scrollIntoView({behavior: 'smooth'});
 }
 
-function renderRecordsTable(rows, total) {
+function renderRecordsTable(rows, total, data) {
   const tbody = document.querySelector('#records_table tbody');
   tbody.innerHTML = '';
   if (!rows.length) {
