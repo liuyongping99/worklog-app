@@ -132,6 +132,54 @@ class RecordPairsTests(_Base):
         self.assertEqual(rows[0]['is_consistent'], 1)
 
 
+class AuditEndpointTests(_Base):
+    def setUp(self):
+        super().setUp()
+        from app import create_app
+        self.client = create_app().test_client()
+
+    def test_aggregate_endpoint(self):
+        """aggregate 端点返 JSON,rows 至少 1 行。"""
+        self._seed_pair(self.rid, self.oid, 'green', 'green')
+        resp = self.client.get('/api/v1/audit/ocr-events/aggregate')
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertTrue(body['success'])
+        self.assertEqual(len(body['rows']), 1)
+        self.assertEqual(body['rows'][0]['prompt_version'], 'compare_rows_v1')
+
+    def test_records_endpoint_requires_prompt_version(self):
+        resp = self.client.get('/api/v1/audit/ocr-events/records')
+        self.assertEqual(resp.status_code, 400)
+        body = resp.get_json()
+        self.assertFalse(body['success'])
+        self.assertIn('prompt_version', body['error'])
+
+    def test_records_endpoint_returns_pairs(self):
+        self._seed_pair(self.rid, self.oid, 'green', 'green')
+        resp = self.client.get('/api/v1/audit/ocr-events/records?prompt_version=compare_rows_v1')
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertTrue(body['success'])
+        self.assertEqual(body['total'], 1)
+        self.assertEqual(len(body['rows']), 1)
+        self.assertEqual(body['rows'][0]['record_id'], self.rid)
+        self.assertEqual(body['rows'][0]['is_consistent'], 1)
+
+    def test_export_csv_returns_csv_file(self):
+        self._seed_pair(self.rid, self.oid, 'green', 'green')
+        resp = self.client.get('/api/v1/audit/ocr-events/export.csv')
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('text/csv', resp.headers['Content-Type'])
+        # BOM
+        body = resp.data
+        self.assertTrue(body.startswith(b'\xef\xbb\xbf'))
+        text = body.decode('utf-8-sig')
+        # header 行
+        self.assertIn('event_id', text)
+        self.assertIn('ai_match_status', text)
+
+
 class ExportRowsTests(_Base):
     def test_includes_all_three_event_types(self):
         """导出含 record_ocr / ai_match / human_verify 三类全字段。"""
