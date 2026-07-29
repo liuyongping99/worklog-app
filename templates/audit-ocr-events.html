@@ -1,0 +1,233 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="audit-page">
+<h1 class="text-2xl font-bold mb-2">OCR 比对事件审计</h1>
+<p class="text-sm text-gray-600 mb-4">按 prompt_version 维度审视 AI 与人工裁决的一致率，为优化比对提示词提供数据。</p>
+
+<!-- 过滤栏 -->
+<section id="filters" class="bg-white p-4 rounded shadow mb-4 flex flex-wrap gap-4 items-end">
+  <label class="block">
+    <span class="text-sm text-gray-700">开始日期</span>
+    <input type="date" id="start_date" class="mt-1 block border rounded px-2 py-1">
+  </label>
+  <label class="block">
+    <span class="text-sm text-gray-700">结束日期</span>
+    <input type="date" id="end_date" class="mt-1 block border rounded px-2 py-1">
+  </label>
+  <label class="block">
+    <span class="text-sm text-gray-700">事件类型(导出用)</span>
+    <select multiple id="event_types" size="3" class="mt-1 block border rounded px-2 py-1">
+      <option value="record_ocr" selected>record_ocr</option>
+      <option value="ai_match" selected>ai_match</option>
+      <option value="human_verify" selected>human_verify</option>
+    </select>
+  </label>
+  <label class="block">
+    <span class="text-sm text-gray-700">prompt 版本(逗号分隔)</span>
+    <input type="text" id="prompt_versions" placeholder="v1,v2" class="mt-1 block border rounded px-2 py-1">
+  </label>
+  <button id="btn_apply" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">应用</button>
+  <button id="btn_export" class="px-4 py-2 bg-gray-200 text-gray-800 rounded hover:bg-gray-300">导出 CSV</button>
+</section>
+
+<!-- 聚合主表 -->
+<section id="aggregate_panel" class="bg-white rounded shadow mb-4">
+  <div class="flex items-center justify-between px-4 py-3 border-b">
+    <h2 class="text-lg font-semibold">按 prompt_version 聚合</h2>
+    <span id="aggregate_count" class="text-sm text-gray-500"></span>
+  </div>
+  <div class="overflow-x-auto">
+    <table id="aggregate_table" class="w-full">
+      <thead class="bg-gray-100">
+        <tr>
+          <th class="px-3 py-2 text-left">prompt 版本</th>
+          <th class="px-3 py-2 text-right">配对数</th>
+          <th class="px-3 py-2 text-right">一致</th>
+          <th class="px-3 py-2 text-right">不一致</th>
+          <th class="px-3 py-2 text-right">人工未核</th>
+          <th class="px-3 py-2 text-right">一致率</th>
+          <th class="px-3 py-2 text-left">最后使用</th>
+          <th class="px-3 py-2 text-center">操作</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <p id="aggregate_empty" class="p-4 text-gray-500" hidden>暂无数据，试试放宽过滤或先在出货页跑几次 OCR / AI 匹配 / 人工核查。</p>
+  <p id="aggregate_error" class="p-4 text-red-600" hidden></p>
+</section>
+
+<!-- 钻入面板 -->
+<section id="drill_panel" class="bg-white rounded shadow" hidden>
+  <h2 class="text-lg font-semibold px-4 py-3 border-b">
+    明细：<span id="drill_pv" class="font-mono"></span>
+    <button type="button" id="btn_close_drill" class="float-right text-sm text-gray-500 hover:text-gray-700" title="关闭钻入">✕ 关闭</button>
+  </h2>
+  <div class="overflow-x-auto">
+    <table id="records_table" class="w-full text-sm">
+      <thead class="bg-gray-100">
+        <tr>
+          <th class="px-2 py-1">record_id</th>
+          <th class="px-2 py-1">订单</th>
+          <th class="px-2 py-1">日期</th>
+          <th class="px-2 py-1">客户</th>
+          <th class="px-2 py-1">品名</th>
+          <th class="px-2 py-1">规格</th>
+          <th class="px-2 py-1">数量</th>
+          <th class="px-2 py-1">AI 判定</th>
+          <th class="px-2 py-1">AI 理由</th>
+          <th class="px-2 py-1">AI 时间</th>
+          <th class="px-2 py-1">人工判定</th>
+          <th class="px-2 py-1">人工理由</th>
+          <th class="px-2 py-1">操作员</th>
+          <th class="px-2 py-1">人工时间</th>
+          <th class="px-2 py-1 text-center">一致?</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <p id="records_pagination" class="p-3 text-sm text-gray-500"></p>
+</section>
+
+</div>
+
+<script>
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, function (c) {
+    return ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'})[c];
+  });
+}
+
+function buildParams() {
+  const p = new URLSearchParams();
+  const start = document.querySelector('#start_date').value;
+  const end = document.querySelector('#end_date').value;
+  if (start) p.set('start_date', start);
+  if (end) p.set('end_date', end);
+  const pv = document.querySelector('#prompt_versions').value.trim();
+  if (pv) p.set('prompt_versions', pv);
+  // event_types 仅用于 CSV 导出;聚合端点不用
+  window._eventTypes = Array.from(document.querySelector('#event_types').selectedOptions).map(function (o) { return o.value; });
+  return p.toString();
+}
+
+async function loadAggregate() {
+  const errEl = document.querySelector('#aggregate_error');
+  errEl.hidden = true;
+  errEl.textContent = '';
+  const resp = await fetch('/api/v1/audit/ocr-events/aggregate?' + buildParams());
+  const data = await resp.json();
+  if (!data.success) {
+    errEl.hidden = false;
+    errEl.textContent = data.error || '查询失败';
+    return;
+  }
+  renderAggregateTable(data.rows);
+  // 钻入面板隐藏(主表刷新后,明细需重 fetch)
+  document.querySelector('#drill_panel').hidden = true;
+}
+
+function renderAggregateTable(rows) {
+  const tbody = document.querySelector('#aggregate_table tbody');
+  tbody.innerHTML = '';
+  document.querySelector('#aggregate_count').textContent = rows.length ? ('共 ' + rows.length + ' 个 prompt_version') : '';
+  if (!rows.length) {
+    document.querySelector('#aggregate_empty').hidden = false;
+    return;
+  }
+  document.querySelector('#aggregate_empty').hidden = true;
+  rows.forEach(function (r) {
+    const tr = document.createElement('tr');
+    tr.className = 'border-t';
+    const rate = r.consistency_rate;
+    let cls = '';
+    if (rate != null) {
+      cls = rate >= 80 ? 'rate-good' : (rate >= 60 ? 'rate-mid' : 'rate-bad');
+    }
+    tr.innerHTML =
+      '<td class="px-3 py-2 font-mono">' + escapeHtml(r.prompt_version) + '</td>' +
+      '<td class="px-3 py-2 text-right">' + (r.total_pairs == null ? 0 : r.total_pairs) + '</td>' +
+      '<td class="px-3 py-2 text-right">' + (r.consistent_pairs == null ? 0 : r.consistent_pairs) + '</td>' +
+      '<td class="px-3 py-2 text-right">' + (r.inconsistent_pairs == null ? 0 : r.inconsistent_pairs) + '</td>' +
+      '<td class="px-3 py-2 text-right">' + (r.null_pairs == null ? 0 : r.null_pairs) + '</td>' +
+      '<td class="px-3 py-2 text-right ' + cls + '">' + (rate == null ? '-' : rate.toFixed(1) + '%') + '</td>' +
+      '<td class="px-3 py-2 text-gray-600">' + escapeHtml(r.last_used_at || '') + '</td>' +
+      '<td class="px-3 py-2 text-center">' +
+        '<button class="btn-drill px-2 py-1 text-sm bg-gray-100 hover:bg-gray-200 rounded" data-pv="' + escapeHtml(r.prompt_version) + '">明细</button>' +
+      '</td>';
+    tbody.appendChild(tr);
+  });
+}
+
+async function drillDown(pv) {
+  const url = '/api/v1/audit/ocr-events/records?prompt_version=' + encodeURIComponent(pv) + '&' + buildParams();
+  const resp = await fetch(url);
+  const data = await resp.json();
+  if (!data.success) { alert(data.error || '查询失败'); return; }
+  document.querySelector('#drill_pv').textContent = pv;
+  renderRecordsTable(data.rows, data.total);
+  document.querySelector('#drill_panel').hidden = false;
+  document.querySelector('#drill_panel').scrollIntoView({behavior: 'smooth'});
+}
+
+function renderRecordsTable(rows, total) {
+  const tbody = document.querySelector('#records_table tbody');
+  tbody.innerHTML = '';
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="15" class="px-3 py-4 text-center text-gray-500">该 prompt_version 下暂无配对明细(可能有 ai_match 但还没人工核查)。</td></tr>';
+  } else {
+    rows.forEach(function (r) {
+      const tr = document.createElement('tr');
+      tr.className = 'border-t';
+      const cls = r.is_consistent === 1 ? 'rate-good' : (r.is_consistent === 0 ? 'rate-bad' : 'text-gray-400');
+      const mark = r.is_consistent === 1 ? '✓' : (r.is_consistent === 0 ? '✗' : '-');
+      tr.innerHTML =
+        '<td class="px-2 py-1 font-mono">' + escapeHtml(r.record_id) + '</td>' +
+        '<td class="px-2 py-1 font-mono">' + escapeHtml(r.order_id) + '</td>' +
+        '<td class="px-2 py-1">' + escapeHtml(r.order_date) + '</td>' +
+        '<td class="px-2 py-1">' + escapeHtml(r.customer) + '</td>' +
+        '<td class="px-2 py-1">' + escapeHtml(r.product_name) + '</td>' +
+        '<td class="px-2 py-1">' + escapeHtml(r.specification) + '</td>' +
+        '<td class="px-2 py-1">' + escapeHtml(r.quantity) + ' ' + escapeHtml(r.unit) + '</td>' +
+        '<td class="px-2 py-1">' + escapeHtml(r.ai_status) + '</td>' +
+        '<td class="px-2 py-1 text-gray-600">' + escapeHtml(r.ai_reason) + '</td>' +
+        '<td class="px-2 py-1 text-gray-500">' + escapeHtml(r.ai_time) + '</td>' +
+        '<td class="px-2 py-1">' + escapeHtml(r.human_status) + '</td>' +
+        '<td class="px-2 py-1 text-gray-600">' + escapeHtml(r.human_reason) + '</td>' +
+        '<td class="px-2 py-1">' + escapeHtml(r.operator_name || '-') + '</td>' +
+        '<td class="px-2 py-1 text-gray-500">' + escapeHtml(r.human_time || '') + '</td>' +
+        '<td class="px-2 py-1 text-center ' + cls + '">' + mark + '</td>';
+      tbody.appendChild(tr);
+    });
+  }
+  document.querySelector('#records_pagination').textContent =
+    '显示 ' + rows.length + ' / 共 ' + total + ' 条' +
+    (data && data.limit ? '(每页上限 ' + data.limit + ')' : '');
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+  loadAggregate();
+  document.querySelector('#btn_apply').onclick = loadAggregate;
+  document.querySelector('#btn_export').onclick = function () {
+    const params = buildParams();
+    let url = '/api/v1/audit/ocr-events/export.csv?' + params;
+    if (window._eventTypes && window._eventTypes.length) {
+      url += '&event_types=' + window._eventTypes.join(',');
+    }
+    // 浏览器原生下载:window.location 也能触发 Content-Disposition: attachment
+    window.location.href = url;
+  };
+  document.querySelector('#btn_close_drill').onclick = function () {
+    document.querySelector('#drill_panel').hidden = true;
+  };
+  document.addEventListener('click', function (e) {
+    if (e.target && e.target.classList && e.target.classList.contains('btn-drill')) {
+      drillDown(e.target.dataset.pv);
+    }
+  });
+});
+</script>
+{% endblock %}

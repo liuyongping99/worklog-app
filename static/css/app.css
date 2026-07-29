@@ -760,3 +760,12 @@ dialog[open] button:last-child { background: #e8e8e8; color: #333; }
     0%   { transform: translateX(0); }
     100% { transform: translateX(-50%); }
 }
+
+/* ── OCR 事件审计页:一致率配色 ─────────────────── */
+.rate-good { color: #16a34a; font-weight: 600; }
+.rate-mid  { color: #ca8a04; font-weight: 600; }
+.rate-bad  { color: #dc2626; font-weight: 600; }
+
+/* 钻入明细表悬停高亮(沿用全局表格规范,只调背景) */
+.audit-page #records_table tr:hover td { background: #f8fafc; }
+.audit-page #aggregate_table tr:hover td { background: #f8fafc; }

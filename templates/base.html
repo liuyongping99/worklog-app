@@ -261,6 +261,7 @@
                     <a href="/notice-color" class="{% if request.endpoint == 'notice_color' %}active{% endif %}">🎨 通知彩色版</a>
                     <a href="/workflow" class="{% if request.endpoint == 'workflow' %}active{% endif %}">🔀 业务流程</a>
                     <a href="/warehouse" class="{% if request.endpoint == 'warehouse' %}active{% endif %}">🏭 仓库布局</a>
+                    <a href="{{ url_for('audit.audit_ocr_events') }}" class="{% if request.endpoint == 'audit.audit_ocr_events' %}active{% endif %}">📊 OCR 事件审计</a>
                 </div>
             </li>
             <li><a href="/stockout" class="{% if request.endpoint == 'stockout' %}active{% endif %}">🚫 当前缺货</a></li>
