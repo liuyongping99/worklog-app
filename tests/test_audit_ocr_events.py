@@ -132,5 +132,42 @@ class RecordPairsTests(_Base):
         self.assertEqual(rows[0]['is_consistent'], 1)
 
 
+class ExportRowsTests(_Base):
+    def test_includes_all_three_event_types(self):
+        """导出含 record_ocr / ai_match / human_verify 三类全字段。"""
+        from models.audit_query import OcrEventAudit
+        from models import OcrMatchEvent
+        OcrMatchEvent.create('record_ocr', self.rid, self.oid,
+                             ocr_text='硬加面', ocr_engine='paddleocr',
+                             ai_match_status='green', ai_engine='local_fuzzy',
+                             product_name='硬加面', specification='黑色')
+        OcrMatchEvent.create('ai_match', self.rid, self.oid,
+                             ai_match_status='green', ai_engine='deepseek',
+                             prompt_version='v1', prompt_payload='PROMPT',
+                             ai_raw_response='{}')
+        OcrMatchEvent.create('human_verify', self.rid, self.oid,
+                             human_status='green', human_verified_by=None)
+
+        rows = OcrEventAudit.export_rows()
+        self.assertEqual(len(rows), 3)
+        # 全字段存在
+        for r in rows:
+            for f in ('event_id', 'created_at', 'event_type', 'record_id', 'order_id',
+                      'product_name', 'specification', 'ocr_text', 'ocr_engine',
+                      'prompt_version', 'ai_match_status', 'human_status'):
+                self.assertIn(f, r)
+
+    def test_filters_by_event_types(self):
+        """event_types=['ai_match'] 只返 ai_match。"""
+        from models.audit_query import OcrEventAudit
+        from models import OcrMatchEvent
+        OcrMatchEvent.create('record_ocr', self.rid, self.oid, ocr_text='x')
+        OcrMatchEvent.create('ai_match', self.rid, self.oid, ai_match_status='green')
+
+        rows = OcrEventAudit.export_rows(event_types=['ai_match'])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['event_type'], 'ai_match')
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -6,6 +6,18 @@
 from ._db import get_db
 
 
+# CSV 导出列定义(蓝图层 import 用于 header)。顺序固定,共 20 列。
+_EXPORT_FIELDS = [
+    'event_id', 'created_at', 'event_type',
+    'record_id', 'order_id', 'image_id',
+    'product_name', 'specification',
+    'ocr_text', 'ocr_engine',
+    'prompt_version', 'ai_engine', 'prompt_payload',
+    'ai_match_status', 'ai_match_score', 'ai_match_reason', 'ai_raw_response',
+    'human_status', 'human_reason', 'human_verified_by',
+]
+
+
 class OcrEventAudit:
     """OCR 比对事件审计查询助手。"""
 
@@ -211,3 +223,51 @@ class OcrEventAudit:
         rows = cursor.fetchall()
         conn.close()
         return [dict(r) for r in rows], total
+
+    @staticmethod
+    def export_rows(*, start_date=None, end_date=None,
+                    event_types=None, prompt_versions=None):
+        """扁平返回每个事件全字段,供 CSV 导出。
+
+        不走配对,逐事件返。排序 `id ASC`(append-only 写入顺序)。
+        过滤参数:start_date/end_date ('YYYY-MM-DD',闭区间含边界);
+        event_types/prompt_versions (列表,None 表示不限)。
+        """
+        params = []
+        where_clauses = []
+        if start_date:
+            where_clauses.append("e.created_at >= ?")
+            params.append(f"{start_date} 00:00:00")
+        if end_date:
+            where_clauses.append("e.created_at <= ?")
+            params.append(f"{end_date} 23:59:59")
+        if event_types:
+            placeholders = ','.join('?' for _ in event_types)
+            where_clauses.append(f"e.event_type IN ({placeholders})")
+            params.extend(event_types)
+        if prompt_versions:
+            placeholders = ','.join('?' for _ in prompt_versions)
+            where_clauses.append(f"e.prompt_version IN ({placeholders})")
+            params.extend(prompt_versions)
+
+        where_sql = ('WHERE ' + ' AND '.join(where_clauses)) if where_clauses else ''
+
+        sql = f"""
+        SELECT
+          e.id AS event_id, e.created_at, e.event_type,
+          e.record_id, e.order_id, e.image_id,
+          e.product_name, e.specification,
+          e.ocr_text, e.ocr_engine,
+          e.prompt_version, e.ai_engine, e.prompt_payload,
+          e.ai_match_status, e.ai_match_score, e.ai_match_reason, e.ai_raw_response,
+          e.human_status, e.human_reason, e.human_verified_by
+        FROM ocr_match_event e
+        {where_sql}
+        ORDER BY e.id ASC
+        """
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(sql, params)
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
