@@ -17,6 +17,19 @@ from models.audit_query import _EXPORT_FIELDS
 bp = Blueprint('audit', __name__)
 
 
+_CSV_FORMULA_PREFIXES = '=+-@\t\r\n'
+
+
+def _sanitize_csv_cell(value):
+    """将可能被表格软件解释为公式的字符串强制标记为文本。"""
+    # 防止 Excel 等表格软件把外部文本当作公式执行。
+    if not isinstance(value, str) or not value:
+        return value
+    if value[0] in _CSV_FORMULA_PREFIXES:
+        return "'" + value
+    return value
+
+
 def _parse_common_filters():
     """解析 start_date / end_date / prompt_versions 公共参数。
 
@@ -107,7 +120,10 @@ def api_audit_export_csv():
     writer = csv.DictWriter(buf, fieldnames=_EXPORT_FIELDS)
     writer.writeheader()
     for r in rows:
-        writer.writerow({k: (r.get(k) if r.get(k) is not None else '') for k in _EXPORT_FIELDS})
+        writer.writerow({
+            k: _sanitize_csv_cell(r.get(k) if r.get(k) is not None else '')
+            for k in _EXPORT_FIELDS
+        })
     body = buf.getvalue().encode('utf-8-sig')
     return Response(
         body,

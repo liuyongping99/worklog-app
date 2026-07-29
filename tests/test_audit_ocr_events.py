@@ -166,6 +166,22 @@ class AuditEndpointTests(_Base):
         self.assertEqual(body['rows'][0]['record_id'], self.rid)
         self.assertEqual(body['rows'][0]['is_consistent'], 1)
 
+    def test_export_csv_sanitizes_formula_injection(self):
+        """CSV 中疑似公式的字符串必须按文本导出。"""
+        import csv
+        import io
+        from models import OcrMatchEvent
+        OcrMatchEvent.create(
+            'ai_match', self.rid, self.oid, ai_match_reason='=1+1'
+        )
+
+        resp = self.client.get('/api/v1/audit/ocr-events/export.csv')
+        self.assertEqual(resp.status_code, 200)
+        text = resp.data.decode('utf-8-sig')
+        row = next(csv.DictReader(io.StringIO(text)))
+        self.assertEqual(row['ai_match_reason'], "'=1+1")
+        self.assertEqual(row['ai_match_reason'][0], "'")
+
     def test_export_csv_returns_csv_file(self):
         self._seed_pair(self.rid, self.oid, 'green', 'green')
         resp = self.client.get('/api/v1/audit/ocr-events/export.csv')
