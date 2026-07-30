@@ -134,6 +134,10 @@
     box-sizing: border-box;
     vertical-align: middle;
 }
+/* 已上传过图片的商品行 🖼️ 按钮加红边框,以示区别(按钮已 box-sizing: border-box,加边不撑大布局) */
+.shipping-page .record-table .record-image-btn.has-image {
+    border: 2px solid #dc2626;
+}
 /* 商品图叠加文字（仅 record 级 🖼️ 上传的图片显示：商品名顶部 + 规格底部，红字） */
 .shipping-page .img-item-record .img-overlay-name {
     position: absolute;
@@ -256,7 +260,6 @@
         <span title="置信度 < 60%：OCR 文字里找不到本行商品,或识别为另一商品" style="cursor:help;">❌ <span style="color:#dc2626; font-weight:600;">✗ 红</span> 可能不符,建议复查</span>
         <span style="margin-left:auto; color:#868e96; font-size:0.72rem;">(行级=本地 fuzzy 模糊匹配; 整单 "🤖 AI 匹配" = PaddleOCR + DeepSeek 语义比对)</span>
     </div>
-    </div>
 
     <script>
     // 客户/商品搜索过滤
@@ -265,8 +268,8 @@
         document.querySelectorAll('.shipping-page .date-group').forEach(function(g) {
             var customer = (g.querySelector('.group-customer') || {}).textContent || '';
             var tds = g.querySelectorAll('.record-table td');
-            var productNames = Array.from(g.querySelectorAll('.record-table td:nth-child(2)')).map(function(td) { return td.textContent; }).join(' ');
-            var specs = Array.from(g.querySelectorAll('.record-table td:nth-child(3)')).map(function(td) { return td.textContent; }).join(' ');
+            var productNames = Array.from(g.querySelectorAll('.record-table td.product-name-cell')).map(function(td) { return td.textContent; }).join(' ');
+            var specs = Array.from(g.querySelectorAll('.record-table td.spec-cell')).map(function(td) { return td.textContent; }).join(' ');
             var match = !kw || customer.toLowerCase().includes(kw) || productNames.toLowerCase().includes(kw) || specs.toLowerCase().includes(kw);
             g.style.display = match ? '' : 'none';
         });
@@ -437,12 +440,13 @@
                 {% for item in group.records %}
                 <tr class="{% if item.qty_invalid %}row-out-of-stock{% elif item.mismatch == 'warn' or item.piece_mismatch == 'warn' %}row-warn{% elif item.mismatch == 'info' or item.piece_mismatch == 'info' %}row-info{% endif %}{% if '环保' in item.product_name %} row-eco{% endif %}"
                     data-record-id="{{ item.id }}"
-                    data-verified="{{ '1' if item.verified else '0' }}">
+                    data-verified="{{ '1' if item.verified else '0' }}"
+                    data-verified-warnings="{{ item.verified_warnings or '{}' }}">
                     <td style="text-align:center; color:#868e96; font-size:0.85rem;">{% if item.qty_invalid %}<span class="stock-icon" title="数量异常">❌</span>{% elif item.mismatch == 'warn' or item.piece_mismatch == 'warn' %}❌ {% elif item.mismatch == 'info' or item.piece_mismatch == 'info' %}💡 {% endif %}{{ loop.index }}</td>
                     <td class="eco-col">{% if '环保' in item.product_name %}<span class="eco-icon" title="环保产品">🌿</span>{% endif %}{% if '杂胶' in item.product_name and '加面' in item.specification %}<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" class="jia-mian-icon" title="加面工艺"><defs><pattern id="jm-mesh-{{ loop.index }}" width="2" height="2" patternUnits="userSpaceOnUse"><path d="M 2 0 L 0 0 0 2" fill="none" stroke="currentColor" stroke-width="0.5"/></pattern></defs><rect width="16" height="16" fill="url(#jm-mesh-{{ loop.index }})"/><line x1="0" y1="8" x2="16" y2="8" stroke="currentColor" stroke-width="1"/></svg>{% endif %}</td>
                     <td class="product-name-cell" style="font-size:0.9rem;" data-record-id-cell="{{ item.id }}">{{ item.product_name }}</td>
                     <td class="spec-cell" style="color:#636e72; font-size:0.9rem;">{{ item.specification }}</td>
-                    <td class="match-col">{% set _bst = record_best_status_map.get(item.id) %}{% set _reason = record_best_reason_map.get(item.id, '') %}{% if _bst == 'green' %}<span class="match-badge" data-match-status="green" title="图文相符{% if _reason %} — {{ _reason }}{% endif %}" style="color:#16a34a;">✓</span>{% elif _bst == 'yellow' %}<span class="match-badge" data-match-status="yellow" title="存疑，请人工核对{% if _reason %} — {{ _reason }}{% endif %}" style="color:#d97706;">⚠</span>{% elif _bst == 'red' %}<span class="match-badge" data-match-status="red" title="可能不符{% if _reason %} — {{ _reason }}{% endif %}" style="color:#dc2626;">✗</span>{% endif %}</td>
+                    <td class="match-col">{% set _bst = record_worst_status_map.get(item.id) %}{% set _reason = record_worst_reason_map.get(item.id, '') %}{% if _bst == 'green' %}<span class="match-badge" data-match-status="green" title="图文相符{% if _reason %} — {{ _reason }}{% endif %}" style="color:#16a34a;">✓</span>{% elif _bst == 'yellow' %}<span class="match-badge" data-match-status="yellow" title="存疑，请人工核对{% if _reason %} — {{ _reason }}{% endif %}" style="color:#d97706;">⚠</span>{% elif _bst == 'red' %}<span class="match-badge" data-match-status="red" title="可能不符{% if _reason %} — {{ _reason }}{% endif %}" style="color:#dc2626;">✗</span>{% endif %}</td>
                     <td class="qty-cell"><span class="qty-badge">{{ item.quantity }}</span></td>
                     <td class="unit-cell"><span class="unit-badge">{{ item.unit }}</span></td>
                     <td class="remark-cell {% if item.remark %}has-content{% endif %}">{{ item.remark or '—' }}</td>
@@ -452,29 +456,20 @@
                         <button type="button" class="btn btn-sm move-down-btn lock-hide" data-id="{{ item.id }}" title="下移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.1rem 0.35rem;font-size:0.75rem;">▼</button>
                         <button type="button" class="btn btn-primary btn-sm edit-record-btn lock-hide" data-id="{{ item.id }}">✏️</button>
                         <button type="button" class="btn btn-danger btn-sm delete-record-btn lock-hide" data-id="{{ item.id }}">🗑️</button>
-                        <button type="button" class="btn btn-sm record-image-btn lock-hide" data-record-id="{{ item.id }}" title="上传图片到此商品" style="background:#74b9ff;color:#fff;">🖼️</button>
+                        <button type="button" class="btn btn-sm record-image-btn lock-hide{% if item.has_image %} has-image{% endif %}" data-record-id="{{ item.id }}" title="上传图片到此商品{% if item.has_image %}（已上传）{% endif %}" style="background:#74b9ff;color:#fff;">🖼️</button>
                         <input type="file" class="record-image-input" data-record-id="{{ item.id }}" accept="image/*" multiple style="display:none;">
                     </td>
                 </tr>
                 {% endfor %}
-                {% if group.summary_pieces > 0 or group.summary_loose_pieces > 0 or group.summary_unit_pieces > 0 %}
-                <tr class="summary-row" style="background:#f0fdf4; font-weight:600; border-top:2px solid #00b894;">
-                    <td colspan="4" style="text-align:right; padding:0.6rem 0.75rem; color:#00b894; font-size:0.9rem;">📊 备注支数：</td>
-                    <td style="padding:0.6rem 0.75rem; color:#2d3436; font-size:0.9rem;">
-                        {{ group.summary_pieces }}支
-                        {% if group.summary_loose_pieces > 0 %}
-                        +{{ group.summary_loose_pieces }}支散码
-                        {% endif %}
-                    </td>
-                    <td style="padding:0.6rem 0.75rem; color:#00b894; font-size:0.9rem;">
-                        📊 明细支数：{{ group.summary_unit_pieces }}支
-                    </td>
-                    <td style="padding:0.6rem 0.75rem;"></td>
-                    <td style="padding:0.6rem 0.75rem;"></td>
-                </tr>
-                {% endif %}
                 </tbody>
             </table>
+            {% if group.summary_pieces > 0 or group.summary_loose_pieces > 0 or group.summary_unit_pieces > 0 %}
+            {# 汇总行从表格里拎出来当独立 div,不再受 10 列 colspan 束缚,各 stat 自适应宽度 #}
+            <div class="summary-row" style="background:#f0fdf4; font-weight:600; border-top:2px solid #00b894; padding:0.6rem 0.75rem; display:flex; justify-content:flex-end; align-items:center; gap:1.5rem; flex-wrap:wrap;">
+                <span style="color:#00b894; font-size:0.9rem;">📊 备注支数：<span class="summary-pieces-val" style="color:#2d3436;">{{ group.summary_pieces }}支{% if group.summary_loose_pieces > 0 %}+{{ group.summary_loose_pieces }}支散码{% endif %}</span></span>
+                <span style="color:#00b894; font-size:0.9rem; white-space:nowrap;">📊 明细支数：<span class="summary-unit-pieces-val">{{ group.summary_unit_pieces }}</span>支</span>
+            </div>
+            {% endif %}
             {% set all_order_imgs = order_images.get(group.id, []) %}
             {% if all_order_imgs %}
             <div class="order-images-area columns-{{ group.img_cols | default(5) }}" data-cols="{{ group.img_cols | default(5) }}" data-order-id="{{ group.id }}">
@@ -504,7 +499,7 @@
                         {% elif img.match_status == 'yellow' %}<span class="match-badge" data-match-status="yellow" title="存疑，请人工核对{% if img.reason %} — {{ img.reason }}{% endif %}" style="color:#d97706;">⚠</span>
                         {% elif img.match_status == 'red' %}<span class="match-badge" data-match-status="red" title="可能不符{% if img.reason %} — {{ img.reason }}{% endif %}" style="color:#dc2626;">✗</span>
                         {% endif %}
-                        {% if img.match_status == 'red' %}
+                        {% if img.match_status in ['red', 'yellow'] %}
                             {% if img.human_verified %}
                                 <span class="manual-verified-marker" data-verified-marker="{{ img.id }}">✓ 已人工确认</span>
                             {% else %}
@@ -564,11 +559,13 @@
     // JS 路径同时被 recordImageUploaded(行级上传后)与 ai-match(整单比对后)复用
     function badgeHtml(status, reason) {
         // reason: AI 给出的判定依据(中文),可空;空时只显示状态标签
+        // 2026-07-30 修复：徽章加 data-match-status 属性,与服务端模板首次渲染保持一致,
+        // 避免 refreshRowMatchBadge 重建徽章后丢失属性（影响 .match-badge[data-match-status] 选择器）.
         reason = reason || '';
         var suffix = reason ? ' — ' + reason : '';
-        if (status === 'green')  return '<span class="match-badge" title="图文相符' + suffix + '" style="color:#16a34a;">✓</span>';
-        if (status === 'yellow') return '<span class="match-badge" title="存疑，请人工核对' + suffix + '" style="color:#d97706;">⚠</span>';
-        if (status === 'red')    return '<span class="match-badge" title="可能不符' + suffix + '" style="color:#dc2626;">✗</span>';
+        if (status === 'green')  return '<span class="match-badge" data-match-status="green" title="图文相符' + suffix + '" style="color:#16a34a;">✓</span>';
+        if (status === 'yellow') return '<span class="match-badge" data-match-status="yellow" title="存疑，请人工核对' + suffix + '" style="color:#d97706;">⚠</span>';
+        if (status === 'red')    return '<span class="match-badge" data-match-status="red" title="可能不符' + suffix + '" style="color:#dc2626;">✗</span>';
         return '';
     }
     // 把徽章贴到某行的 AI 比对 cell 上:先清掉旧徽章,再插入新徽章(status 为空则只清)
@@ -590,8 +587,9 @@
 
     // 重算并刷新某个 record 的行级 AI 比对徽章
     // 规则:扫描该 record 所有 img-item-record 里的 .match-badge[data-match-status],
-    //      红牌 + 已人工确认 → 视为 green;其他按原值。取最高(green > yellow > red)。
+    //      红牌/黄牌 + 已人工确认 → 视为 green;其他按原值。取最高(green > yellow > red)。
     // 调用时机:① 人工确认按钮成功后 ② ai-match 后(未来扩展)
+    // 2026-07-30 修复：黄牌 + 已人工确认也应升级为 green（之前只覆盖红牌,黄牌视觉上"无变化"）.
     function refreshRowMatchBadge(recordPk) {
         var imgs = document.querySelectorAll('.img-item-record[data-record-pk="' + recordPk + '"]');
         if (!imgs.length) return;
@@ -602,8 +600,8 @@
             var badge = img.querySelector('.match-badge[data-match-status]');
             if (!badge) return;
             var s = badge.getAttribute('data-match-status');
-            // 红牌 + 已人工确认 → 视为 green(覆盖 AI 判 ✗)
-            if (s === 'red' && img.querySelector('.manual-verified-marker')) {
+            // 红牌/黄牌 + 已人工确认 → 视为 green（人工裁决覆盖 AI 判定）
+            if ((s === 'red' || s === 'yellow') && img.querySelector('.manual-verified-marker')) {
                 s = 'green';
             }
             if (rank[s] > rank[best]) best = s;
@@ -881,7 +879,6 @@
         }
 
         var summaryRow = dateGroup.querySelector('.summary-row');
-        var tbody = dateGroup.querySelector('.record-table tbody');
 
         if (totalPieces === 0 && totalLoosePieces === 0 && totalUnitPieces === 0) {
             if (summaryRow) summaryRow.remove();
@@ -893,18 +890,16 @@
         var summaryText2 = totalUnitPieces + '支';
 
         if (!summaryRow) {
-            summaryRow = document.createElement('tr');
+            summaryRow = document.createElement('div');
             summaryRow.className = 'summary-row';
-            summaryRow.style.cssText = 'background:#f0fdf4;font-weight:600;border-top:2px solid #00b894;';
-            summaryRow.innerHTML = '<td colspan="4" style="text-align:right;padding:0.6rem 0.75rem;color:#00b894;font-size:0.9rem;">📊 备注支数：</td>' +
-                '<td style="padding:0.6rem 0.75rem;color:#2d3436;font-size:0.9rem;"></td>' +
-                '<td style="padding:0.6rem 0.75rem;color:#00b894;font-size:0.9rem;"></td>' +
-                '<td style="padding:0.6rem 0.75rem;"></td>' +
-                '<td style="padding:0.6rem 0.75rem;"></td>';
-            tbody.appendChild(summaryRow);
+            summaryRow.style.cssText = 'background:#f0fdf4;font-weight:600;border-top:2px solid #00b894;padding:0.6rem 0.75rem;display:flex;justify-content:flex-end;align-items:center;gap:1.5rem;flex-wrap:wrap;';
+            summaryRow.innerHTML = '<span style="color:#00b894;font-size:0.9rem;">📊 备注支数：<span class="summary-pieces-val" style="color:#2d3436;"></span></span>' +
+                '<span style="color:#00b894;font-size:0.9rem;white-space:nowrap;">📊 明细支数：<span class="summary-unit-pieces-val"></span>支</span>';
+            var recordTable = dateGroup.querySelector('.record-table');
+            recordTable.parentNode.insertBefore(summaryRow, recordTable.nextSibling);
         }
-        summaryRow.querySelectorAll('td')[1].textContent = summaryText1;
-        summaryRow.querySelectorAll('td')[2].innerHTML = '📊 明细支数：' + summaryText2;
+        summaryRow.querySelector('.summary-pieces-val').textContent = summaryText1;
+        summaryRow.querySelector('.summary-unit-pieces-val').textContent = summaryText2;
     }
 
     // 自动填充今天日期
@@ -937,15 +932,20 @@
                             return;
                         }
                         // 数据行:重跑 addRowWarning(锁定时跳过,解锁时加回)
-                        var pn = (tr.children[1] && tr.children[1].textContent || '').trim();
-                        var sp = (tr.children[2] && tr.children[2].textContent || '').trim();
+                        var _pnCell = tr.querySelector('.product-name-cell');
+                        var _spCell = tr.querySelector('.spec-cell');
+                        var pn = (_pnCell && _pnCell.textContent || '').trim();
+                        var sp = (_spCell && _spCell.textContent || '').trim();
                         if (!pn) return;
                         var verified = (tr.dataset && tr.dataset.verified === '1') ? 1 : 0;
                         var recordId = tr.dataset.recordId || tr.getAttribute('data-record-id') || tr.getAttribute('data-id') || null;
+                        var _vw = {};
+                        try { _vw = JSON.parse(tr.dataset.verifiedWarnings || '{}'); } catch(e) { _vw = {}; }
                         if (typeof addRowWarning === 'function') {
                             addRowWarning(tr, {
                                 product_name: pn, specification: sp,
-                                verified: verified, record_id: recordId
+                                verified: verified, record_id: recordId,
+                                verified_warnings: _vw
                             });
                         }
                     });
@@ -1293,6 +1293,9 @@
             }
         });
         if (bestStatus) setRowMatchBadge(recordPk, bestStatus);
+        // 标记该行 🖼️ 按钮为"已上传"状态(加红框);删除全部图片后清除
+        var imgBtn = document.querySelector('.record-image-btn[data-record-id="' + recordPk + '"]');
+        if (imgBtn) imgBtn.classList.add('has-image');
     };
     // 图片列数切换（每订单独立记忆，持久化到数据库）
     window.setImgCols = function(btn, cols) {
@@ -1322,6 +1325,27 @@
                 b.classList.toggle('active', parseInt(b.textContent.trim()) === parseInt(cols));
             });
         });
+        // 2026-07-27:首屏渲染就调 addRowWarning —— 否则 B白300 等警告要等下一次编辑/锁定切换才会出现,
+        // 用户看不到当前明细是不是该核查。从 server-rendered data-verified-warnings 读 per-rule 状态。
+        if (typeof addRowWarning === 'function') {
+            document.querySelectorAll('.record-table tbody tr').forEach(function(tr) {
+                if (tr.classList && tr.classList.contains('record-warn-row')) return;
+                var pn = tr.querySelector('.product-name-cell');
+                var sp = tr.querySelector('.spec-cell');
+                if (!pn || !pn.textContent.trim()) return;
+                var verified = tr.getAttribute('data-verified') === '1' ? 1 : 0;
+                var recordId = tr.dataset.recordId || tr.getAttribute('data-record-id') || null;
+                var vw = {};
+                try { vw = JSON.parse(tr.dataset.verifiedWarnings || '{}'); } catch(e) { vw = {}; }
+                addRowWarning(tr, {
+                    product_name: pn.textContent.trim(),
+                    specification: sp ? sp.textContent.trim() : '',
+                    verified: verified,
+                    record_id: recordId,
+                    verified_warnings: vw
+                });
+            });
+        }
     });
 // 重新绑定编辑/删除按钮事件（用于局部更新后）
 function bindEditDeleteButtons() {
@@ -1389,13 +1413,17 @@ function bindEditDeleteButtons() {
                         btn.classList.remove('btn-success');
                         btn.classList.add('btn-primary');
                         refreshRemarkSummary(tr.closest('.date-group'));
-                        // inline 编辑后重渲校验警告(落到明细行下方)
+                        // inline 编辑后重渲校验警告(落到明细行下方)。
+                        // 保留 tr.dataset.verifiedWarnings 让用户已核查的 B白300 等规则不复活。
                         if (typeof addRowWarning === 'function') {
+                            var _vw = {};
+                            try { _vw = JSON.parse(tr.dataset.verifiedWarnings || '{}'); } catch(e) { _vw = {}; }
                             addRowWarning(tr, {
                                 product_name: r.product_name,
                                 specification: r.specification || '',
                                 verified: r.verified ? 1 : 0,
-                                record_id: r.id
+                                record_id: r.id,
+                                verified_warnings: _vw
                             });
                         }
                     } else {
@@ -1580,6 +1608,21 @@ bindEditDeleteButtons();
 bindDeleteImageButtons();
 bindRecordImageButtons();
 bindManualConfirmButtons();
+// 给所有已经存在的"✓ 已人工确认"标记旁追加"💡 生成提示词"按钮
+(function(){
+    document.querySelectorAll('.img-item-record .manual-verified-marker').forEach(function(marker){
+        var imgId = marker.getAttribute('data-verified-marker');
+        if (!imgId) return;
+        if (marker.parentNode.querySelector('.gen-prompt-btn[data-gen-prompt="'+imgId+'"]')) return;
+        var btn = document.createElement('button');
+        btn.type='button'; btn.className='gen-prompt-btn lock-hide';
+        btn.style.cssText='margin-left:.35rem;padding:.1rem .5rem;font-size:.75rem;background:#7c3aed;color:#fff;border:none;border-radius:4px;cursor:pointer;';
+        btn.setAttribute('data-gen-prompt', imgId);
+        btn.textContent='💡 生成提示词';
+        marker.parentNode.appendChild(btn);
+    });
+    if (typeof bindGenPromptButtons === 'function') bindGenPromptButtons();
+})();
 applyAllRecordImageOverlays();
 
 // 给 record 级图片（🖼️ 按钮上传）叠加"商品名 + 规格"文字
@@ -1694,9 +1737,9 @@ function appendOrderImageArea(orderPk, images, recordInfo) {
             badgeHtml = '<span class="match-badge" data-match-status="red" title="可能不符' + (reason ? ' — ' + reason : '') + '" style="color:#dc2626;">✗</span>';
         }
         var btnHtml = '';
-        if (status === 'red' && !img.human_verified) {
+        if ((status === 'red' || status === 'yellow') && !img.human_verified) {
             btnHtml = '<button class="manual-confirm-btn lock-hide" data-image-id="' + escAttr(img.image_id) + '" data-confirm-btn="' + escAttr(img.image_id) + '">✓ 确认通过</button>';
-        } else if (status === 'red' && img.human_verified) {
+        } else if ((status === 'red' || status === 'yellow') && img.human_verified) {
             btnHtml = '<span class="manual-verified-marker" data-verified-marker="' + escAttr(img.image_id) + '">✓ 已人工确认</span>';
         }
         div.innerHTML = '<div class="img-photo">' +
@@ -1712,6 +1755,21 @@ function appendOrderImageArea(orderPk, images, recordInfo) {
     });
     bindDeleteImageButtons();
     bindManualConfirmButtons();   // 复用新上传图的确认按钮绑定
+    // 复用后立刻给新出现的人工确认按钮挂上"💡 生成提示词"按钮
+    (function(){
+        document.querySelectorAll('.img-item-record .manual-verified-marker:not([data-gp-bound])').forEach(function(marker){
+            var imgId = marker.getAttribute('data-verified-marker');
+            if (!imgId) return;
+            if (marker.parentNode.querySelector('.gen-prompt-btn[data-gen-prompt="'+imgId+'"]')) return;
+            var btn = document.createElement('button');
+            btn.type='button'; btn.className='gen-prompt-btn lock-hide';
+            btn.style.cssText='margin-left:.35rem;padding:.1rem .5rem;font-size:.75rem;background:#7c3aed;color:#fff;border:none;border-radius:4px;cursor:pointer;';
+            btn.setAttribute('data-gen-prompt', imgId);
+            btn.textContent='💡 生成提示词';
+            marker.parentNode.appendChild(btn);
+        });
+        bindGenPromptButtons();
+    })();
 }
 
 // 手工确认按钮 click handler(把红牌标记为人工已确认)
@@ -1729,12 +1787,21 @@ function bindManualConfirmButtons() {
                 body: JSON.stringify({verified: true})
             }).then(function(res) { return res.json(); }).then(function(data) {
                 if (data.success) {
-                    // 把按钮替换成 "✓ 已人工确认" 标记
+                    // 把按钮替换成 "✓ 已人工确认" 标记 + 紧邻的"💡 生成提示词"按钮
                     var marker = document.createElement('span');
                     marker.className = 'manual-verified-marker';
                     marker.setAttribute('data-verified-marker', imgId);
                     marker.textContent = '✓ 已人工确认';
+                    var promptBtn = document.createElement('button');
+                    promptBtn.type = 'button';
+                    promptBtn.className = 'gen-prompt-btn lock-hide';
+                    promptBtn.style.cssText = 'margin-left:.35rem;padding:.1rem .5rem;font-size:.75rem;background:#7c3aed;color:#fff;border:none;border-radius:4px;cursor:pointer;';
+                    promptBtn.setAttribute('data-gen-prompt', imgId);
+                    promptBtn.textContent = '💡 生成提示词';
+                    // 替换:先放 marker,再 append promptBtn 到同一父容器
                     self.parentNode.replaceChild(marker, self);
+                    marker.parentNode.appendChild(promptBtn);
+                    bindGenPromptButtons();
                     // 同步刷新该 record 行级徽章(图红牌→绿后,行 best 可能也变绿)
                     var imgItem = marker.closest('.img-item-record');
                     var recordPk = imgItem && imgItem.getAttribute('data-record-pk');
@@ -1753,48 +1820,85 @@ function bindManualConfirmButtons() {
     });
 }
 
-// ── "已核查"按钮回调(给 _smart_add_modal.html 的事件代理调用)──
-// markRecordVerified:    点击 .record-warn-verify-btn 触发 → PUT verified=true
-// unmarkRecordVerified:  点击 .record-verified-unverify 触发 → PUT verified=false
-// 两者成功后刷新该行警告状态(addRowWarning 会自动按 verified 切换警告/绿色状态)
-window.markRecordVerified = function(recordId, dataRow) {
-    fetch('/api/v1/shipping-orders/records/' + recordId, {
-        method: 'PUT',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({verified: 1})
-    }).then(function(res) { return res.json(); }).then(function(data) {
-        if (data.success) {
-            // 更新 data-row 的 data-verified
-            dataRow.setAttribute('data-verified', '1');
-            // 读 pn/sp 重新调 addRowWarning,会自动渲染绿色"已核查"行
-            var pn = (dataRow.children[1] && dataRow.children[1].textContent || '').trim();
-            var sp = (dataRow.children[2] && dataRow.children[2].textContent || '').trim();
-            if (typeof addRowWarning === 'function') {
-                addRowWarning(dataRow, {product_name: pn, specification: sp, verified: 1, record_id: recordId});
-            }
-        } else {
-            alert('标记失败：' + (data.error || '未知错误'));
-        }
-    }).catch(function(err) { alert('请求失败：' + err); });
-};
-window.unmarkRecordVerified = function(recordId, dataRow) {
-    fetch('/api/v1/shipping-orders/records/' + recordId, {
-        method: 'PUT',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({verified: 0})
-    }).then(function(res) { return res.json(); }).then(function(data) {
-        if (data.success) {
-            dataRow.setAttribute('data-verified', '0');
-            var pn = (dataRow.children[1] && dataRow.children[1].textContent || '').trim();
-            var sp = (dataRow.children[2] && dataRow.children[2].textContent || '').trim();
-            if (typeof addRowWarning === 'function') {
-                addRowWarning(dataRow, {product_name: pn, specification: sp, verified: 0, record_id: recordId});
-            }
-        } else {
-            alert('取消核查失败：' + (data.error || '未知错误'));
-        }
-    }).catch(function(err) { alert('请求失败：' + err); });
-};
+// ── 生成类别/规格自适应提示词(2026-07-30 新增) ──
+// 「💡 生成提示词」按钮:调后端 /generate-prompt-suggestion 拿草稿,弹模态编辑器,保存到 /category-prompts。
+function bindGenPromptButtons() {
+    document.querySelectorAll('.gen-prompt-btn:not([data-bound])').forEach(function(btn) {
+        btn.setAttribute('data-bound', '1');
+        btn.addEventListener('click', function() {
+            var imgId = this.getAttribute('data-gen-prompt');
+            btn.disabled = true; btn.textContent = '生成中...';
+            fetch('/api/v1/shipping-orders/images/' + imgId + '/generate-prompt-suggestion', {
+                method: 'POST'
+            }).then(function(res) { return res.json(); }).then(function(data) {
+                btn.disabled = false; btn.textContent = '💡 生成提示词';
+                if (!data.success) { alert('生成失败: ' + (data.error || '')); return; }
+                openCategoryPromptModal(data.suggestion, imgId);
+            }).catch(function() { btn.disabled = false; btn.textContent = '💡 生成提示词'; alert('请求失败'); });
+        });
+    });
+}
+
+function openCategoryPromptModal(sug, imgId) {
+    // 简易模态:避免引入额外组件
+    var existing = document.getElementById('categoryPromptModal');
+    if (existing) existing.remove();
+    var html = ''
+        + '<div id="categoryPromptModal" style="position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9999;display:flex;align-items:center;justify-content:center;">'
+        + '<div style="background:#fff;border-radius:8px;padding:1.2rem;max-width:560px;width:92%;box-shadow:0 8px 24px rgba(0,0,0,.25);">'
+        + '<h3 style="margin:0 0 .6rem;color:#7c3aed;">💡 生成自适应提示词</h3>'
+        + '<p style="font-size:.82rem;color:#636e72;margin:0 0 .8rem;">基于 OCR 原文 + AI/人裁决自动生成的提示词草稿;可编辑后保存,下次同品类/同规格比对生效。</p>'
+        + '<label style="font-size:.82rem;">作用范围:</label><br>'
+        + '<select id="cp_scope" style="width:100%;margin:.3rem 0 .6rem;padding:.3rem;">'
+        + '<option value="category"' + (sug.scope === 'category' ? ' selected' : '') + '>大类(按商品品类)</option>'
+        + '<option value="spec"'     + (sug.scope === 'spec'     ? ' selected' : '') + '>具体规格(品类+通配符)</option>'
+        + '</select>'
+        + '<label style="font-size:.82rem;">品类编号:</label><br>'
+        + '<input id="cp_category_code" value="' + escHtml(sug.category_code || '') + '" placeholder="如 0204" style="width:100%;margin:.3rem 0 .6rem;padding:.3rem;">'
+        + '<label style="font-size:.82rem;">品名关键词(大类时填):</label><br>'
+        + '<input id="cp_product_name_keyword" value="' + escHtml(sug.product_name_keyword || '') + '" placeholder="如 杂胶 / HA猪皮纹" style="width:100%;margin:.3rem 0 .6rem;padding:.3rem;">'
+        + '<label style="font-size:.82rem;">规格通配(选具体规格时填,SQL LIKE 语法 %/_):</label><br>'
+        + '<input id="cp_spec_pattern" value="' + escHtml(sug.spec_pattern || '') + '" placeholder="如 %黑中加面% / 0._%" style="width:100%;margin:.3rem 0 .6rem;padding:.3rem;">'
+        + '<label style="font-size:.82rem;">提示词内容(可编辑):</label><br>'
+        + '<textarea id="cp_prompt_text" rows="5" style="width:100%;margin:.3rem 0 .8rem;padding:.4rem;font-size:.85rem;">' + escHtml(sug.prompt_text) + '</textarea>'
+        + '<div style="text-align:right;">'
+        + '<button id="cp_cancel" style="margin-right:.4rem;padding:.3rem .7rem;background:#dfe6e9;border:none;border-radius:4px;cursor:pointer;">取消</button>'
+        + '<button id="cp_save" style="padding:.3rem .8rem;background:#7c3aed;color:#fff;border:none;border-radius:4px;cursor:pointer;">保存</button>'
+        + '</div>'
+        + '</div></div>';
+    document.body.insertAdjacentHTML('beforeend', html);
+    var modal = document.getElementById('categoryPromptModal');
+    document.getElementById('cp_cancel').onclick = function() { modal.remove(); };
+    document.getElementById('cp_save').onclick = function() {
+        var body = {
+            scope: document.getElementById('cp_scope').value,
+            category_code: document.getElementById('cp_category_code').value || null,
+            product_name_keyword: document.getElementById('cp_product_name_keyword').value || null,
+            spec_pattern: document.getElementById('cp_spec_pattern').value || null,
+            prompt_text: document.getElementById('cp_prompt_text').value || '',
+            source_ocr_text: sug.source_ocr_text,
+            source_ai_status: sug.source_ai_status,
+            source_human_status: 'green',
+        };
+        var saveBtn = document.getElementById('cp_save');
+        saveBtn.disabled = true; saveBtn.textContent = '保存中...';
+        fetch('/api/v1/category-prompts', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body)
+        }).then(function(r){ return r.json(); }).then(function(data){
+            saveBtn.disabled = false; saveBtn.textContent = '保存';
+            if (data.success) {
+                modal.remove();
+                alert('已保存,下次同类比对生效');
+            } else { alert('保存失败: ' + (data.error || '')); }
+        }).catch(function(){ saveBtn.disabled = false; saveBtn.textContent = '保存'; alert('请求失败'); });
+    };
+}
+
+// ── "已核查"按钮回调 ──
+// markRecordVerified / unmarkRecordVerified 的实现已上移到共享模板
+// _smart_add_modal.html(走 _smartAddApi 拼 URL,三套订单共用一份),此处不再重复定义。
 </script>
 
 </div><!-- /.shipping-page -->

@@ -133,15 +133,29 @@ class TestGetItemWarnings(unittest.TestCase):
         for case_def, result in zip(CASES, self.results):
             desc, pn, sp, expect_n, expect_substrs = case_def
             with self.subTest(case=desc):
-                actual = result['warnings']
+                raw = result['warnings']
+                # 契约(per-rule 核查改造后):getItemWarnings 返回 [{rule_id, message}],
+                # 不再是纯字符串数组 —— rule_id 是「单条警告已核查」状态的追踪键。
+                actual = [w['message'] for w in raw]
                 self.assertEqual(
                     len(actual), expect_n,
                     f"[{desc}] pn={pn!r} sp={sp!r}\n"
                     f"  期望 {expect_n} 条 warning, 实际 {len(actual)} 条: {actual}",
                 )
+                # 每条警告必须带非空 rule_id,且同一条目内不重复 ——
+                # 否则 verified_warnings[rule_id] 会互相覆盖,核查一条等于核查两条。
+                rule_ids = [w.get('rule_id') for w in raw]
+                self.assertTrue(
+                    all(rid for rid in rule_ids),
+                    f"[{desc}] 存在缺失 rule_id 的警告: {raw}",
+                )
+                self.assertEqual(
+                    len(set(rule_ids)), len(rule_ids),
+                    f"[{desc}] rule_id 重复,核查状态会互相覆盖: {rule_ids}",
+                )
                 for substr in expect_substrs:
                     self.assertTrue(
-                        any(substr in w for w in actual),
+                        any(substr in msg for msg in actual),
                         f"[{desc}] 期望 warning 含 '{substr}',实际:\n  " +
                         "\n  ".join(actual),
                     )

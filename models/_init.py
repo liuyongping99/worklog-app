@@ -153,10 +153,24 @@ def init_db():
         except Exception:
             pass  # 列已存在
 
-    # 迁移：出货/装柜订单明细加 verified 列（用户已核查该明细，0/1）
-    for tbl in ('shipping_records', 'loading_order_records'):
+    # 迁移：三套订单明细加 verified 列（用户已核查该明细，0/1）
+    #   2026-07-30：入库补齐 —— 之前只有出货/装柜有此列，入库页「✓ 全部已核查」点了没法落库。
+    for tbl in ('shipping_records', 'inbound_records', 'loading_order_records'):
         try:
             cursor.execute(f"ALTER TABLE {tbl} ADD COLUMN verified INTEGER NOT NULL DEFAULT 0")
+        except Exception:
+            pass  # 列已存在
+
+    # 迁移：三套订单明细加 verified_warnings(JSON) — 细粒度记录"哪条警告已核查"
+    #   与 verified 字段并存:verified=1 仍代表整行已核查(隐藏所有警告),
+    #   verified_warnings 用于单独追踪某条规则(如 B白300g)是否被点掉过,
+    #   这样用户可以"取消核查"该条让警告重新弹出,而不会触发其他警告的复活。
+    #   NOT NULL DEFAULT '{}' 保证存量行不是 NULL —— 模板 |tojson 遇到 None 会输出 null,
+    #   前端 JSON.parse 出 null 后 Object 操作会抛错。
+    #   2026-07-30：入库/装柜补齐（装柜之前只有 verified，per-rule 折叠区永远是空的）。
+    for tbl in ('shipping_records', 'inbound_records', 'loading_order_records'):
+        try:
+            cursor.execute(f"ALTER TABLE {tbl} ADD COLUMN verified_warnings TEXT NOT NULL DEFAULT '{{}}'")
         except Exception:
             pass  # 列已存在
 
@@ -263,6 +277,8 @@ def init_db():
             remark TEXT DEFAULT '',
             created_at TEXT NOT NULL,
             sort_order INTEGER NOT NULL DEFAULT 0,
+            verified INTEGER NOT NULL DEFAULT 0,
+            verified_warnings TEXT NOT NULL DEFAULT '{}',
             FOREIGN KEY (order_pk) REFERENCES inbound_orders(id)
         )
     ''')
@@ -280,6 +296,7 @@ def init_db():
             created_at TEXT NOT NULL,
             sort_order INTEGER NOT NULL DEFAULT 0,
             verified INTEGER NOT NULL DEFAULT 0,
+            verified_warnings TEXT NOT NULL DEFAULT '{}',
             FOREIGN KEY (order_pk) REFERENCES loading_orders(id)
         )
     ''')
@@ -337,6 +354,28 @@ def init_db():
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_audit_log_entity ON audit_log(entity_type, entity_id)')
 
+    # ── 类别/规格自适应提示词（compare-rows 比对时拼装 layer2/layer3） ──
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS category_prompts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            scope TEXT NOT NULL,                  -- 'category' | 'spec'
+            category_code TEXT,                   -- NULL 时要求 product_name_keyword 非空(spec 全局匹配)
+            spec_pattern TEXT,                    -- LIKE 模式(%, _),scope='spec' 时必填
+            product_name_keyword TEXT,            -- 品名包含关键词则匹配(category 分类的依据)
+            prompt_text TEXT NOT NULL,
+            source_event_id INTEGER,              -- 触发它的 ocr_match_event.id;NULL=手工直接添加
+            source_ocr_text TEXT,                 -- 生成时的 OCR 文本快照
+            source_ai_status TEXT,                -- 生成时的 AI 裁决快照(green/yellow/red)
+            source_human_status TEXT,            -- 人工最终裁决(一般是 green)
+            status TEXT NOT NULL DEFAULT 'active',  -- 'active' | 'archived'
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (source_event_id) REFERENCES ocr_match_event(id)
+        )
+    ''')
+    # 经常按 scope+category_code 查分类级提示词,以及按 category+spec_pattern 查规格级提示词
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_cat_prompts_category ON category_prompts(scope, category_code, status)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_cat_prompts_spec ON category_prompts(scope, category_code, spec_pattern, status)')
+
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS shipping_records (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -348,6 +387,7 @@ def init_db():
             remark TEXT DEFAULT '',
             created_at TEXT NOT NULL,
             verified INTEGER NOT NULL DEFAULT 0,
+            verified_warnings TEXT NOT NULL DEFAULT '{}',
             FOREIGN KEY (order_pk) REFERENCES shipping_orders(id)
         )
     ''')

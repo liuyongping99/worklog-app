@@ -45,16 +45,19 @@ class AiMatchEndpointTests(unittest.TestCase):
         except OSError:
             pass
 
-    @mock.patch('blueprints.shipping.PaddleOCREngine')
     @mock.patch('blueprints.shipping.get_ocr_engine')
-    def test_ai_match_updates_rows(self, mock_get_engine, MockPaddle):
-        """端点应跑 PaddleOCR + DeepSeek,把 verdict 写到 shipping_images.match_status。"""
-        MockPaddle.return_value.extract_text.return_value = '硬加面 黑色'
+    def test_ai_match_updates_rows(self, mock_get_engine):
+        """端点应跑 PaddleOCR + DeepSeek,把 verdict 写到 shipping_images.match_status。
+
+        NP0-1 之后 paddleocr 走 get_ocr_engine 单例,需要按引擎名分发 fake 实例。
+        """
+        fake_paddle = mock.MagicMock()
+        fake_paddle.extract_text.return_value = '硬加面 黑色'
         fake_ds = mock.MagicMock()
         fake_ds.compare_rows.return_value = [
             {'record_id': self.rid, 'match_status': 'green', 'reason': '品名规格一致'}
         ]
-        mock_get_engine.return_value = fake_ds
+        mock_get_engine.side_effect = lambda name: fake_paddle if name == 'paddleocr' else fake_ds
 
         resp = self.client.post(f'/api/v1/shipping-orders/{self.oid}/ai-match')
         self.assertEqual(resp.status_code, 200)
@@ -67,11 +70,11 @@ class AiMatchEndpointTests(unittest.TestCase):
         imgs = ShippingImage.get_by_record(self.rid)
         self.assertEqual(imgs[0]['match_status'], 'green')
 
-    @mock.patch('blueprints.shipping.PaddleOCREngine')
     @mock.patch('blueprints.shipping.get_ocr_engine')
-    def test_ai_match_normalizes_off_spec_status(self, mock_get_engine, MockPaddle):
+    def test_ai_match_normalizes_off_spec_status(self, mock_get_engine):
         """LLM 返回 'GREEN'/'Yellow'/'OK'/'foo' 等不规范值时,端点必须归一为小写并计入 summary。"""
-        MockPaddle.return_value.extract_text.return_value = '硬加面 黑色'
+        fake_paddle = mock.MagicMock()
+        fake_paddle.extract_text.return_value = '硬加面 黑色'
         fake_ds = mock.MagicMock()
         fake_ds.compare_rows.return_value = [
             {'record_id': self.rid, 'match_status': 'GREEN', 'reason': ''},
@@ -79,7 +82,7 @@ class AiMatchEndpointTests(unittest.TestCase):
             {'record_id': self.rid, 'match_status': 'OK', 'reason': ''},
             {'record_id': self.rid, 'match_status': 'foo', 'reason': ''},
         ]
-        mock_get_engine.return_value = fake_ds
+        mock_get_engine.side_effect = lambda name: fake_paddle if name == 'paddleocr' else fake_ds
 
         resp = self.client.post(f'/api/v1/shipping-orders/{self.oid}/ai-match')
         self.assertEqual(resp.status_code, 200)

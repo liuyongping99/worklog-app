@@ -18,6 +18,7 @@ from .products import ProductUnit, ProductCategory, Product
 from .piece_conversion import PieceConversion
 from .audit import AuditLog
 from .audit_query import OcrEventAudit
+from .category_prompt import CategoryPrompt, classify_record
 
 __all__ = [
     'get_db', 'DB_PATH', 'init_db',
@@ -32,4 +33,6 @@ __all__ = [
     'PieceConversion',
     'AuditLog',
     'OcrEventAudit',
+    'CategoryPrompt',
+    'classify_record',
 ]

@@ -49,6 +49,74 @@ def _safe_remove_file(file_path):
         return False
 
 
+# ── 明细「单条警告已核查」共享读写 ─────────────────────────────────────────
+# 三套订单明细(shipping_records / inbound_records / loading_order_records)都有
+# verified_warnings(JSON, NOT NULL DEFAULT '{}') 列,语义完全一致:
+#   {rule_id: true} 表示该条校验警告被用户单独点掉,不再出现在主警告列表。
+# 与整行 verified 字段并存:verified=1 = 整行所有警告都折叠。
+# table 只由本模块内部传入固定字面量表名,不接受外部输入(避免 f-string 拼 SQL 的注入面)。
+_VERIFY_WARNING_TABLES = ('shipping_records', 'inbound_records', 'loading_order_records')
+
+
+def _verified_warnings_get(table: str, record_id: int) -> dict:
+    """读某条明细的 verified_warnings(JSON),反序列化为 dict,失败返回空 dict。"""
+    import json
+    assert table in _VERIFY_WARNING_TABLES, f'非法表名: {table}'
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(f'SELECT verified_warnings FROM {table} WHERE id = ?', (record_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if not row or not row['verified_warnings']:
+        return {}
+    try:
+        return json.loads(row['verified_warnings'])
+    except (TypeError, ValueError):
+        return {}
+
+
+def _verified_warnings_set(table: str, record_id: int, rule_id: str, verified: bool) -> dict:
+    """单条规则的核查切换:把 rule_id 设为 verified/未 verified,返回更新后的完整 dict。"""
+    import json
+    assert table in _VERIFY_WARNING_TABLES, f'非法表名: {table}'
+    conn = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(f'SELECT verified_warnings FROM {table} WHERE id = ?', (record_id,))
+        row = cursor.fetchone()
+        if not row:
+            return {}
+        current = {}
+        if row['verified_warnings']:
+            try:
+                current = json.loads(row['verified_warnings'])
+            except (TypeError, ValueError):
+                current = {}
+        if verified:
+            current[rule_id] = True
+        else:
+            current.pop(rule_id, None)
+        cursor.execute(
+            f'UPDATE {table} SET verified_warnings = ? WHERE id = ?',
+            (json.dumps(current, ensure_ascii=False, sort_keys=True), record_id)
+        )
+        conn.commit()
+        return current
+    finally:
+        conn.close()
+
+
+def _unverify_clears_warnings(data: dict, fields: list, values: list):
+    """update() 里的联动:verified 被切到 0/False 时,同时把 verified_warnings 清空。
+
+    语义:"全部已核查"是顶层开关,取消它 → 用户应看到一份干净的警告列表,
+    而不是残留着上次单条核查过的折叠项。
+    """
+    if data.get('verified') == 0 or data.get('verified') is False:
+        fields.append('verified_warnings = ?')
+        values.append('{}')
+
+
 class ShippingOrder:
     @staticmethod
     def create(date: str, customer: str) -> int:
@@ -245,6 +313,55 @@ class ShippingRecord:
         return record_id
 
     @staticmethod
+    def create_many(order_pk: int, items: list) -> dict:
+        """单事务批量插入明细，避免逐条独立提交导致中途失败留半单。
+
+        items: [{'product_name','specification','quantity','unit','remark'}, ...]
+        规则：品名或数量为空 的项跳过(计入 skipped)；'码'→'y' 归一化；
+             任一 INSERT 抛异常则整批回滚。
+        Returns: {'records': [dict...], 'skipped': int}
+        """
+        conn = get_db()
+        cursor = conn.cursor()
+        try:
+            cursor.execute('SELECT COALESCE(MAX(sort_order), 0) FROM shipping_records WHERE order_pk = ?', (order_pk,))
+            next_sort = cursor.fetchone()[0]
+            now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            records = []
+            skipped = 0
+            for item in items:
+                if not isinstance(item, dict):
+                    skipped += 1
+                    continue
+                product_name = (str(item.get('product_name') or '')).strip()
+                specification = (str(item.get('specification') or '')).strip()
+                quantity = (str(item.get('quantity') if item.get('quantity') is not None else '')).strip()
+                unit = (str(item.get('unit') or '支')).strip()
+                if unit == '码':
+                    unit = 'y'
+                remark = (str(item.get('remark') or '')).strip()
+                if not product_name or not quantity:
+                    skipped += 1
+                    continue
+                next_sort += 1
+                cursor.execute(
+                    'INSERT INTO shipping_records (order_pk, product_name, specification, quantity, unit, remark, sort_order, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                    (order_pk, product_name, specification, quantity, unit, remark, next_sort, now)
+                )
+                records.append({
+                    'id': cursor.lastrowid, 'product_name': product_name,
+                    'specification': specification, 'quantity': quantity,
+                    'unit': unit, 'remark': remark,
+                })
+            conn.commit()
+            return {'records': records, 'skipped': skipped}
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    @staticmethod
     def get_all():
         conn = get_db()
         cursor = conn.cursor()
@@ -299,7 +416,11 @@ class ShippingRecord:
 
     @staticmethod
     def update(record_id: int, data: dict):
-        """更新单条明细。只更新 data 里传入的字段,缺省字段保持原值。"""
+        """更新单条明细。只更新 data 里传入的字段,缺省字段保持原值。
+
+        联动规则:当 verified 从 1 切到 0(取消"全部已核查")时,自动清空 verified_warnings JSON。
+        否则用户看到的是「干净的警告列表」,符合"全部已核查是顶层开关"的语义。
+        """
         conn = get_db()
         cursor = conn.cursor()
         fields = []
@@ -311,10 +432,28 @@ class ShippingRecord:
         if not fields:
             conn.close()
             return
+        # 取消核查联动清空 per-rule 状态
+        _unverify_clears_warnings(data, fields, values)
         values.append(record_id)
         cursor.execute(f'UPDATE shipping_records SET {", ".join(fields)} WHERE id = ?', values)
         conn.commit()
         conn.close()
+
+    @staticmethod
+    def get_verified_warnings(record_id: int) -> dict:
+        """读某条明细的 verified_warnings(JSON),反序列化为 dict,失败返回空 dict。"""
+        return _verified_warnings_get('shipping_records', record_id)
+
+    @staticmethod
+    def set_verified_warning(record_id: int, rule_id: str, verified: bool) -> dict:
+        """单条规则的核查切换:把 rule_id 设为 verified/未 verified,返回更新后的完整 dict。
+
+        设计:与全局 verified 字段并存 —— verified=1 仍代表"整行已核查,所有警告都折叠";
+        verified_warnings 让用户可以单独点掉/恢复某条警告(目前用到 b_white_300g)。
+        整体流程:addRowWarning 把 verified_warnings 传进去 → 警告渲染时根据它决定是否显示;
+        用户点 ✓ 核查 / ✗ 取消核查 → POST 此端点 → 局部刷新警告行。
+        """
+        return _verified_warnings_set('shipping_records', record_id, rule_id, verified)
 
     @staticmethod
     def delete(record_id: int):
@@ -336,53 +475,68 @@ class ShippingRecord:
 
     @staticmethod
     def move_up(record_id: int):
+        """上移一条明细(交换相邻 sort_order)。三 UPDATE 必须原子,否则中途崩溃
+        会留下 sort_order=-1 的孤儿值,渲染顺序错乱。"""
         conn = get_db()
         cursor = conn.cursor()
-        cursor.execute('SELECT order_pk, sort_order FROM shipping_records WHERE id = ?', (record_id,))
-        cur = cursor.fetchone()
-        if not cur:
+        try:
+            cursor.execute('BEGIN IMMEDIATE')
+            cursor.execute('SELECT order_pk, sort_order FROM shipping_records WHERE id = ?', (record_id,))
+            cur = cursor.fetchone()
+            if not cur:
+                conn.rollback(); conn.close()
+                return False
+            order_pk, cur_sort = cur['order_pk'], cur['sort_order']
+            cursor.execute(
+                'SELECT id, sort_order FROM shipping_records WHERE order_pk = ? AND sort_order < ? ORDER BY sort_order DESC LIMIT 1',
+                (order_pk, cur_sort)
+            )
+            prev = cursor.fetchone()
+            if not prev:
+                conn.rollback(); conn.close()
+                return False
+            cursor.execute('UPDATE shipping_records SET sort_order = -1 WHERE id = ?', (record_id,))
+            cursor.execute('UPDATE shipping_records SET sort_order = ? WHERE id = ?', (cur_sort, prev['id']))
+            cursor.execute('UPDATE shipping_records SET sort_order = ? WHERE id = ?', (prev['sort_order'], record_id))
+            conn.commit()
+            return True
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
             conn.close()
-            return False
-        order_pk, cur_sort = cur['order_pk'], cur['sort_order']
-        cursor.execute(
-            'SELECT id, sort_order FROM shipping_records WHERE order_pk = ? AND sort_order < ? ORDER BY sort_order DESC LIMIT 1',
-            (order_pk, cur_sort)
-        )
-        prev = cursor.fetchone()
-        if not prev:
-            conn.close()
-            return False
-        cursor.execute('UPDATE shipping_records SET sort_order = -1 WHERE id = ?', (record_id,))
-        cursor.execute('UPDATE shipping_records SET sort_order = ? WHERE id = ?', (cur_sort, prev['id']))
-        cursor.execute('UPDATE shipping_records SET sort_order = ? WHERE id = ?', (prev['sort_order'], record_id))
-        conn.commit()
-        conn.close()
-        return True
 
     @staticmethod
     def move_down(record_id: int):
+        """下移一条明细(交换相邻 sort_order)。三 UPDATE 必须原子,理由同 move_up。"""
         conn = get_db()
         cursor = conn.cursor()
-        cursor.execute('SELECT order_pk, sort_order FROM shipping_records WHERE id = ?', (record_id,))
-        cur = cursor.fetchone()
-        if not cur:
+        try:
+            cursor.execute('BEGIN IMMEDIATE')
+            cursor.execute('SELECT order_pk, sort_order FROM shipping_records WHERE id = ?', (record_id,))
+            cur = cursor.fetchone()
+            if not cur:
+                conn.rollback(); conn.close()
+                return False
+            order_pk, cur_sort = cur['order_pk'], cur['sort_order']
+            cursor.execute(
+                'SELECT id, sort_order FROM shipping_records WHERE order_pk = ? AND sort_order > ? ORDER BY sort_order ASC LIMIT 1',
+                (order_pk, cur_sort)
+            )
+            nxt = cursor.fetchone()
+            if not nxt:
+                conn.rollback(); conn.close()
+                return False
+            cursor.execute('UPDATE shipping_records SET sort_order = -1 WHERE id = ?', (record_id,))
+            cursor.execute('UPDATE shipping_records SET sort_order = ? WHERE id = ?', (cur_sort, nxt['id']))
+            cursor.execute('UPDATE shipping_records SET sort_order = ? WHERE id = ?', (nxt['sort_order'], record_id))
+            conn.commit()
+            return True
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
             conn.close()
-            return False
-        order_pk, cur_sort = cur['order_pk'], cur['sort_order']
-        cursor.execute(
-            'SELECT id, sort_order FROM shipping_records WHERE order_pk = ? AND sort_order > ? ORDER BY sort_order ASC LIMIT 1',
-            (order_pk, cur_sort)
-        )
-        nxt = cursor.fetchone()
-        if not nxt:
-            conn.close()
-            return False
-        cursor.execute('UPDATE shipping_records SET sort_order = -1 WHERE id = ?', (record_id,))
-        cursor.execute('UPDATE shipping_records SET sort_order = ? WHERE id = ?', (cur_sort, nxt['id']))
-        cursor.execute('UPDATE shipping_records SET sort_order = ? WHERE id = ?', (nxt['sort_order'], record_id))
-        conn.commit()
-        conn.close()
-        return True
 
 
 class InboundOrder:
@@ -578,21 +732,36 @@ class InboundRecord:
 
     @staticmethod
     def update(record_id: int, data: dict):
+        """更新单条明细。只更新 data 里传入的字段,缺省字段保持原值。
+
+        联动规则:verified 切到 0(取消"全部已核查")时,自动清空 verified_warnings JSON。
+        """
         conn = get_db()
         cursor = conn.cursor()
         fields = []
         values = []
-        for key in ['product_name', 'specification', 'quantity', 'unit', 'remark']:
+        for key in ['product_name', 'specification', 'quantity', 'unit', 'remark', 'verified']:
             if key in data:
                 fields.append(f'{key} = ?')
                 values.append(data[key])
         if not fields:
             conn.close()
             return
+        _unverify_clears_warnings(data, fields, values)
         values.append(record_id)
         cursor.execute(f'UPDATE inbound_records SET {", ".join(fields)} WHERE id = ?', values)
         conn.commit()
         conn.close()
+
+    @staticmethod
+    def get_verified_warnings(record_id: int) -> dict:
+        """读某条明细的 verified_warnings(JSON) → dict。"""
+        return _verified_warnings_get('inbound_records', record_id)
+
+    @staticmethod
+    def set_verified_warning(record_id: int, rule_id: str, verified: bool) -> dict:
+        """单条规则核查切换,返回更新后的完整 dict。语义同出货。"""
+        return _verified_warnings_set('inbound_records', record_id, rule_id, verified)
 
     @staticmethod
     def delete(record_id: int):
@@ -910,6 +1079,48 @@ class ShippingImage:
         for file_path in file_paths:
             _safe_remove_file(file_path)
 
+    @staticmethod
+    def delete_by_record(record_pk: int):
+        """删除某条明细的所有专属图片（DB 行 + 物理文件）。
+
+        删除单条明细时必须调用，否则 record 删掉后其行级图片变成孤儿：
+        页面按现存 record 循环取图不再显示它们，而订单又因"仍有图片"删不掉。
+        """
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('SELECT file_path FROM shipping_images WHERE record_pk = ?', (record_pk,))
+        file_paths = [row['file_path'] for row in cursor.fetchall()]
+        cursor.execute('DELETE FROM shipping_images WHERE record_pk = ?', (record_pk,))
+        conn.commit()
+        conn.close()
+        for file_path in file_paths:
+            _safe_remove_file(file_path)
+        return file_paths
+
+    @staticmethod
+    def delete_record_images_by_order(order_pk: int):
+        """删除某订单下所有【行级】图片（record_pk 非空），保留订单级共享图。
+
+        清空整单明细（delete_by_order 记录）时调用：明细都没了，其行级图片
+        应一并清理，但订单外壳仍在，故订单级共享图（record_pk IS NULL）保留。
+        """
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            'SELECT file_path FROM shipping_images WHERE order_pk = ? AND record_pk IS NOT NULL',
+            (order_pk,)
+        )
+        file_paths = [row['file_path'] for row in cursor.fetchall()]
+        cursor.execute(
+            'DELETE FROM shipping_images WHERE order_pk = ? AND record_pk IS NOT NULL',
+            (order_pk,)
+        )
+        conn.commit()
+        conn.close()
+        for file_path in file_paths:
+            _safe_remove_file(file_path)
+        return file_paths
+
 
 class OcrMatchEvent:
     """出货 OCR/AI/人工核查三类事件的 append-only 日志。
@@ -1010,6 +1221,7 @@ class OcrMatchEvent:
     def get_ai_human_delta(record_id: int) -> list:
         """取同 record 的所有事件;分析 AI vs 人裁决一致率时用。"""
         return OcrMatchEvent.get_by_record(record_id)
+
 
 class LoadingOrder:
     """装柜订单主表"""
@@ -1203,7 +1415,10 @@ class LoadingOrderRecord:
 
     @staticmethod
     def update(record_id: int, data: dict):
-        """更新单条明细。只更新 data 里传入的字段,缺省字段保持原值。"""
+        """更新单条明细。只更新 data 里传入的字段,缺省字段保持原值。
+
+        联动规则:verified 切到 0(取消"全部已核查")时,自动清空 verified_warnings JSON。
+        """
         conn = get_db()
         cursor = conn.cursor()
         fields = []
@@ -1215,10 +1430,21 @@ class LoadingOrderRecord:
         if not fields:
             conn.close()
             return
+        _unverify_clears_warnings(data, fields, values)
         values.append(record_id)
         cursor.execute(f'UPDATE loading_order_records SET {", ".join(fields)} WHERE id = ?', values)
         conn.commit()
         conn.close()
+
+    @staticmethod
+    def get_verified_warnings(record_id: int) -> dict:
+        """读某条明细的 verified_warnings(JSON) → dict。"""
+        return _verified_warnings_get('loading_order_records', record_id)
+
+    @staticmethod
+    def set_verified_warning(record_id: int, rule_id: str, verified: bool) -> dict:
+        """单条规则核查切换,返回更新后的完整 dict。语义同出货。"""
+        return _verified_warnings_set('loading_order_records', record_id, rule_id, verified)
 
     @staticmethod
     def delete(record_id: int):

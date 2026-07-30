@@ -1,6 +1,9 @@
 {# 智能添加弹框 - 共享模板
-   调用方式: {% with smart_add_api='/_smartAddApi/v1/shipping-orders' %}{% include '_smart_add_modal.html' %}{% endwith %}
-   参数: smart_add_api - API 基础路径 (如 /_smartAddApi/v1/shipping-orders)
+   调用方式: {% with smart_add_api='/api/v1/shipping-orders' %}{% include '_smart_add_modal.html' %}{% endwith %}
+   参数: smart_add_api - API 基础路径 (如 /api/v1/shipping-orders、/api/v1/inbound-orders)
+
+   ⚠️ 本文件里所有 fetch 都必须走 _smartAddApi 拼路径,不许硬编码某一套订单的 URL ——
+      否则装柜/入库页会拿自己的 record_id 去写出货表(串表脏写)。
 #}
 <script>
 // ── 智能添加弹框 ──
@@ -8,6 +11,95 @@ var SMART_ADD_API = '{{ smart_add_api }}';
 var _smartAddApi = SMART_ADD_API;
 var _smartAiImageFile = null, _smartAiItems = [], _smartDocNumber = '', _smartCustomer = '';
 var _smartFillOrderPk = null, _smartFillOrderId = null;
+
+// 共享的批量添加 + 局部刷新:submitAiResults(AI 识别后)和 submitSmartFill(文本解析后)
+// 都调它,把 items 数组 POST 到 /records/batch,然后 appendChild 新 tr 到对应订单的 tbody。
+// 不再整页 location.reload(),避免闪烁 + 滚动位置丢失。
+// ── 客户端构建出货明细行(tr)— 与 server 模板(templates/shipping-records.html:441-461)1:1 对齐 ──
+// 10 列固定:序号/重点/商品名称/规格/AI 比对/数量/单位/备注/辅助单位提示/操作
+// 「重点」「AI 比对」是虚拟占位列,服务端用 .no-eco / .no-match class 决定显示隐藏。
+// 改 server 模板列结构时,这里必须同步改 —— 否则新旧行单元格数不一致会导致列错位。
+function buildShippingRecordRow(rec, tbody) {
+    var tr = document.createElement('tr');
+    var hint = (typeof getUnitHint === 'function') ? getUnitHint(rec.product_name, rec.specification||'', rec.quantity, rec.unit, rec.remark) : '';
+    var mismatch = (typeof checkMismatch === 'function') ? checkMismatch(rec.remark||'', rec.quantity, rec.product_name, rec.specification||'') : '';
+    var pieceHint = (typeof getPieceHint === 'function') ? getPieceHint(rec.product_name, rec.specification||'') : '';
+    var pieceMismatch = (typeof checkPieceMismatch === 'function') ? checkPieceMismatch(rec.remark||'', rec.quantity, rec.product_name, rec.specification||'') : '';
+    var bad = typeof isInvalidQty === 'function' ? isInvalidQty(rec.quantity) : false;
+    var cm = ''; if (mismatch==='warn'||pieceMismatch==='warn') cm='warn'; else if (mismatch==='info'||pieceMismatch==='info') cm='info';
+    var prefix = bad ? (typeof invalidQtyIcon === 'function' ? invalidQtyIcon() : '❌') : (typeof mismatchIcon === 'function' ? mismatchIcon(cm) : '');
+    tr.innerHTML =
+        // 1. 序号(可能带 ❌/💡/❌ 前缀图标)
+        '<td style="text-align:center;color:#868e96;font-size:0.85rem;">'+prefix+(tbody.children.length+1)+'</td>' +
+        // 2. 重点(eco-col)— 永远占位,服务端按 has_eco 控制 .no-eco class 隐藏整列
+        '<td class="eco-col"></td>' +
+        // 3. 商品名称
+        '<td class="product-name-cell" style="font-size:0.9rem;">'+escHtml(rec.product_name)+'</td>' +
+        // 4. 规格
+        '<td class="spec-cell" style="color:#636e72;font-size:0.9rem;">'+escHtml(rec.specification||'')+'</td>' +
+        // 5. AI 比对(match-col)— 占位
+        '<td class="match-col"></td>' +
+        // 6. 数量
+        '<td class="qty-cell"><span class="qty-badge">'+escHtml(rec.quantity)+'</span></td>' +
+        // 7. 单位
+        '<td class="unit-cell"><span class="unit-badge">'+escHtml(rec.unit)+'</span></td>' +
+        // 8. 备注
+        '<td class="remark-cell">'+escHtml(rec.remark||'—')+'</td>' +
+        // 9. 辅助单位提示
+        '<td class="unit-hint-cell" style="font-size:0.85rem;color:#e17055;">'+escHtml(hint||'—')+(pieceHint?'<br><span style="color:#0984e3;">'+escHtml(pieceHint)+'</span>':'')+'</td>' +
+        // 10. 操作(上移/下移/编辑/删除/🖼️ + 隐藏 file input)
+        '<td class="actions-cell" style="white-space:nowrap;">' +
+            '<button type="button" class="btn btn-sm move-up-btn lock-hide" data-id="'+rec.id+'" title="上移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.1rem 0.35rem;font-size:0.75rem;">▲</button> ' +
+            '<button type="button" class="btn btn-sm move-down-btn lock-hide" data-id="'+rec.id+'" title="下移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.1rem 0.35rem;font-size:0.75rem;">▼</button> ' +
+            '<button type="button" class="btn btn-primary btn-sm edit-record-btn lock-hide" data-id="'+rec.id+'">✏️</button> ' +
+            '<button type="button" class="btn btn-danger btn-sm delete-record-btn lock-hide" data-id="'+rec.id+'">🗑️</button> ' +
+            '<button type="button" class="btn btn-sm record-image-btn lock-hide" data-record-id="'+rec.id+'" title="上传图片到此商品" style="background:#74b9ff;color:#fff;">🖼️</button>' +
+            '<input type="file" class="record-image-input" data-record-id="'+rec.id+'" accept="image/*" multiple style="display:none;">' +
+        '</td>';
+    if (typeof applyMismatchClass === 'function') applyMismatchClass(tr, cm);
+    if (bad) tr.classList.add('row-out-of-stock');
+    // 写 verified / record_id 数据属性,page-load 扫描和事件代理会用到
+    tr.setAttribute('data-record-id', rec.id);
+    tr.setAttribute('data-verified', rec.verified ? '1' : '0');
+    tr.setAttribute('data-verified-warnings', JSON.stringify(rec.verified_warnings || {}));
+    return tr;
+}
+
+function doBatchAdd(items, imgData) {
+    if (typeof showLoading === 'function') showLoading('批量添加中...');
+    fetch(_smartAddApi + '/' + _smartFillOrderPk + '/records/batch', {
+        method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({items:items, records:items})
+    }).then(function(r){return r.json();}).then(function(data){
+        if (typeof hideLoading === 'function') hideLoading();
+        if (data.success) {
+            updateOrderDocNumber(); closeSmartFill();
+            if (data.records && data.records.length > 0) {
+                var tbody = document.querySelector('.date-group[data-order-id="' + _smartFillOrderId + '"] .record-table tbody');
+                if (tbody) {
+                    data.records.forEach(function(item){
+                        var tr = buildShippingRecordRow(item, tbody);
+                        tbody.appendChild(tr);
+                        // 校验警告落到明细行下方(独立 tr),不在弹框内显示
+                        if (typeof addRowWarning === 'function') {
+                            addRowWarning(tr, {
+                                product_name: item.product_name,
+                                specification: item.specification || '',
+                                verified: item.verified ? 1 : 0,
+                                record_id: item.id,
+                                verified_warnings: item.verified_warnings || {}
+                            });
+                        }
+                    });
+                    if (typeof bindEditDeleteButtons === 'function') bindEditDeleteButtons();
+                    // 同步绑定新行的 🖼️ 图片按钮点击(否则新加的 record 点 🖼️ 没反应)
+                    if (typeof bindRecordImageButtons === 'function') bindRecordImageButtons();
+                    if (typeof refreshRemarkSummary === 'function') refreshRemarkSummary(tbody.closest('.date-group'));
+                    if (imgData && imgData.success && imgData.image) insertAiImage(imgData, tbody.closest('.date-group'));
+                }
+            }
+        } else { alert('添加失败：' + (data.error || '未知错误')); }
+    }).catch(function(err){ alert('请求失败：'+err); });
+}
 
 window.openSmartFill = function(orderPk, orderDate, orderCustomer) {
     _smartFillOrderPk = orderPk; _smartFillOrderId = orderPk;
@@ -112,6 +204,44 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 });
 
+// ── 从明细行读「品名 / 规格」的唯一入口 ────────────────────────────────────
+// 三套订单的列结构不一样,取值必须走同一套三级兜底,否则同一行在
+// 「首屏扫描」和「点已核查后重渲」两条路径上算出的警告集合会不一致:
+//   1) [data-field=...]         行内编辑模式(input/select 里取 value)
+//   2) .product-name-cell/.spec-cell  出货页(第 1 列是序号,不能按列位置取)
+//   3) children[1] / children[2]      装柜页(序号/品名/规格);入库页沿用现状
+// 返回 [pn, sp]。
+function readRowNameSpec(tr) {
+    if (!tr) return ['', ''];
+    var pnCell = tr.querySelector('[data-field="product_name"]');
+    var spCell = tr.querySelector('[data-field="specification"]');
+    var pn = (pnCell && (pnCell.value || pnCell.textContent) || '').trim();
+    var sp = (spCell && (spCell.value || spCell.textContent) || '').trim();
+    if (!pn) {
+        var pnTd = tr.querySelector('.product-name-cell');
+        if (pnTd) pn = (pnTd.textContent || '').trim();
+    }
+    if (!sp) {
+        var spTd = tr.querySelector('.spec-cell');
+        if (spTd) sp = (spTd.textContent || '').trim();
+    }
+    if (!pn && tr.children[1]) pn = (tr.children[1].textContent || '').trim();
+    if (!sp && tr.children[2]) sp = (tr.children[2].textContent || '').trim();
+    return [pn, sp];
+}
+
+// 读明细行上服务端渲染的 data-verified-warnings(JSON),坏数据兜底成 {}
+function readRowVerifiedWarnings(tr) {
+    if (!tr) return {};
+    try { return JSON.parse(tr.dataset.verifiedWarnings || '{}') || {}; } catch (e) { return {}; }
+}
+
+// 读明细行的 record id(不同页面用过 data-record-id / data-id)
+function readRowRecordId(tr) {
+    if (!tr) return null;
+    return tr.getAttribute('data-record-id') || tr.getAttribute('data-id') || null;
+}
+
 // ── 页面加载时扫描订单明细表 ──────────────────────────────
 // 校验警告显示位置:不再在 AI 弹框,而是落到明细行下方。
 // 扫描所有订单页面已有的明细行(出货/入库/装柜/任务流都共用),
@@ -121,22 +251,57 @@ document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('.record-table tbody tr').forEach(function(tr) {
         // 已经是警告行(本函数上一轮添加的),跳过避免递归
         if (tr.classList && tr.classList.contains('record-warn-row')) return;
-        // 优先 data-field 属性(行内编辑模式用),其次按列位置(显示模式)
-        var pnCell = tr.querySelector('[data-field="product_name"]');
-        var spCell = tr.querySelector('[data-field="specification"]');
-        var pn = (pnCell && (pnCell.value || pnCell.textContent) || '').trim();
-        var sp = (spCell && (spCell.value || spCell.textContent) || '').trim();
-        if (!pn && tr.children[1]) pn = (tr.children[1].textContent || '').trim();
-        if (!sp && tr.children[2]) sp = (tr.children[2].textContent || '').trim();
-        if (!pn) return;  // 空行或非明细行,跳过
-        // 读 verified 状态(从 data-row 上的 data-verified)
+        var pnSp = readRowNameSpec(tr);
+        if (!pnSp[0]) return;  // 空行或非明细行,跳过
+        // 读 verified / per-rule 状态(服务端渲染在数据行的 data-* 上)
         var verified = (tr.dataset && tr.dataset.verified === '1') ? 1 : 0;
-        var recordId = tr.dataset.recordId || tr.dataset.recordId || tr.getAttribute('data-record-id') || tr.getAttribute('data-id') || null;
-        addRowWarning(tr, {product_name: pn, specification: sp, verified: verified, record_id: recordId});
+        addRowWarning(tr, {
+            product_name: pnSp[0],
+            specification: pnSp[1],
+            verified: verified,
+            record_id: readRowRecordId(tr),
+            verified_warnings: readRowVerifiedWarnings(tr)
+        });
     });
     // 扫描完成后刷一次 nav 指示(addRowWarning 内部已经各调一次,但全量为幂等兜底)
     if (typeof updateNavIndicator === 'function') updateNavIndicator();
 });
+
+// ── 「整行已核查」切换的共享默认实现 ───────────────────────────────────────
+// 出货/入库/装柜三页共用:URL 走 _smartAddApi,所以新增订单类型不用再各写一份
+// (入库页之前就是因为没写这两个函数,「✓ 全部已核查」点了完全没反应)。
+// 页面若要特殊处理,可在 include 之后重新赋值覆盖。
+function _toggleRecordVerified(recordId, dataRow, verified) {
+    fetch(_smartAddApi + '/records/' + recordId, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({verified: verified ? 1 : 0})
+    }).then(function(res) { return res.json(); }).then(function(data) {
+        if (!data.success) {
+            alert((verified ? '标记失败：' : '取消核查失败：') + (data.error || '未知错误'));
+            return;
+        }
+        dataRow.setAttribute('data-verified', verified ? '1' : '0');
+        // 取消整行核查时后端会联动清空 per-rule 状态,dataset 要同步,
+        // 否则本次页面存续期间旧的折叠项会"复活"。
+        if (!verified) dataRow.setAttribute('data-verified-warnings', '{}');
+        if (typeof addRowWarning !== 'function') return;
+        var pnSp = readRowNameSpec(dataRow);
+        addRowWarning(dataRow, {
+            product_name: pnSp[0],
+            specification: pnSp[1],
+            verified: verified ? 1 : 0,
+            record_id: recordId,
+            verified_warnings: verified ? readRowVerifiedWarnings(dataRow) : {}
+        });
+    }).catch(function(err) { alert('请求失败：' + err); });
+}
+window.markRecordVerified = function(recordId, dataRow) {
+    _toggleRecordVerified(recordId, dataRow, true);
+};
+window.unmarkRecordVerified = function(recordId, dataRow) {
+    _toggleRecordVerified(recordId, dataRow, false);
+};
 
 // ── 事件代理:已核查按钮点击(动态元素) ──
 // .record-warn-verify-btn   → window.markRecordVerified(recordId, dataRow)
@@ -266,8 +431,25 @@ function addRowWarning(targetTr, item) {
         return;
     }
     // ── 状态:未核查 ── 警告行(如有)
+    // 每条警告都有 rule_id,根据 item.verified_warnings[rule_id] 判断是否已被单条核查过。
+    // - 未核查:显示警告 + 「✓ 核查」按钮(点 → POST /verify-warning → 折叠到下方)
+    // - 已核查:从主警告列表剔除,移到下方「✓ 已核查的 N 项」折叠区 + 「✗ 取消核查」按钮
+    // 特殊:如果该明细**原本就只触发 1 条警告**且已被核查,效果等同"全部已核查",整段警告行隐藏
+    //       (空折叠区放一个 ✗ 取消核查按钮没意义),用户想恢复就改品名/规格让警告重新触发
     var warnings = getItemWarnings(item);
-    if (!warnings.length) {
+    var verifiedMap = item.verified_warnings || {};
+    var activeWarnings = [];
+    var ignoredWarnings = [];
+    warnings.forEach(function(w) {
+        if (verifiedMap[w.rule_id]) ignoredWarnings.push(w);
+        else activeWarnings.push(w);
+    });
+    if (!activeWarnings.length && !ignoredWarnings.length) {
+        if (typeof updateNavIndicator === 'function') updateNavIndicator();
+        return;
+    }
+    if (!activeWarnings.length && warnings.length === 1) {
+        // 单条警告已被核查 → 等价于"全部已核查",整段警告行不渲染
         if (typeof updateNavIndicator === 'function') updateNavIndicator();
         return;
     }
@@ -277,22 +459,101 @@ function addRowWarning(targetTr, item) {
     var warnTd = document.createElement('td');
     warnTd.colSpan = colSpan;
     warnTd.style.padding = '0';
-    var head = '<div class="record-warn-head">' +
-               '<span>⚠️ 检测到 ' + warnings.length + ' 项需核查</span>' +
+    // 头部:仅在仍有未核查项时显示"全部已核查"按钮
+    var headParts = [];
+    if (activeWarnings.length) {
+        headParts.push('<span>⚠️ 检测到 ' + activeWarnings.length + ' 项需核查</span>');
+        if (recordId) {
+            headParts.push('<button type="button" class="record-warn-verify-btn" data-record-id="' + escHtml(String(recordId)) + '">✓ 全部已核查</button>');
+        }
+    }
+    var head = '<div class="record-warn-head">' + headParts.join('') + '</div>';
+    // 主区:未核查的警告 + ✓ 核查按钮(点 → POST /verify-warning → 重新 addRowWarning)
+    var body = activeWarnings.map(function(w) {
+        return '<div class="record-warn-item" data-rule-id="' + escHtml(w.rule_id) + '">' +
+               '<span class="record-warn-text">' + escHtml(w.message) + '</span>' +
                (recordId
-                   ? '<button type="button" class="record-warn-verify-btn" data-record-id="' + escHtml(String(recordId)) + '">✓ 已核查</button>'
+                   ? '<button type="button" class="rule-check-btn lock-hide" data-record-id="' + escHtml(String(recordId)) + '" data-rule-id="' + escHtml(w.rule_id) + '" title="标记该条警告为已核查,折叠到下方">✓ 核查</button>'
                    : '') +
                '</div>';
-    var body = warnings.map(function(w){
-        return '<div class="record-warn-item">' + escHtml(w) + '</div>';
     }).join('');
+    // 已忽略区:已核查的警告 + ✗ 取消核查按钮(点 → POST /verify-warning verified=false)
+    var ignored = '';
+    if (ignoredWarnings.length) {
+        var ignoredItems = ignoredWarnings.map(function(w) {
+            return '<div class="record-warn-item ignored" data-rule-id="' + escHtml(w.rule_id) + '">' +
+                   '<span class="record-warn-text">' + escHtml(w.message) + '</span>' +
+                   (recordId
+                       ? '<button type="button" class="rule-uncheck-btn lock-hide" data-record-id="' + escHtml(String(recordId)) + '" data-rule-id="' + escHtml(w.rule_id) + '" title="取消核查 → 让该警告重新出现在主警告列表">✗ 取消核查</button>'
+                       : '') +
+                   '</div>';
+        }).join('');
+        ignored = '<div class="record-warn-ignored-head">✓ 已核查的 ' + ignoredWarnings.length + ' 项(可点击 ✗ 取消核查 让警告重新弹出)</div>' + ignoredItems;
+    }
     var tail = '<div class="record-warn-tail"></div>';
-    warnTd.innerHTML = head + body + tail;
+    warnTd.innerHTML = head + body + ignored + tail;
     warnTr.appendChild(warnTd);
     if (targetTr.nextSibling) {
         targetTr.parentNode.insertBefore(warnTr, targetTr.nextSibling);
     } else {
         targetTr.parentNode.appendChild(warnTr);
+    }
+    // 绑定 ✓ 核查 / ✗ 取消核查 按钮的点击 → POST /verify-warning → 重渲本行警告
+    if (recordId) {
+        // 单条警告场景:点 ✓ 核查 等价于点 ✓ 全部已核查 —— 直接 set verified=1,
+        // 这样 verified 字段翻转、操作列自动出现 ✅ 已核查 绿钮,与"全部已核查"路径行为完全一致
+        var singleWarningMode = (warnings.length === 1);
+        warnTr.querySelectorAll('.rule-check-btn, .rule-uncheck-btn').forEach(function(btn) {
+            if (btn._bound) return; btn._bound = true;
+            btn.addEventListener('click', function() {
+                var ruleId = btn.getAttribute('data-rule-id');
+                var verified = btn.classList.contains('rule-check-btn');
+                btn.disabled = true;
+                if (verified && singleWarningMode) {
+                    // ── 单条警告快捷路径 → PUT verified=1(等同点"全部已核查")──
+                    fetch(_smartAddApi + '/records/' + recordId, {
+                        method: 'PUT',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({verified: 1})
+                    }).then(function(r) { return r.json(); }).then(function(data) {
+                        btn.disabled = false;
+                        if (!data.success) { alert('操作失败：' + (data.error || '')); return; }
+                        targetTr.setAttribute('data-verified', '1');
+                        targetTr.dataset.verifiedWarnings = '{}';
+                        // addRowWarning 看到 verified=1 会走"全部已核查"分支:加绿底 toggle,清警告行
+                        addRowWarning(targetTr, {
+                            product_name: item.product_name || '',
+                            specification: item.specification || '',
+                            verified: 1,
+                            record_id: recordId,
+                            verified_warnings: {}
+                        });
+                    }).catch(function(err) { btn.disabled = false; alert('请求失败：' + err); });
+                    return;
+                }
+                // ── 多条警告:走 per-rule 切换路径 ──
+                fetch(_smartAddApi + '/records/' + recordId + '/verify-warning', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({rule_id: ruleId, verified: verified})
+                }).then(function(r) { return r.json(); }).then(function(data) {
+                    btn.disabled = false;
+                    if (!data.success) { alert('操作失败：' + (data.error || '')); return; }
+                    // 把最新 verified_warnings 写回 tr.dataset,下次 addRowWarning 用得到
+                    targetTr.dataset.verifiedWarnings = JSON.stringify(data.verified_warnings || {});
+                    // 重新渲染本行的警告区(把刚点的项移到正确分组)
+                    var pnSp = readRowNameSpec(targetTr);
+                    var verifiedFlag = targetTr.getAttribute('data-verified') === '1' ? 1 : 0;
+                    addRowWarning(targetTr, {
+                        product_name: pnSp[0],
+                        specification: pnSp[1],
+                        verified: verifiedFlag,
+                        record_id: recordId,
+                        verified_warnings: data.verified_warnings || {}
+                    });
+                }).catch(function(err) { btn.disabled = false; alert('请求失败：' + err); });
+            });
+        });
     }
     // 重渲 nav 校验状态指示器
     if (typeof updateNavIndicator === 'function') updateNavIndicator();
@@ -366,20 +627,16 @@ window.validateAllRows = function() {
             // 已核查行跳过(item.verified=1)
             if (tr.dataset && tr.dataset.verified === '1') return;
             result.total++;
-            // 读 pn / sp(优先 data-field,其次按列位置)
-            var pnCell = tr.querySelector('[data-field="product_name"]');
-            var spCell = tr.querySelector('[data-field="specification"]');
-            var pn = (pnCell && (pnCell.value || pnCell.textContent) || '').trim();
-            var sp = (spCell && (spCell.value || spCell.textContent) || '').trim();
-            if (!pn && tr.children[1]) pn = (tr.children[1].textContent || '').trim();
-            if (!sp && tr.children[2]) sp = (tr.children[2].textContent || '').trim();
+            // 读 pn / sp —— 与首屏扫描/警告渲染共用同一套三级兜底(readRowNameSpec)
+            var pnSp = readRowNameSpec(tr);
+            var pn = pnSp[0], sp = pnSp[1];
             if (!pn) return;
             var ws = getItemWarnings({product_name: pn, specification: sp});
             if (ws.length) {
                 result.withWarnings++;
                 result.items.push({
                     orderId: orderId,
-                    recordId: tr.dataset.recordId || tr.dataset.recordId || tr.getAttribute('data-record-id') || tr.getAttribute('data-id') || null,
+                    recordId: readRowRecordId(tr),
                     pn: pn,
                     sp: sp,
                     warnings: ws
@@ -394,6 +651,8 @@ window.validateAllRows = function() {
 // 规则 1: 商品名含「纯胶」但不是「环保纯胶」→ 提示核查
 // 规则 2: 商品类型为「杂胶」或「环保杂胶」→ 提示核查规格是否含「加面」
 // (product_name 没单独的 category 字段,实际数据里 product_name 已包含分类信息)
+// 返回 [{rule_id, message}],前端按 rule_id 渲染「✓ 核查」/「✗ 取消核查」按钮,
+// 配合后端 shipping_records.verified_warnings(JSON) 持久化每条规则的核查状态。
 function getItemWarnings(item) {
     var pn = (item.product_name || '').trim();
     var sp = (item.specification || '').trim();
@@ -404,17 +663,23 @@ function getItemWarnings(item) {
     var pnHasPureRubber = pn.indexOf('纯胶') !== -1;
     var pnHasEcoPureRubber = pn.indexOf('环保纯胶') !== -1;
     if (pnHasPureRubber && !pnHasEcoPureRubber) {
-        warnings.push('商品名称含「纯胶」,请核查是否应为「环保纯胶」');
+        warnings.push({rule_id: 'pure_rubber', message: '商品名称含「纯胶」,请核查是否应为「环保纯胶」'});
     }
 
     // 规则 3a: 「纯胶」类产品,规格含「中软」→ 提示是否「软性纯胶」
     if (pn.indexOf('纯胶') !== -1 && sp.indexOf('中软') !== -1) {
-        warnings.push('规格含「中软」,是否应为「软性纯胶」?');
+        warnings.push({rule_id: 'mid_soft', message: '规格含「中软」,是否应为「软性纯胶」?'});
     }
 
     // 规则 3b: 「纯胶」类产品,规格含「软」(且不含「中软」)→ 提示是否「中软纯胶」
     if (pn.indexOf('纯胶') !== -1 && sp.indexOf('软') !== -1 && sp.indexOf('中软') === -1) {
-        warnings.push('规格含「软」,是否应为「中软纯胶」?');
+        warnings.push({rule_id: 'soft', message: '规格含「软」,是否应为「中软纯胶」?'});
+    }
+
+    // 规则 4: 规格含「B白300」 → 品名有「定制 1.5米」/「普通 1.6米」两种,
+    // 担心选错 → 无条件提示核查品名长度(已核查过的行会被折叠,但首次/重渲都会触发)
+    if (sp.indexOf('B白300') !== -1) {
+        warnings.push({rule_id: 'b_white_300g', message: '规格含「B白300」,请核查品名长度:是「定制 1.5米」还是「普通 1.6米」?'});
     }
 
     // 规则 2: 杂胶族 → 加面/不加面 双向核查
@@ -424,16 +689,16 @@ function getItemWarnings(item) {
     var combinedHasBuJiaMian = combined.indexOf('不加面') !== -1;
     if (hasEcoMiscRubber && !combinedHasJiaMian) {
         // 规则 2a: 环保杂胶无加面 → 提示是否「加面」
-        warnings.push('商品类型为「环保杂胶」,规格中是否含「加面」?');
+        warnings.push({rule_id: 'eco_misc_no_jia_mian', message: '商品类型为「环保杂胶」,规格中是否含「加面」?'});
     } else if (hasEcoMiscRubber && combinedHasJiaMian && !combinedHasBuJiaMian) {
         // 规则 2b: 环保杂胶有加面 → 提示是否「不加面」
-        warnings.push('商品类型为「环保杂胶」,规格含「加面」,是否应为「不加面」?');
+        warnings.push({rule_id: 'eco_misc_has_jia_mian', message: '商品类型为「环保杂胶」,规格含「加面」,是否应为「不加面」?'});
     } else if (hasMiscRubber && !combinedHasJiaMian) {
         // 规则 2a: 杂胶无加面
-        warnings.push('商品类型为「杂胶」,规格中是否含「加面」?');
+        warnings.push({rule_id: 'misc_no_jia_mian', message: '商品类型为「杂胶」,规格中是否含「加面」?'});
     } else if (hasMiscRubber && combinedHasJiaMian && !combinedHasBuJiaMian) {
         // 规则 2b: 杂胶有加面
-        warnings.push('商品类型为「杂胶」,规格含「加面」,是否应为「不加面」?');
+        warnings.push({rule_id: 'misc_has_jia_mian', message: '商品类型为「杂胶」,规格含「加面」,是否应为「不加面」?'});
     }
 
     return warnings;
@@ -520,69 +785,12 @@ window.submitAiResults = function() {
         if (!confirm(lines.join('\n'))) return;
     }
 
-    var doBatchAdd = function(imgData) {
-        if (typeof showLoading === 'function') showLoading('批量添加中...');
-        fetch(_smartAddApi + '/' + _smartFillOrderPk + '/records/batch', {
-            method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({items:items, records:items})
-        }).then(function(r){return r.json();}).then(function(data){
-            if (typeof hideLoading === 'function') hideLoading();
-            if (data.success) {
-                updateOrderDocNumber(); closeSmartFill();
-                if (data.records && data.records.length > 0) {
-                    var tbody = document.querySelector('.date-group[data-order-id="' + _smartFillOrderId + '"] .record-table tbody');
-                    if (tbody) {
-                        data.records.forEach(function(item){
-                            var tr = document.createElement('tr');
-                            var hint = (typeof getUnitHint === 'function') ? getUnitHint(item.product_name, item.specification||'', item.quantity, item.unit, item.remark) : '';
-                            var mismatch = (typeof checkMismatch === 'function') ? checkMismatch(item.remark||'', item.quantity, item.product_name, item.specification||'') : '';
-                            var pieceHint = (typeof getPieceHint === 'function') ? getPieceHint(item.product_name, item.specification||'') : '';
-                            var pieceMismatch = (typeof checkPieceMismatch === 'function') ? checkPieceMismatch(item.remark||'', item.quantity, item.product_name, item.specification||'') : '';
-                            var bad = typeof isInvalidQty === 'function' ? isInvalidQty(item.quantity) : false;
-                            var cm = ''; if (mismatch==='warn'||pieceMismatch==='warn') cm='warn'; else if (mismatch==='info'||pieceMismatch==='info') cm='info';
-                            var prefix = bad ? (typeof invalidQtyIcon === 'function' ? invalidQtyIcon() : '❌') : (typeof mismatchIcon === 'function' ? mismatchIcon(cm) : '');
-                            tr.innerHTML = '<td style="text-align:center;color:#868e96;font-size:0.85rem;">'+prefix+(tbody.children.length+1)+'</td>' +
-                                '<td style="font-size:0.9rem;">'+escHtml(item.product_name)+'</td>' +
-                                '<td style="color:#636e72;font-size:0.9rem;">'+escHtml(item.specification||'')+'</td>' +
-                                '<td><span class="qty-badge">'+escHtml(item.quantity)+'</span></td>' +
-                                '<td><span class="unit-badge">'+escHtml(item.unit)+'</span></td>' +
-                                '<td class="remark-cell">'+escHtml(item.remark||'—')+'</td>' +
-                                '<td class="unit-hint-cell" style="font-size:0.85rem;color:#e17055;">'+escHtml(hint||'—')+(pieceHint?'<br><span style="color:#0984e3;">'+escHtml(pieceHint)+'</span>':'')+'</td>' +
-                                '<td style="white-space:nowrap;">' +
-                                '<button type="button" class="btn btn-sm move-up-btn lock-hide" data-id="'+item.id+'" title="上移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.1rem 0.35rem;font-size:0.75rem;">▲</button> ' +
-                                '<button type="button" class="btn btn-sm move-down-btn lock-hide" data-id="'+item.id+'" title="下移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.1rem 0.35rem;font-size:0.75rem;">▼</button> ' +
-                                '<button type="button" class="btn btn-primary btn-sm edit-record-btn lock-hide" data-id="'+item.id+'">✏️</button> ' +
-                                '<button type="button" class="btn btn-danger btn-sm delete-record-btn lock-hide" data-id="'+item.id+'">🗑️</button></td>';
-                            if (typeof applyMismatchClass === 'function') applyMismatchClass(tr, cm);
-                            if (bad) tr.classList.add('row-out-of-stock');
-                            // 写 verified / record_id 数据属性,page-load 扫描和事件代理会用到
-                            tr.setAttribute('data-record-id', item.id);
-                            tr.setAttribute('data-verified', item.verified ? '1' : '0');
-                            tbody.appendChild(tr);
-                            // 校验警告落到明细行下方(独立 tr),不再在弹框内显示
-                            if (typeof addRowWarning === 'function') {
-                                addRowWarning(tr, {
-                                    product_name: item.product_name,
-                                    specification: item.specification || '',
-                                    verified: item.verified ? 1 : 0,
-                                    record_id: item.id
-                                });
-                            }
-                        });
-                        if (typeof bindEditDeleteButtons === 'function') bindEditDeleteButtons();
-                        if (typeof refreshRemarkSummary === 'function') refreshRemarkSummary(tbody.closest('.date-group'));
-                        if (imgData && imgData.success && imgData.image) insertAiImage(imgData, tbody.closest('.date-group'));
-                    }
-                }
-            } else { alert('添加失败：' + (data.error || '未知错误')); }
-        }).catch(function(err){ alert('请求失败：'+err); });
-    };
-
     if (_smartAiImageFile) {
         if (typeof showLoading === 'function') showLoading('上传图片中...');
         var fd = new FormData(); fd.append('image', _smartAiImageFile); fd.append('source', 'ai');
         fetch(_smartAddApi + '/' + _smartFillOrderPk + '/images', { method:'POST', body:fd })
-        .then(function(r){return r.json();}).then(function(d){doBatchAdd(d);}).catch(function(){doBatchAdd(null);});
-    } else { doBatchAdd(null); }
+        .then(function(r){return r.json();}).then(function(d){doBatchAdd(items, d);}).catch(function(){doBatchAdd(items, null);});
+    } else { doBatchAdd(items, null); }
 };
 
 function updateOrderDocNumber() {
@@ -619,14 +827,8 @@ window.submitSmartFill = function() {
     }
     if (items.length===0) { alert('没有有效数据'); return; }
     if (_smartFillOrderPk===null) { alert('缺少订单信息'); return; }
-    if (typeof showLoading === 'function') showLoading('批量添加中...');
-    fetch(_smartAddApi + '/' + _smartFillOrderPk + '/records/batch', {
-        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({items:items, records:items})
-    }).then(function(r){return r.json();}).then(function(data){
-        if (typeof hideLoading === 'function') hideLoading();
-        if (data.success) { closeSmartFill(); location.reload(); }
-        else { alert('添加失败：'+(data.error||'未知错误')); }
-    }).catch(function(e){alert('请求失败：'+e);});
+    // 委托 doBatchAdd 走局部刷新路径(appendChild tr + 绑定事件),跟 AI 识别走同一条路
+    doBatchAdd(items, null);
 };
 
 window.copyPrompt = function() {

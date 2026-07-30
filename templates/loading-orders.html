@@ -221,7 +221,8 @@
                     {% for record in group.records %}
                     <tr class="{% if record.mismatch == 'warn' or record.piece_mismatch == 'warn' %}row-warn{% elif record.mismatch == 'info' or record.piece_mismatch == 'info' %}row-info{% endif %}"
                         data-record-id="{{ record.id }}"
-                        data-verified="{{ '1' if record.verified else '0' }}">
+                        data-verified="{{ '1' if record.verified else '0' }}"
+                        data-verified-warnings="{{ record.verified_warnings or '{}' }}">
                         <td style="width:40px; text-align:center; color:#868e96; font-size:0.85rem;">{% if record.mismatch == 'warn' or record.piece_mismatch == 'warn' %}❌ {% elif record.mismatch == 'info' or record.piece_mismatch == 'info' %}💡 {% endif %}{{ loop.index }}</td>
                         <td>{{ record.product_name }}</td>
                         <td>{{ record.specification or '-' }}</td>
@@ -1387,42 +1388,8 @@ document.addEventListener('keydown', function(e) {
 });
 
 // ── "已核查"按钮回调 ──
-window.markRecordVerified = function(recordId, dataRow) {
-    fetch('/api/v1/loading-orders/records/' + recordId, {
-        method: 'PUT',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({verified: 1})
-    }).then(function(res) { return res.json(); }).then(function(data) {
-        if (data.success) {
-            dataRow.setAttribute('data-verified', '1');
-            var pn = (dataRow.children[1] && dataRow.children[1].textContent || '').trim();
-            var sp = (dataRow.children[2] && dataRow.children[2].textContent || '').trim();
-            if (typeof addRowWarning === 'function') {
-                addRowWarning(dataRow, {product_name: pn, specification: sp, verified: 1, record_id: recordId});
-            }
-        } else {
-            alert('标记失败：' + (data.error || '未知错误'));
-        }
-    }).catch(function(err) { alert('请求失败：' + err); });
-};
-window.unmarkRecordVerified = function(recordId, dataRow) {
-    fetch('/api/v1/loading-orders/records/' + recordId, {
-        method: 'PUT',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({verified: 0})
-    }).then(function(res) { return res.json(); }).then(function(data) {
-        if (data.success) {
-            dataRow.setAttribute('data-verified', '0');
-            var pn = (dataRow.children[1] && dataRow.children[1].textContent || '').trim();
-            var sp = (dataRow.children[2] && dataRow.children[2].textContent || '').trim();
-            if (typeof addRowWarning === 'function') {
-                addRowWarning(dataRow, {product_name: pn, specification: sp, verified: 0, record_id: recordId});
-            }
-        } else {
-            alert('取消核查失败：' + (data.error || '未知错误'));
-        }
-    }).catch(function(err) { alert('请求失败：' + err); });
-};
+// markRecordVerified / unmarkRecordVerified 的实现已上移到共享模板
+// _smart_add_modal.html(走 _smartAddApi 拼 URL,三套订单共用一份),此处不再重复定义。
 
 </script>
 {% endblock %}

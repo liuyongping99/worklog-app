@@ -26,7 +26,7 @@ if sys.platform == 'win32':
 logger = logging.getLogger(__name__)
 
 # 提示词版本号 —— 改 COMPARE_PROMPT 时同时 bump,事件日志按此版本切分分析
-OCR_MATCH_PROMPT_VERSION = 'compare_rows_v1'
+OCR_MATCH_PROMPT_VERSION = 'compare_rows_v2'
 
 # ═══════════════════════════════════════════════════════════════════
 # 知识库：从数据库加载产品名（按长度降序，优先匹配长名）
@@ -751,13 +751,14 @@ class DeepSeekEngine(BaseOCREngine):
         '【关键匹配规则 — 请严格按这些规则判定】\n'
         '════════════════════════════════════════\n'
         '\n'
-        '▌规则 1：杂胶类商品 — "环保"等价词\n'
-        '对于品名中含"杂胶"的商品，标签上出现以下任意字样，\n'
-        '都视为该商品名称中的"环保"特征已被命中：\n'
+        '▌规则 1：环保属性 — "环保"等价词（覆盖所有品类）\n'
+        '对于品名中含"环保"字样的商品(不只杂胶:纯胶/三文治/磅布三文治/HA猪皮纹/\n'
+        'LB鱼鳞布/路华里等也属此范畴),标签上出现以下任意字样,都视为该商品名称\n'
+        '中"环保"特征已被命中:\n'
         '  - 环保\n'
         '  - 7P / 15P / 18P / 21P\n'
         '（这些型号字样在该品类下均代表"环保"属性；只要 OCR 文字里出现上述任\n'
-        ' 一字样，就可作为"品名含环保杂胶"的强证据，可判 green。）\n'
+        ' 一字样，就可作为"品名含环保 X"的强证据,可判 green。）\n'
         '\n'
         '▌规则 2：颜色匹配\n'
         'OCR 文字中识别到的颜色（黑、白、红、蓝、绿、黄、棕、灰、米、杏、紫、粉、橙 等），\n'
@@ -799,7 +800,7 @@ class DeepSeekEngine(BaseOCREngine):
         '{"record_id":<原样返回>,"match_status":"green|yellow|red","reason":"简述"}\n'
         '\n'
         'reason 必须中文，简要说明判定依据。示例：\n'
-        '  - "品名 7P 环保杂胶匹配（命中 7P 等价词），颜色黑对得上，厚度 3mm 吻合"\n'
+        '  - "品名 7P 环保 X 匹配（命中 7P 等价词），颜色黑对得上，厚度 3mm 吻合"\n'
         '  - "标签上出现单面，与规格加面冲突"\n'
         '  - "OCR 文字中未找到该商品信息"\n'
         '\n'
@@ -822,8 +823,15 @@ class DeepSeekEngine(BaseOCREngine):
             [{'record_id': r['record_id'], 'product_name': r.get('product_name', ''),
               'specification': r.get('specification', '')} for r in rows],
             ensure_ascii=False)
-        prompt_text = (self.COMPARE_PROMPT + '\n【OCR文字】\n' + ocr_text +
-                       '\n【明细行】\n' + rows_json)
+        base_prompt = self.COMPARE_PROMPT + '\n【OCR文字】\n' + ocr_text + '\n【明细行】\n' + rows_json
+        # ── 2026-07-30 自适应提示词:如果 rows 里携带 _supplement(layer2 大类 / layer3 规格),
+        # 把它们拼到 prompt 末尾,DeepSeek 能参照此前人工确认案例做更宽松的判断。 ──
+        supplements = [r.get('_supplement') for r in rows if r.get('_supplement')]
+        if supplements:
+            layer_text = '\n\n'.join(supplements)
+            prompt_text = base_prompt + '\n\n════════════════════════════════════════\n【自适应提示词(同品类 / 同规格历史人工案例)】\n════════════════════════════════════════\n' + layer_text
+        else:
+            prompt_text = base_prompt
         client = openai.OpenAI(api_key=self.API_KEY, base_url=self.BASE_URL)
         response = client.chat.completions.create(
             model=self.MODEL,

@@ -184,23 +184,29 @@ class OcrEventAudit:
             last_used_at}, ...]
           按 last_used_at DESC 排序。
         """
+        # 注意:prompt_version IS NOT NULL 只对 ai_match 行有意义(human_verify
+        # 写库时没传 prompt_version)。WHERE 拆成两部分用 OR 合并,确保两类事件
+        # 都能进入 latest CTE;prompt_versions 过滤仅作用于 ai_match 行。
         params = []
-        where_clauses = [
-            "e.event_type IN ('ai_match', 'human_verify')",
-            "e.prompt_version IS NOT NULL",
-        ]
+        ai_predicates = ["e.event_type = 'ai_match'", "e.prompt_version IS NOT NULL"]
+        hv_predicates = ["e.event_type = 'human_verify'"]
         if start_date:
-            where_clauses.append("e.created_at >= ?")
+            ai_predicates.append("e.created_at >= ?")
+            hv_predicates.append("e.created_at >= ?")
+            params.append(f"{start_date} 00:00:00")
             params.append(f"{start_date} 00:00:00")
         if end_date:
-            where_clauses.append("e.created_at < ?")
-            params.append(f"{end_date} 23:59:59")  # 含当天
+            ai_predicates.append("e.created_at <= ?")
+            hv_predicates.append("e.created_at <= ?")
+            params.append(f"{end_date} 23:59:59")
+            params.append(f"{end_date} 23:59:59")
         if prompt_versions:
-            placeholders = ','.join('?' for _ in prompt_versions)
-            where_clauses.append(f"e.prompt_version IN ({placeholders})")
+            pv_placeholders = ','.join('?' for _ in prompt_versions)
+            ai_predicates.append(f"e.prompt_version IN ({pv_placeholders})")
             params.extend(prompt_versions)
-
-        where_sql = ' AND '.join(where_clauses)
+        ai_sql = ' AND '.join(ai_predicates)
+        hv_sql = ' AND '.join(hv_predicates)
+        where_sql = f"({ai_sql}) OR ({hv_sql})"
 
         sql = f"""
         WITH latest AS (
@@ -236,7 +242,7 @@ class OcrEventAudit:
         )
         SELECT
           p.prompt_version,
-          COUNT(*) AS total_pairs,
+          SUM(CASE WHEN is_consistent IS NOT NULL THEN 1 ELSE 0 END) AS total_pairs,
           SUM(CASE WHEN is_consistent = 1 THEN 1 ELSE 0 END) AS consistent_pairs,
           SUM(CASE WHEN is_consistent = 0 THEN 1 ELSE 0 END) AS inconsistent_pairs,
           SUM(CASE WHEN is_consistent IS NULL THEN 1 ELSE 0 END) AS null_pairs,

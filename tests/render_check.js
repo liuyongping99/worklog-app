@@ -90,7 +90,7 @@ if (!wFn || !rFn) {
 // 所以把函数体里所有 `getItemWarnings(`/`collectRowWarnings(` 改成走 `window.` 引用。
 function rewriteForWindow(fnSrc) {
   return fnSrc.replace(/^function\s+(\w+)\s*\(([^)]*)\)\s*\{/, 'window.$1 = function($2){')
-              .replace(/\b(getItemWarnings|collectRowWarnings|addRowWarning|removeRowWarning|addVerifiedToggle|removeVerifiedToggle|validateAllRows|updateNavIndicator|isOrderLocked|bindRowWarningClickHandler|openImageModal|openImageModalForRecord|closeImageModal|confirmUpload|_setTarget)\(/g, 'window.$1(');
+              .replace(/\b(getItemWarnings|collectRowWarnings|addRowWarning|removeRowWarning|addVerifiedToggle|removeVerifiedToggle|validateAllRows|updateNavIndicator|isOrderLocked|bindRowWarningClickHandler|readRowNameSpec|readRowVerifiedWarnings|readRowRecordId|openImageModal|openImageModalForRecord|closeImageModal|confirmUpload|_setTarget)\(/g, 'window.$1(');
 }
 const wFnAssign = rewriteForWindow(wFn);
 const cFnAssign = rewriteForWindow(extractFunc(tpl, 'collectRowWarnings'));
@@ -104,6 +104,11 @@ const lockFnAssign = rewriteForWindow(extractFunc(tpl, 'isOrderLocked'));
 const bindFnAssign = rewriteForWindow(extractFunc(tpl, 'bindRowWarningClickHandler'));
 const vFnAssign = rewriteForWindow(extractFunc(tpl, 'validateAllRows'));
 const navFnAssign = rewriteForWindow(extractFunc(baseTpl, 'updateNavIndicator'));
+// 明细行取值共享 helper —— addRowWarning / validateAllRows / 首屏扫描都调它们,
+// 不抽进 jsdom 会 ReferenceError。
+const readPnSpFnAssign = rewriteForWindow(extractFunc(tpl, 'readRowNameSpec'));
+const readVwFnAssign = rewriteForWindow(extractFunc(tpl, 'readRowVerifiedWarnings'));
+const readRidFnAssign = rewriteForWindow(extractFunc(tpl, 'readRowRecordId'));
 
 (function (window) {
   var escHtml = function(s) {
@@ -111,6 +116,9 @@ const navFnAssign = rewriteForWindow(extractFunc(baseTpl, 'updateNavIndicator'))
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   };
   window.escHtml = escHtml;
+  eval(readPnSpFnAssign);
+  eval(readVwFnAssign);
+  eval(readRidFnAssign);
   eval(wFnAssign);
   eval(cFnAssign);
   eval(rFnAssign);

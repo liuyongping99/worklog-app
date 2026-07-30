@@ -321,6 +321,33 @@ def api_v1_inbound_orders_delete_record(record_id):
     return jsonify({'success': True})
 
 
+@bp.route('/api/v1/inbound-orders/records/<int:record_id>/verify-warning', methods=['POST'])
+def api_v1_inbound_orders_record_verify_warning(record_id):
+    """切换某条校验规则的核查状态（与出货 /api/v1/shipping-orders/... 同语义）。
+
+    Body: {rule_id, verified}
+    - verified=true → 把 rule_id 写入 verified_warnings(JSON),该条警告折叠到下方
+    - verified=false → 从 verified_warnings 移除 rule_id,警告重新弹出
+    与整行 verified 字段并存:verified=1 仍代表"整行所有警告已核查"。
+    """
+    record = InboundRecord.get_by_id(record_id)
+    if not record:
+        return jsonify({'success': False, 'error': '记录不存在'}), 404
+    data = request.get_json() or {}
+    rule_id = (data.get('rule_id') or '').strip()
+    verified = bool(data.get('verified'))
+    if not rule_id:
+        return jsonify({'success': False, 'error': 'rule_id 不能为空'}), 400
+    current = InboundRecord.set_verified_warning(record_id, rule_id, verified)
+    AuditLog.log(
+        'verify_warning' if verified else 'unverify_warning',
+        'inbound_record',
+        record_id,
+        detail={'rule_id': rule_id}
+    )
+    return jsonify({'success': True, 'verified_warnings': current, 'rule_id': rule_id, 'verified': verified})
+
+
 @bp.route('/api/v1/inbound-orders/records/<int:record_id>/move', methods=['PATCH'])
 def api_v1_inbound_orders_move_record(record_id):
     """移动明细排序 → 200"""

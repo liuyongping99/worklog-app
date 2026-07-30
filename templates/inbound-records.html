@@ -425,7 +425,10 @@
             </thead>
             <tbody>
                 {% for record in group.records %}
-                <tr data-record-id="{{ record.id }}" class="{% if record.mismatch == 'warn' or record.piece_mismatch == 'warn' %}row-warn{% elif record.mismatch == 'info' or record.piece_mismatch == 'info' %}row-info{% endif %}">
+                <tr data-record-id="{{ record.id }}"
+                    data-verified="{{ '1' if record.verified else '0' }}"
+                    data-verified-warnings="{{ record.verified_warnings or '{}' }}"
+                    class="{% if record.mismatch == 'warn' or record.piece_mismatch == 'warn' %}row-warn{% elif record.mismatch == 'info' or record.piece_mismatch == 'info' %}row-info{% endif %}">
                     <td class="product-name" style="max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ record.product_name }}">{% if record.mismatch == 'warn' or record.piece_mismatch == 'warn' %}❌ {% elif record.mismatch == 'info' or record.piece_mismatch == 'info' %}💡 {% endif %}{{ record.product_name }}</td>
                     <td class="spec">{{ record.specification }}</td>
                     <td><span class="qty-badge">{{ record.quantity }}</span></td>
@@ -1088,7 +1091,15 @@ setTimeout(() => {
                         btn.classList.add('btn-primary');
                         // inline 编辑后重渲校验警告(落到明细行下方)
                         if (typeof addRowWarning === 'function') {
-                            addRowWarning(tr, {product_name: r.product_name, specification: r.specification || ''});
+                            // 带上 verified / record_id / per-rule 状态 —— 缺了共享模板就渲染不出
+                            // 「✓ 全部已核查」按钮和 ✅ 已核查 toggle,编辑一次就点不动了。
+                            addRowWarning(tr, {
+                                product_name: r.product_name,
+                                specification: r.specification || '',
+                                verified: tr.getAttribute('data-verified') === '1' ? 1 : 0,
+                                record_id: tr.getAttribute('data-record-id'),
+                                verified_warnings: (typeof readRowVerifiedWarnings === 'function') ? readRowVerifiedWarnings(tr) : {}
+                            });
                         }
                     } else {
                         alert('保存失败：' + (result.error || ''));
@@ -1267,6 +1278,9 @@ setTimeout(() => {
     function buildInboundRecordRow(rec, orderPk) {
         var tr = document.createElement('tr');
         tr.setAttribute('data-record-id', rec.id);
+        // 新行默认未核查;属性齐了共享模板的「✓ 全部已核查」才能正确渲染/切换
+        tr.setAttribute('data-verified', rec.verified ? '1' : '0');
+        tr.setAttribute('data-verified-warnings', rec.verified_warnings || '{}');
         var unitHint = getInboundUnitHint(rec.product_name, rec.specification || '', rec.quantity, rec.unit, rec.remark) || '—';
         var mismatch = checkInboundMismatch(rec.remark || '', rec.quantity, rec.product_name, rec.specification || '');
         var pieceHint = getPieceHint(rec.product_name, rec.specification || '');
@@ -1372,7 +1386,15 @@ setTimeout(() => {
                         recalcInboundSummary(tr.closest('.date-group'));
                         // inline 编辑后重渲校验警告(落到明细行下方)
                         if (typeof addRowWarning === 'function') {
-                            addRowWarning(tr, {product_name: r.product_name, specification: r.specification || ''});
+                            // 带上 verified / record_id / per-rule 状态 —— 缺了共享模板就渲染不出
+                            // 「✓ 全部已核查」按钮和 ✅ 已核查 toggle,编辑一次就点不动了。
+                            addRowWarning(tr, {
+                                product_name: r.product_name,
+                                specification: r.specification || '',
+                                verified: tr.getAttribute('data-verified') === '1' ? 1 : 0,
+                                record_id: tr.getAttribute('data-record-id'),
+                                verified_warnings: (typeof readRowVerifiedWarnings === 'function') ? readRowVerifiedWarnings(tr) : {}
+                            });
                         }
                     } else { alert('保存失败：' + (result.error || '')); }
                 });

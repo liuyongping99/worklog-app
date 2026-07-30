@@ -89,7 +89,14 @@ class AiMatchEventTriggerTests(_Base):
             self.assertIsNotNone(e['prompt_payload'])
             self.assertIsNotNone(e['ai_raw_response'])
             self.assertEqual(e['ai_engine'], 'deepseek')
-            self.assertEqual(e['prompt_version'], 'compare_rows_v1')
+            # prompt_version 用源码常量断言(2026-07-30 bump v1→v2 后改成动态引用)
+            import blueprints.ocr_engine as _oe
+            self.assertEqual(e['prompt_version'], _oe.OCR_MATCH_PROMPT_VERSION)
+            # 历史 baseline:本测试在 v1 时代硬编码了 'compare_rows_v1' —— 留这个字符串
+            # 作为基线锚点,audit 页面要靠它和 v2 对比一致率。改了常量就要更新这里。
+            self.assertIn('compare_rows_v', _oe.OCR_MATCH_PROMPT_VERSION)
+            self.assertIn(_oe.OCR_MATCH_PROMPT_VERSION, ('compare_rows_v1', 'compare_rows_v2'),
+                '常量已迁移到 v3+?请同步更新历史 baseline:rules/test_compare_prompt_v2_rule1.py 也有断言')
 
         # 清理磁盘
         try:

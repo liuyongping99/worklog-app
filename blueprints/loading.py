@@ -342,6 +342,33 @@ def api_v1_loading_orders_delete_record(record_id):
     return jsonify({'success': True})
 
 
+@bp.route('/api/v1/loading-orders/records/<int:record_id>/verify-warning', methods=['POST'])
+def api_v1_loading_orders_record_verify_warning(record_id):
+    """切换某条校验规则的核查状态（与出货 /api/v1/shipping-orders/... 同语义）。
+
+    Body: {rule_id, verified}
+    2026-07-30 新增:共享模板原来把这个请求硬编码发到出货端点,装柜页点「✓ 核查」
+    会拿装柜 record_id 去改 shipping_records（串表脏写）。现在共享模板走 _smartAddApi,
+    装柜必须有自己的端点。
+    """
+    record = LoadingOrderRecord.get_by_id(record_id)
+    if not record:
+        return jsonify({'success': False, 'error': '记录不存在'}), 404
+    data = request.get_json() or {}
+    rule_id = (data.get('rule_id') or '').strip()
+    verified = bool(data.get('verified'))
+    if not rule_id:
+        return jsonify({'success': False, 'error': 'rule_id 不能为空'}), 400
+    current = LoadingOrderRecord.set_verified_warning(record_id, rule_id, verified)
+    AuditLog.log(
+        'verify_warning' if verified else 'unverify_warning',
+        'loading_record',
+        record_id,
+        detail={'rule_id': rule_id}
+    )
+    return jsonify({'success': True, 'verified_warnings': current, 'rule_id': rule_id, 'verified': verified})
+
+
 @bp.route('/api/v1/loading-orders/records/<int:record_id>/move', methods=['PATCH'])
 def api_v1_loading_orders_move_record(record_id):
     """移动明细排序 → 200"""

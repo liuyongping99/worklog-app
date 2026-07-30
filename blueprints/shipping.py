@@ -14,6 +14,7 @@ from flask import Blueprint, render_template, request, jsonify, current_app, ses
 from models import (
     ShippingOrder, ShippingRecord, ShippingImage, ProductUnit, PieceConversion, AuditLog,
     OcrMatchEvent,
+    classify_record, CategoryPrompt,
 )
 from blueprints._helpers import (
     get_upload_dir as get_helpers_upload_dir,
@@ -25,17 +26,29 @@ from blueprints._helpers import (
 from blueprints.ocr_engine import PaddleOCREngine, get_ocr_engine, OCR_MATCH_PROMPT_VERSION
 from blueprints import _helpers
 
+
 bp = Blueprint('shipping', __name__)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _run_label_match(image_abspath, record):
-    """对一张行级图跑 OCR + 本地匹配，返回 (status, score, reason)。失败则 ('', None, '') 不阻断上传。"""
+    """对一张行级图跑 OCR + 本地匹配，返回 (status, score, reason)。失败则 ('', None, '') 不阻断上传。
+
+    走 get_ocr_engine('paddleocr') 单例:与本文件其他 OCR 调用点(事件记录/ai-match)保持同一实例,
+    避免每次上传重复加载 PaddleOCR 模型。
+
+    OCR 文本为空时返回空 status —— 语义是"没证据"而非"不符":
+    match_label_to_row('') 会判 red,但那对用户是误导(标签没识别出来 ≠ 货不对)。
+    空 status 让调用方跳过 set_match(不打徽章),事件表里 ai_match_status 落 NULL,
+    与 plan「OCR 失败信号」的约定一致。
+    """
     try:
         with open(image_abspath, 'rb') as f:
             img_bytes = f.read()
-        text = PaddleOCREngine().extract_text(img_bytes)
+        text = get_ocr_engine('paddleocr').extract_text(img_bytes)
+        if not (text or '').strip():
+            return '', None, ''
         status, score, reason = match_label_to_row(
             text, record.get('product_name', ''), record.get('specification', '')
         )
@@ -43,6 +56,24 @@ def _run_label_match(image_abspath, record):
     except Exception:
         current_app.logger.exception('行级图片 OCR 匹配失败（不阻断上传）')
         return '', None, ''
+
+
+def _as_bool(value, default=True):
+    """把 JSON 里可能出现的多种"假值写法"统一成 bool。
+
+    坑:bool('false') / bool('0') 在 Python 里都是 True —— 前端只要把布尔序列化成字符串
+    (常见于 FormData、某些 fetch 封装、手写 JSON),取消操作就会被反向解读成"确认"。
+    这里显式识别字符串假值,数字 0 与 None 也算假。
+    """
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() not in ('false', '0', 'no', 'off', '')
+    return bool(value)
 
 
 def _get_upload_dir():
@@ -78,16 +109,20 @@ def shipping_records():
         if non_ai: order_non_ai[oid] = non_ai
         if ai: ai_images[oid] = ai
     # 把每个订单的所有 record 级图也按 source 分到上面两个 dict
-    # 同时按 record 汇总 match_status 最高分那张的档位(green > yellow > red),
-    # 给到前端做「行级徽章」首屏渲染(刷新不丢)。
-    _status_rank = {'green': 3, 'yellow': 2, 'red': 1}
-    record_best_status_map = {}  # record_id -> 'green'/'yellow'/'red'(行级徽章)
-    record_best_reason_map = {}  # record_id -> 该 record 最高分档图对应的 reason(给 hover 用)
+    # 同时按 record 汇总【最差】档位(red < yellow < green),给前端做「行级徽章」首屏渲染(刷新不丢)。
+    # 为什么取最差而不是最好:徽章的作用是【暴露风险】。一行挂 3 张图,只要有 1 张判红,
+    # 就说明这行可能装错货 —— 若按最好档显绿,那张红图就被静默吞掉,徽章反而成了帮凶。
+    # 例外:human_verified=1 的红牌已被人工看过并放行,先降级为 green 再参与比较。
+    _status_rank = {'red': 1, 'yellow': 2, 'green': 3}
+    record_worst_status_map = {}  # record_id -> 'green'/'yellow'/'red'(行级徽章,取最差)
+    record_worst_reason_map = {}  # record_id -> 该 record 最差档图对应的 reason(给 hover 用)
     for grp in groups:
         all_record_imgs = []
         for rec in grp.get('records', []):
             record_imgs = ShippingImage.get_by_record(rec['id'])
             all_record_imgs.extend(record_imgs)
+            # 2026-07-27:行级有图 → 模板渲染 🖼️ 按钮加红框 has-image class(刷新不丢)
+            rec['has_image'] = bool(record_imgs)
             for img in record_imgs:
                 status = img.get('match_status') or ''
                 if not status:
@@ -96,10 +131,10 @@ def shipping_records():
                 # 这样:刷新页面时,人工确认过的红牌不会让行级徽章仍然是 ✗
                 if status == 'red' and img.get('human_verified'):
                     status = 'green'
-                cur = record_best_status_map.get(rec['id'])
-                if cur is None or _status_rank.get(status, 0) > _status_rank.get(cur, 0):
-                    record_best_status_map[rec['id']] = status
-                    record_best_reason_map[rec['id']] = img.get('reason') or ''
+                cur = record_worst_status_map.get(rec['id'])
+                if cur is None or _status_rank.get(status, 0) < _status_rank.get(cur, 0):
+                    record_worst_status_map[rec['id']] = status
+                    record_worst_reason_map[rec['id']] = img.get('reason') or ''
         for img in all_record_imgs:
             target = ai_images if img.get('source') == 'ai' else order_non_ai
             target.setdefault(grp['id'], []).append(img)
@@ -170,6 +205,9 @@ def shipping_records():
             else:
                 item['piece_hint'] = ''
                 item['piece_mismatch'] = ''
+            # 2026-07-27:每条明细的 per-rule 核查状态(目前只用到 b_white_300g),
+            # 模板里 addRowWarning 据此决定每条警告单独显示/隐藏 + 渲染 ✓/✗ 按钮
+            item['verified_warnings'] = ShippingRecord.get_verified_warnings(item['id'])
         group.update(summarize_remarks(group['records']))
         group['has_eco'] = any('环保' in r.get('product_name', '') for r in group['records'])
         group['has_jia_mian'] = any(
@@ -177,7 +215,7 @@ def shipping_records():
             and '加面' in r.get('specification', '')
             for r in group['records']
         )
-        group['has_match'] = any(record_best_status_map.get(r['id']) for r in group['records'])
+        group['has_match'] = any(record_worst_status_map.get(r['id']) for r in group['records'])
 
     # 2026-07-24: 把所有 group 的 records 合并成 record_by_pk,模板里给图片叠加品名/规格用
     # (服务端渲染,不依赖 JS 加载 — 之前靠 JS append 在某些场景下不稳定)
@@ -191,8 +229,8 @@ def shipping_records():
         groups=groups,
         order_images=order_non_ai,  # 模板里变量名仍叫 order_images,但内容已剔 AI
         ai_images=ai_images,
-        record_best_status_map=record_best_status_map,
-        record_best_reason_map=record_best_reason_map,
+        record_worst_status_map=record_worst_status_map,
+        record_worst_reason_map=record_worst_reason_map,
         record_by_pk=record_by_pk,   # 2026-07-24 新增:图片叠加文字用的 record 查表
         page_title='出货记录',
         today=today,
@@ -277,11 +315,16 @@ def api_v1_shipping_orders_update(order_id):
         conn = get_db()
         cursor = conn.cursor()
         try:
-            cursor.execute(
-                'SELECT COALESCE(MAX(order_num), 0) + 1 FROM shipping_orders WHERE date = ? AND customer = ?',
-                (new_date, new_customer)
-            )
-            new_order_num = cursor.fetchone()[0]
+            # 只有「换组」才需要重排单号:同组内(日期+客户都没变)保存备注时若照样取 MAX+1,
+            # 会把本单单号顶到组尾,用户看到的表现是「改个备注单号就跳了」。
+            if new_date == (order.get('date') or '') and new_customer == (order.get('customer') or ''):
+                new_order_num = order.get('order_num')
+            else:
+                cursor.execute(
+                    'SELECT COALESCE(MAX(order_num), 0) + 1 FROM shipping_orders WHERE date = ? AND customer = ?',
+                    (new_date, new_customer)
+                )
+                new_order_num = cursor.fetchone()[0]
             cursor.execute(
                 'UPDATE shipping_orders SET date = ?, customer = ?, order_num = ?, order_note = ? WHERE id = ?',
                 (new_date, new_customer, new_order_num, note, order_id)
@@ -376,23 +419,25 @@ def api_v1_shipping_orders_add_records_batch(order_id):
         return jsonify({'success': False, 'error': '无数据'}), 400
 
     items = data['items']
-    records = []
-    for item in items:
-        product_name = item.get('product_name', '').strip()
-        specification = item.get('specification', '').strip()
-        quantity = item.get('quantity', '').strip()
-        unit = item.get('unit', '支').strip()
-        remark = item.get('remark', '').strip()
-        if product_name and quantity:
-            record_id = ShippingRecord.create('', '', product_name, specification, quantity, unit, remark, order_pk=order_id)
-            records.append({
-                'id': record_id, 'product_name': product_name,
-                'specification': specification, 'quantity': quantity,
-                'unit': unit, 'remark': remark
-            })
-    if records:
-        AuditLog.log('batch_add_records', 'shipping_order', order_id, detail={'count': len(records)})
-    return jsonify({'success': True, 'count': len(records), 'records': records}), 201
+    # 走 create_many:单事务批量插入(中途失败整批回滚,不留半单),
+    # 内部统一做 '码'→'y' 归一化、数量 int/str 兼容、空品名或空数量计入 skipped。
+    try:
+        result = ShippingRecord.create_many(order_id, items)
+    except Exception:
+        current_app.logger.exception('批量添加明细失败: order_id=%s', order_id)
+        return jsonify({'success': False, 'error': '批量添加失败，已整批回滚'}), 500
+    records = result['records']
+    skipped = result['skipped']
+
+    # 一条都没成功 → 400:让前端知道这次提交完全无效,而不是收一个 201 空响应当成功
+    if not records:
+        return jsonify({'success': False, 'error': '没有有效明细（品名与数量均不能为空）',
+                        'count': 0, 'skipped': skipped, 'records': []}), 400
+
+    AuditLog.log('batch_add_records', 'shipping_order', order_id,
+                 detail={'count': len(records), 'skipped': skipped})
+    return jsonify({'success': True, 'count': len(records),
+                    'skipped': skipped, 'records': records}), 201
 
 
 @bp.route('/api/v1/shipping-orders/records/<int:record_id>', methods=['PUT'])
@@ -427,8 +472,12 @@ def api_v1_shipping_orders_delete_record(record_id):
     if order and order.get('is_locked'):
         return jsonify({'success': False, 'error': '该订单已锁定，无法删除商品'}), 403
 
+    # 先清该明细的行级图片,再删明细 —— 顺序不能反:
+    # 明细一旦删掉,其 record_pk 图片就成孤儿(页面按现存 record 循环取图不再显示它们,
+    # 而订单又因"仍有图片"删不掉)。
+    removed = ShippingImage.delete_by_record(record_id)
     ShippingRecord.delete(record_id)
-    AuditLog.log('delete_record', 'shipping_order', record['order_pk'], detail={'record_id': record_id, 'product': record.get('product_name', '')})
+    AuditLog.log('delete_record', 'shipping_order', record['order_pk'], detail={'record_id': record_id, 'product': record.get('product_name', ''), 'removed_images': len(removed)})
     return jsonify({'success': True})
 
 
@@ -441,8 +490,11 @@ def api_v1_shipping_orders_delete_all_records(order_id):
     if order.get('is_locked'):
         return jsonify({'success': False, 'error': '该订单已锁定，无法操作'}), 403
 
+    # 明细全清 → 其行级图片一并清理;订单级共享图(record_pk IS NULL)保留,
+    # 因为订单外壳还在,那些图不属于任何一条明细。
+    removed = ShippingImage.delete_record_images_by_order(order_id)
     ShippingRecord.delete_by_order(order_id)
-    AuditLog.log('delete_all_records', 'shipping_order', order_id)
+    AuditLog.log('delete_all_records', 'shipping_order', order_id, detail={'removed_images': len(removed)})
     return jsonify({'success': True})
 
 
@@ -571,7 +623,7 @@ def api_v1_shipping_orders_manual_verify_image(image_id):
     if order and order.get('is_locked'):
         return jsonify({'success': False, 'error': '订单已锁定，无法操作'}), 403
     data = request.get_json(silent=True) or {}
-    verified = bool(data.get('verified', True))
+    verified = _as_bool(data.get('verified'), default=True)
 
     # 新增:append-only human_verify 事件(先读 AI 当前状态快照)
     # 写入失败不阻断主流程 — 与 AuditLog 哲学一致
@@ -605,8 +657,11 @@ def _save_one_uploaded_file(file, upload_dir):
     """保存一个上传文件到 upload_dir,返回 (filepath, original_name)。失败抛 ValueError。"""
     if not file or not file.filename:
         raise ValueError('未选择文件')
-    ext = check_uploaded_image(file)
-    filename = f"{uuid.uuid4().hex}.{ext}"
+    ext = check_uploaded_image(file)  # 契约:返回值【自带前导点】,如 '.png'
+    # 兼容两种写法,避免拼出 'xxx..png' 这种双点文件名
+    if not ext.startswith('.'):
+        ext = '.' + ext
+    filename = f"{uuid.uuid4().hex}{ext}"
     filepath = os.path.join(upload_dir, filename)
     file.save(filepath)
     validate_image_content(filepath)
@@ -697,6 +752,7 @@ def api_v1_shipping_orders_record_upload_images(record_id):
                 'sort_order': img['sort_order'],
                 'match_status': status or None,
                 'match_score': score,
+                'reason': reason or '',
             })
         for s in saved:
             AuditLog.log('upload_image', 'shipping_order', record['order_pk'],
@@ -751,6 +807,7 @@ def api_v1_shipping_orders_record_upload_images(record_id):
             'image_id': image_id, 'image': rel_path,
             'original_name': original_name, 'sort_order': img['sort_order'],
             'match_status': status or None, 'match_score': score,
+            'reason': reason or '',
         }], 'count': 1}), 201
 
     return jsonify({'success': False, 'error': '未提供图片'}), 400
@@ -767,6 +824,33 @@ def api_v1_shipping_orders_record_images_area(record_id):
     for it in items:
         it['scope'] = 'order' if it.get('record_pk') is None else 'record'
     return jsonify({'success': True, 'images': items, 'count': len(items)})
+
+
+@bp.route('/api/v1/shipping-orders/records/<int:record_id>/verify-warning', methods=['POST'])
+def api_v1_shipping_orders_record_verify_warning(record_id):
+    """切换某条规则(目前用到 b_white_300g)的核查状态。
+
+    Body: {rule_id, verified}
+    - verified=true → 把 rule_id 写入 verified_warnings(JSON),警告折叠
+    - verified=false → 从 verified_warnings 移除 rule_id,警告重新弹出
+    与全局 verified 字段并存:verified=1 仍代表"整行所有警告已核查"。
+    """
+    record = ShippingRecord.get_by_id(record_id)
+    if not record:
+        return jsonify({'success': False, 'error': '记录不存在'}), 404
+    data = request.get_json() or {}
+    rule_id = (data.get('rule_id') or '').strip()
+    verified = bool(data.get('verified'))
+    if not rule_id:
+        return jsonify({'success': False, 'error': 'rule_id 不能为空'}), 400
+    current = ShippingRecord.set_verified_warning(record_id, rule_id, verified)
+    AuditLog.log(
+        'verify_warning' if verified else 'unverify_warning',
+        'shipping_record',
+        record_id,
+        detail={'rule_id': rule_id}
+    )
+    return jsonify({'success': True, 'verified_warnings': current, 'rule_id': rule_id, 'verified': verified})
 
 
 
@@ -806,6 +890,18 @@ def shipping_records_ai_recognize():
             'success': False,
             'error': '未选择文件',
             'hint': '请先选择一张图片再点击识别'
+        }), 400
+
+    # 扩展名 + 大小校验(与行级上传同一把尺子)。
+    # 不校验就直接 read() 的后果:.txt 之类非图会一路送进 OCR 引擎,
+    # 引擎内部抛错后被兜成 503「引擎不可用」—— 明明是用户传错文件,却报成服务故障。
+    try:
+        check_uploaded_image(file)
+    except ValueError as e:
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'hint': '请上传 10MB 以内的 png/jpg/jpeg/gif/webp 图片'
         }), 400
 
     img_bytes = file.read()
@@ -863,6 +959,9 @@ def api_v1_shipping_orders_ai_match(order_id):
     order = ShippingOrder.get_by_id(order_id)
     if not order:
         return jsonify({'success': False, 'error': '订单不存在'}), 404
+    # 锁定单不允许 AI 改写匹配状态 —— 闸门放在 OCR 之前,避免白跑一趟识别
+    if order.get('is_locked'):
+        return jsonify({'success': False, 'error': '该订单已锁定，无法执行 AI 匹配'}), 403
 
     # 拉取该单所有明细行(ShippingRecord 没有 get_by_order,内联 SQL 最稳)
     from models._db import get_db as _get_db
@@ -875,8 +974,8 @@ def api_v1_shipping_orders_ai_match(order_id):
     records = [dict(r) for r in cur.fetchall()]
     conn.close()
 
-    # 汇总该单所有行级图片的 OCR 文字
-    paddle = PaddleOCREngine()
+    # 汇总该单所有行级图片的 OCR 文字（单例引擎，与 _run_label_match / 事件记录共用同一实例）
+    paddle = get_ocr_engine('paddleocr')
     texts = []
     for rec in records:
         for img in ShippingImage.get_by_record(rec['id']):
@@ -892,9 +991,23 @@ def api_v1_shipping_orders_ai_match(order_id):
 
     rows = [{'record_id': r['id'], 'product_name': r['product_name'],
              'specification': r['specification']} for r in records]
+
+    # ── 2026-07-30 自适应提示词:把同品类的 layer2 + 同规格的 layer3 拼到 prompt 末尾 ──
+    augmented_rows = []
+    for r in rows:
+        cls = classify_record(product_name=r['product_name'], specification=r['specification'])
+        augmented_rows.append({
+            **r,
+            '_supplement': CategoryPrompt.compose_for_record(
+                category_code=cls['category_code'] if cls else None,
+                product_name=r['product_name'],
+                specification=r['specification'],
+            ),
+        })
+
     try:
         engine = get_ocr_engine('deepseek')
-        ai_result = engine.compare_rows(ocr_text, rows)
+        ai_result = engine.compare_rows(ocr_text, augmented_rows)
         verdicts = ai_result.get('verdicts', []) if isinstance(ai_result, dict) else ai_result
         prompt_payload_text = ai_result.get('prompt', '') if isinstance(ai_result, dict) else ''
     except Exception as e:
@@ -902,9 +1015,23 @@ def api_v1_shipping_orders_ai_match(order_id):
         return jsonify({'success': False, 'error': f'AI 比对失败:{type(e).__name__}'}), 500
 
     _SCORE = {'green': 90.0, 'yellow': 70.0, 'red': 30.0}
+    # 只认属于本单的 record_id:LLM 可能幻觉出别单的 id,
+    # 直接照单回写会越权改写他人订单的匹配状态。
+    own_record_ids = {r['id'] for r in records}
     results = []
+    skipped_foreign = 0
     for v in verdicts:
         rid = v.get('record_id')
+        try:
+            rid = int(rid)
+        except (TypeError, ValueError):
+            skipped_foreign += 1
+            continue
+        if rid not in own_record_ids:
+            skipped_foreign += 1
+            current_app.logger.warning(
+                'ai-match 跳过不属于本单的 record_id=%s (order_id=%s)', rid, order_id)
+            continue
         raw_status = v.get('match_status', 'red')
         # Normalize: lowercase + small synonym map (LLMs drift on casing/abbrev)
         status = {'g': 'green', 'y': 'yellow', 'r': 'red',
@@ -915,6 +1042,9 @@ def api_v1_shipping_orders_ai_match(order_id):
         reason = v.get('reason', '') or ''
         for img in ShippingImage.get_by_record(rid):
             ShippingImage.set_match(img['id'], status, score, reason)
+            # 重跑 AI = 新一轮裁决,旧的人工确认作废 —— 否则上一轮被人工"放行"的红牌
+            # 会继续顶着已核查的绿色外观,新裁决的风险就被静默吞掉了。
+            ShippingImage.set_human_verified(img['id'], False)
         results.append({'record_id': rid, 'match_status': status, 'match_score': score,
                         'reason': reason})
         # append-only ai_match 事件(每个 record 一条;image_id 留空,代表聚合 OCR 比对结果)
@@ -945,3 +1075,131 @@ def api_v1_shipping_orders_ai_match(order_id):
     rd = sum(1 for r in results if r['match_status'] == 'red')
     summary = f'{len(results)} 行已核对:{g} ✓ / {y} ⚠ / {rd} ✗'
     return jsonify({'success': True, 'results': results, 'summary': summary})
+
+
+# ────────────────────────────────────────────────────────────────────
+# 类别/规格自适应提示词 (CategoryPrompt) API — 2026-07-30 新增
+# 设计:在出货页对黄/红图点"✓ 确认通过"后,图下方按钮调 /generate-prompt-suggestion
+# 生成模板化提示词草稿,用户编辑后调 /category-prompts (POST) 保存。下次同 record 比对自动注入。
+# ────────────────────────────────────────────────────────────────────
+
+def _build_suggestion_text(img: dict, record: dict | None) -> str:
+    """模板化生成:基于 OCR 原文 + AI/人裁决,产出可供用户编辑的"补充提示词"草稿。
+
+    不调 LLM(避免 API key 依赖),按行内变量渲染,用户可在前端编辑器再改。
+    模板自带 [yellow→green] / [red→green] 上下文 + 品名/规格/部分 OCR 关键词,作为"该案例的判决依据"。
+    """
+    ai = img.get('match_status') or '?'
+    ai_reason = img.get('reason') or ''
+    pn = (record or {}).get('product_name', '') or ''
+    sp = (record or {}).get('specification', '') or ''
+
+    # 截 OCR 原文前 200 字(避免提示词太长压垮上下文)
+    return (
+        f'[{ai}→人工确认] 商品「{pn}」规格「{sp}」OCR标签此前判 {ai},'
+        f'原因为「{ai_reason[:120]}」,但人工复核与录入明细一致。'
+        f'同类案例在后续比对中,即使 OCR 文本中只出现部分关键词(如 7P / 加面 / 厚度)'
+        f'也视为该规则命中,判 green。'
+    )
+
+
+@bp.route('/api/v1/shipping-orders/images/<int:image_id>/generate-prompt-suggestion', methods=['POST'])
+def api_v1_shipping_orders_generate_prompt_suggestion(image_id):
+    """生成提示词草稿:调人工确认"✓ 确认通过"后,图下方的按钮触发。
+
+    Returns:
+      {
+        'success': True,
+        'suggestion': {
+          'prompt_text': str,              # 可编辑草稿
+          'scope': 'category',             # 默认大类,前端可改成 spec
+          'category_code': str|None,
+          'product_name_keyword': str|None,
+          'spec_pattern': '',              # spec 时由用户填
+          'source_ocr_text': str,          # 摘要
+          'source_ai_status': str,
+          'source_human_status': 'green',
+        }
+      }
+    """
+    img = ShippingImage.get_by_id(image_id)
+    if not img:
+        return jsonify({'success': False, 'error': '图片不存在'}), 404
+    record = None
+    if img.get('record_pk'):
+        record = ShippingRecord.get_by_id(img['record_pk'])
+    if not img.get('human_verified'):
+        return jsonify({'success': False, 'error': '仅当 human_verified=1 后才能生成提示词'}), 400
+
+    # 自动分类
+    cls = classify_record(product_name=(record or {}).get('product_name', ''),
+                          specification=(record or {}).get('specification', ''))
+    suggestion_text = _build_suggestion_text(img, record)
+    return jsonify({
+        'success': True,
+        'suggestion': {
+            'prompt_text': suggestion_text,
+            'scope': 'category',  # 前端可切到 'spec'
+            'category_code': cls['category_code'] if cls else None,
+            'product_name_keyword': (record or {}).get('product_name', '') or None,
+            'spec_pattern': '',
+            'source_event_id': img.get('_source_event_id'),  # 上一个 human-verify 事件 id(可选)
+            'source_ocr_text': (img.get('ocr_text') or '')[:200],
+            'source_ai_status': img.get('match_status') or '',
+            'source_human_status': 'green',
+        }
+    })
+
+
+@bp.route('/api/v1/category-prompts', methods=['POST'])
+def api_v1_category_prompts_create():
+    """保存用户编辑后的提示词 → 写入 category_prompts 表(scope='category'|'spec')。
+
+    Body 必填 scope + prompt_text;category / spec 分类按 scope 校验。
+    """
+    data = request.get_json() or {}
+    scope = data.get('scope')
+    prompt_text = (data.get('prompt_text') or '').strip()
+    if scope not in ('category', 'spec'):
+        return jsonify({'success': False, 'error': 'scope 必须是 category 或 spec'}), 400
+    if not prompt_text:
+        return jsonify({'success': False, 'error': 'prompt_text 不能为空'}), 400
+    if scope == 'spec':
+        if not data.get('category_code') or not data.get('spec_pattern'):
+            return jsonify({'success': False, 'error': 'spec scope 必须有 category_code + spec_pattern'}), 400
+    if scope == 'category' and not (data.get('product_name_keyword') or data.get('category_code')):
+        return jsonify({'success': False, 'error': 'category scope 必须有 product_name_keyword 或 category_code'}), 400
+
+    pid = CategoryPrompt.create(
+        scope=scope,
+        prompt_text=prompt_text,
+        category_code=data.get('category_code') or None,
+        spec_pattern=data.get('spec_pattern') or None,
+        product_name_keyword=data.get('product_name_keyword') or None,
+        source_event_id=data.get('source_event_id') or None,
+        source_ocr_text=data.get('source_ocr_text') or None,
+        source_ai_status=data.get('source_ai_status') or None,
+        source_human_status=data.get('source_human_status') or None,
+        status='active',
+    )
+    AuditLog.log('create_category_prompt', 'category_prompt', pid,
+                 detail={'scope': scope, 'category_code': data.get('category_code'),
+                         'spec_pattern': data.get('spec_pattern')})
+    return jsonify({'success': True, 'id': pid})
+
+
+@bp.route('/api/v1/category-prompts', methods=['GET'])
+def api_v1_category_prompts_list():
+    """列出当前活跃提示词(管理 UI 用),可选 scope 过滤。"""
+    scope = request.args.get('scope')
+    rows = CategoryPrompt.list_active(scope=scope if scope in ('category', 'spec') else None)
+    return jsonify({'success': True, 'rows': rows})
+
+
+@bp.route('/api/v1/category-prompts/<int:prompt_id>', methods=['DELETE'])
+def api_v1_category_prompts_delete(prompt_id):
+    """软删:把 status 改为 archived,不影响历史拼装记录(只不再注入)。"""
+    if CategoryPrompt.archive(prompt_id):
+        AuditLog.log('archive_category_prompt', 'category_prompt', prompt_id)
+        return jsonify({'success': True})
+    return jsonify({'success': False, 'error': '提示词不存在或已被归档'}), 404

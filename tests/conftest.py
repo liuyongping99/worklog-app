@@ -12,6 +12,8 @@ import shutil
 import sys
 from pathlib import Path
 
+import pytest
+
 # 项目根目录
 ROOT = Path(__file__).resolve().parent.parent
 PROD_DB = ROOT / 'worklog.db'
@@ -55,3 +57,26 @@ def pytest_unconfigure(config):
             if aux.exists():
                 try: aux.unlink()
                 except OSError: pass
+
+
+@pytest.fixture(autouse=True)
+def _clear_paddle_ocr_cache(request):
+    """每个测试前清掉 PaddleOCR 单例缓存。
+
+    背景：NP0-1 把 PaddleOCREngine() 改成 get_ocr_engine('paddleocr') 单例缓存。
+    但 PaddleOCR 未安装 / 模型加载失败时,首次真实调用会把"半初始化实例"或
+    None 写进 _engine_cache['paddleocr'],污染同会话后续测试(出现 'NoneType'
+    has no attribute 'shape')。清缓存放在 yield 之前,保证 setup 阶段即可用。
+    """
+    try:
+        from blueprints.ocr_engine import _engine_cache
+        _engine_cache.pop('paddleocr', None)
+    except Exception:
+        pass
+    yield
+    # teardown:再次清,防止该测试自身已污染 cache 影响下一组
+    try:
+        from blueprints.ocr_engine import _engine_cache
+        _engine_cache.pop('paddleocr', None)
+    except Exception:
+        pass
