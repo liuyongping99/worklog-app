@@ -38,6 +38,8 @@ class RecordUploadMatchTests(unittest.TestCase):
         NP0-1 之后生产代码改走 get_ocr_engine('paddleocr') 单例,原先 mock
         PaddleOCREngine 类的写法已不再拦截（无 PaddleOCREngine() 直接调用）。
         改成 mock 工厂函数返回 fake 引擎,行为一致。
+
+        2026-07-31 改造:OCR+AI 比对改成后台线程异步跑,等待 _ASYNC_JOBS[iid]['state'] 完成。
         """
         mock_factory.return_value.extract_text.return_value = '硬加面 黑色 1.5m'
         data = {'image': (io.BytesIO(b'\x89PNG\r\n\x1a\n' + b'0' * 64), 'label.png')}
@@ -47,7 +49,20 @@ class RecordUploadMatchTests(unittest.TestCase):
         )
         self.assertEqual(resp.status_code, 201)
         img = resp.get_json()['images'][0]
-        self.assertEqual(img['match_status'], 'green')
+        self.assertTrue(img.get('processing'),
+            f'上传端点应立即返回 processing=True(后台异步),实际 {img}')
+        # 等待后台线程完成
+        from blueprints.shipping import _ASYNC_JOBS
+        import time
+        iid = img['image_id']
+        deadline = time.time() + 5
+        while time.time() < deadline and _ASYNC_JOBS.get(iid, {}).get('state') == 'processing':
+            time.sleep(0.05)
+        # 重新查 DB(后台线程 set_match 已写)
+        from models import ShippingImage
+        rec = ShippingImage.get_by_id(iid)
+        self.assertEqual(rec['match_status'], 'green',
+            f'异步处理后应为 green,实际 {rec}')
         self.assertGreaterEqual(img['match_score'], 85)
 
 

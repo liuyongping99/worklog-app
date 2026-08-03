@@ -830,12 +830,24 @@ class InboundRecord:
 
 class InboundImage:
     @staticmethod
-    def create(order_pk: int, file_path: str, original_name: str = '', source: str = 'upload'):
+    def create(order_pk: int, file_path: str, original_name: str = '', source: str = 'upload', record_pk: int = None, sort_order: int = None):
+        """插入图片。
+        - record_pk: None=订单级共享图, 非空=某条明细的专属图
+        - sort_order: None 时由本方法在事务内计算 max+1(同事务累加); 显式传入则按用户值
+        """
         conn = get_db()
         cursor = conn.cursor()
+        if sort_order is None:
+            cursor.execute(
+                'SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM inbound_images WHERE order_pk = ?',
+                (order_pk,)
+            )
+            sort_order = cursor.fetchone()['next']
         cursor.execute(
-            'INSERT INTO inbound_images (order_pk, file_path, original_name, source, created_at) VALUES (?, ?, ?, ?, ?)',
-            (order_pk, file_path, original_name, source, datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+            'INSERT INTO inbound_images (order_pk, file_path, original_name, source, record_pk, sort_order, created_at) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?)',
+            (order_pk, file_path, original_name, source, record_pk, sort_order,
+             datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
         )
         conn.commit()
         image_id = cursor.lastrowid
@@ -844,9 +856,52 @@ class InboundImage:
 
     @staticmethod
     def get_by_order(order_pk: int):
+        """查订单所有图(含订单级 + 记录级),按 sort_order + id 排"""
         conn = get_db()
         cursor = conn.cursor()
-        cursor.execute('SELECT * FROM inbound_images WHERE order_pk = ? ORDER BY id ASC', (order_pk,))
+        cursor.execute(
+            'SELECT * FROM inbound_images WHERE order_pk = ? ORDER BY sort_order ASC, id ASC',
+            (order_pk,)
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item['relative_path'] = InboundImage.get_relative_path(item['file_path'])
+            result.append(item)
+        return result
+
+    @staticmethod
+    def get_by_record(record_pk: int):
+        """查某条明细专属图片(订单级共享图不算),按 sort_order + id 排"""
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            'SELECT * FROM inbound_images WHERE record_pk = ? ORDER BY sort_order ASC, id ASC',
+            (record_pk,)
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item['relative_path'] = InboundImage.get_relative_path(item['file_path'])
+            result.append(item)
+        return result
+
+    @staticmethod
+    def get_combined_for_record(order_pk: int, record_pk: int):
+        """合并视图:某 record 专属图 + 订单共享图,按 sort_order + id 统一排"""
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            '''SELECT * FROM inbound_images WHERE order_pk = ? AND record_pk IS NULL
+               UNION ALL
+               SELECT * FROM inbound_images WHERE order_pk = ? AND record_pk = ?
+               ORDER BY sort_order ASC, id ASC''',
+            (order_pk, order_pk, record_pk)
+        )
         rows = cursor.fetchall()
         conn.close()
         result = []
@@ -877,6 +932,55 @@ class InboundImage:
         row = cursor.fetchone()
         conn.close()
         return dict(row) if row else None
+
+    @staticmethod
+    def set_match(image_id: int, status: str, score: float, reason: str = '',
+               source: str = None):
+        """写入标签匹配结果（match_status/match_score/reason）。
+
+        Args:
+            image_id: 图片 id
+            status:   'green' | 'yellow' | 'red' | '' (空 = 清空,不打徽章)
+            score:    0~100 置信度
+            reason:   AI 中文判定依据(给前端 hover 提示用)
+            source:   'local_fuzzy' (默认,本地 RapidFuzz) 或 'deepseek' (云端)
+                      写入 inbound_images.match_source,前端据此用不同图标
+        """
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            'UPDATE inbound_images SET match_status = ?, match_score = ?, '
+            'reason = ?, match_source = ? WHERE id = ?',
+            (status, score, reason or None,
+             source or 'local_fuzzy',  # 默认 local_fuzzy
+             image_id)
+        )
+        conn.commit()
+        conn.close()
+
+    @staticmethod
+    def set_human_verified(image_id: int, verified: bool = True):
+        """人工覆盖 AI 比对结果(目前仅用于红牌的"确认通过")。
+
+        写入后前端应把红牌徽章视为已确认(可隐藏确认按钮,或展示"已确认"标记)。
+        """
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            'UPDATE inbound_images SET human_verified = ? WHERE id = ?',
+            (1 if verified else 0, image_id)
+        )
+        conn.commit()
+        conn.close()
+
+    @staticmethod
+    def set_bg_color(image_id: int, bg: str):
+        """写入自动识别的图片背景色('black'|'white'),供前端展示"""
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('UPDATE inbound_images SET bg_color = ? WHERE id = ?', (bg, image_id))
+        conn.commit()
+        conn.close()
 
     @staticmethod
     def delete(image_id: int):
@@ -911,6 +1015,24 @@ class InboundImage:
         # 删除文件（走回收站 + 路径白名单）
         for file_path in file_paths:
             _safe_remove_file(file_path)
+
+    @staticmethod
+    def delete_by_record(record_pk: int):
+        """删除某条明细的所有专属图片（DB 行 + 物理文件）。
+
+        删除单条明细时必须调用，否则 record 删掉后其行级图片变成孤儿：
+        页面按现存 record 循环取图不再显示它们，而订单又因"仍有图片"删不掉。
+        """
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('SELECT file_path FROM inbound_images WHERE record_pk = ?', (record_pk,))
+        file_paths = [row['file_path'] for row in cursor.fetchall()]
+        cursor.execute('DELETE FROM inbound_images WHERE record_pk = ?', (record_pk,))
+        conn.commit()
+        conn.close()
+        for file_path in file_paths:
+            _safe_remove_file(file_path)
+        return file_paths
 
 
 
@@ -1018,17 +1140,26 @@ class ShippingImage:
         return dict(row) if row else None
 
     @staticmethod
-    def set_match(image_id: int, status: str, score: float, reason: str = ''):
+    def set_match(image_id: int, status: str, score: float, reason: str = '',
+               source: str = None):
         """写入标签匹配结果（match_status/match_score/reason）。
 
-        reason: DeepSeek 返回的中文判定依据(给前端 hover 提示用),行级 RapidFuzz
-                上传时为空字符串(本地算法不产出 reason)。
+        Args:
+            image_id: 图片 id
+            status:   'green' | 'yellow' | 'red' | '' (空 = 清空,不打徽章)
+            score:    0~100 置信度
+            reason:   AI 中文判定依据(给前端 hover 提示用)
+            source:   'local_fuzzy' (默认,本地 RapidFuzz) 或 'deepseek' (云端)
+                      写入 shipping_images.match_source,前端据此用不同图标
         """
         conn = get_db()
         cursor = conn.cursor()
         cursor.execute(
-            'UPDATE shipping_images SET match_status = ?, match_score = ?, reason = ? WHERE id = ?',
-            (status, score, reason or None, image_id)
+            'UPDATE shipping_images SET match_status = ?, match_score = ?, '
+            'reason = ?, match_source = ? WHERE id = ?',
+            (status, score, reason or None,
+             source or 'local_fuzzy',  # 默认 local_fuzzy
+             image_id)
         )
         conn.commit()
         conn.close()
@@ -1045,6 +1176,15 @@ class ShippingImage:
             'UPDATE shipping_images SET human_verified = ? WHERE id = ?',
             (1 if verified else 0, image_id)
         )
+        conn.commit()
+        conn.close()
+
+    @staticmethod
+    def set_bg_color(image_id: int, bg: str):
+        """写入自动识别的图片背景色('black'|'white'),供前端展示"""
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('UPDATE shipping_images SET bg_color = ? WHERE id = ?', (bg, image_id))
         conn.commit()
         conn.close()
 
@@ -1197,6 +1337,60 @@ class OcrMatchEvent:
         rows = cursor.fetchall()
         conn.close()
         return [dict(r) for r in rows]
+
+    @staticmethod
+    def get_by_image(image_id: int, event_type: str = None) -> list:
+        """查某图片的所有事件(老→新;同 record_ocr / human_verify 用)。
+
+        ai_match 事件按 record 写,image_id=NULL,所以不在此查询范围。
+        """
+        conn = get_db()
+        cursor = conn.cursor()
+        if event_type:
+            cursor.execute(
+                'SELECT * FROM ocr_match_event WHERE image_id = ? AND event_type = ? '
+                'ORDER BY created_at ASC, id ASC',
+                (image_id, event_type),
+            )
+        else:
+            cursor.execute(
+                'SELECT * FROM ocr_match_event WHERE image_id = ? ORDER BY created_at ASC, id ASC',
+                (image_id,),
+            )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+
+    @staticmethod
+    def get_latest_by_record(record_id: int, event_type: str) -> dict | None:
+        """取某 record 最新一条某类型事件(按 created_at DESC, id DESC 兜底)。
+
+        主要给 ai_match 用(image_id=NULL,不能按图查)。
+        """
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            'SELECT * FROM ocr_match_event WHERE record_id = ? AND event_type = ? '
+            'ORDER BY created_at DESC, id DESC LIMIT 1',
+            (record_id, event_type),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    @staticmethod
+    def get_latest_by_image(image_id: int, event_type: str) -> dict | None:
+        """取某图片最新一条某类型事件。record_ocr / human_verify 用。"""
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            'SELECT * FROM ocr_match_event WHERE image_id = ? AND event_type = ? '
+            'ORDER BY created_at DESC, id DESC LIMIT 1',
+            (image_id, event_type),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
 
     @staticmethod
     def get_by_order(order_id: int, event_type: str = None) -> list:
@@ -1714,6 +1908,55 @@ class LoadingOrderImage:
                 result[order_pk] = []
             result[order_pk].append(item)
         return result
+
+    @staticmethod
+    def set_match(image_id: int, status: str, score: float, reason: str = '',
+               source: str = None):
+        """写入标签匹配结果（match_status/match_score/reason）。
+
+        Args:
+            image_id: 图片 id
+            status:   'green' | 'yellow' | 'red' | '' (空 = 清空,不打徽章)
+            score:    0~100 置信度
+            reason:   AI 中文判定依据(给前端 hover 提示用)
+            source:   'local_fuzzy' (默认,本地 RapidFuzz) 或 'deepseek' (云端)
+                      写入 loading_order_images.match_source,前端据此用不同图标
+        """
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            'UPDATE loading_order_images SET match_status = ?, match_score = ?, '
+            'reason = ?, match_source = ? WHERE id = ?',
+            (status, score, reason or None,
+             source or 'local_fuzzy',  # 默认 local_fuzzy
+             image_id)
+        )
+        conn.commit()
+        conn.close()
+
+    @staticmethod
+    def set_human_verified(image_id: int, verified: bool = True):
+        """人工覆盖 AI 比对结果(目前仅用于红牌的"确认通过")。
+
+        写入后前端应把红牌徽章视为已确认(可隐藏确认按钮,或展示"已确认"标记)。
+        """
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            'UPDATE loading_order_images SET human_verified = ? WHERE id = ?',
+            (1 if verified else 0, image_id)
+        )
+        conn.commit()
+        conn.close()
+
+    @staticmethod
+    def set_bg_color(image_id: int, bg: str):
+        """写入自动识别的图片背景色('black'|'white'),供前端展示"""
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('UPDATE loading_order_images SET bg_color = ? WHERE id = ?', (bg, image_id))
+        conn.commit()
+        conn.close()
 
 
 class UnifiedSearch:

@@ -454,6 +454,52 @@ def _normalize_for_match(text):
     return s
 
 
+def detect_bg_color(filepath):
+    """检测商品标签图片的背景色(整图分块采样,取最暗区域判断)。
+
+    用于"黑磅布三文治""白磅布三文治"等标签上不写颜色的品类:
+    从图片背景推断实物颜色,补充到 OCR 文字中供比对。
+
+    实现细节:
+      - 把图等分 4×4 网格,采样每个网格的平均灰度
+      - 取最暗 25% 样本的均值(避开白色标签纸/塑料反光)
+      - < 70 → black(明显深色背景)
+      - > 100 → white(浅色背景,白磅布实拍浅灰蓝)
+      - 70-100 → None(中性灰,放弃推断避免误判)
+
+    Returns:
+        'black', 'white', 或 None.
+    """
+    try:
+        from PIL import Image, ImageStat
+        img = Image.open(filepath).convert('L')
+        w, h = img.size
+        samples = []
+        for i in range(4):
+            for j in range(4):
+                x0 = i * w // 4
+                y0 = j * h // 4
+                x1 = min((i + 1) * w // 4, w)
+                y1 = min((j + 1) * h // 4, h)
+                if x1 - x0 < 2 or y1 - y0 < 2:
+                    continue
+                tile = img.crop((x0, y0, x1, y1))
+                samples.append(ImageStat.Stat(tile).mean[0])
+        if not samples:
+            return None
+        samples.sort()
+        # 取最暗 25% 样本(避开白色标签/反光)
+        dark_n = max(1, len(samples) // 4)
+        dark_avg = sum(samples[:dark_n]) / dark_n
+        if dark_avg < 70:
+            return 'black'
+        if dark_avg > 100:
+            return 'white'
+        return None
+    except Exception:
+        return None
+
+
 def _char_tokens(s):
     """把连续字符串按字符切成空格分隔的 token 串，供 token_set_ratio 无视顺序比较。"""
     return ' '.join(list(s))

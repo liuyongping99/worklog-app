@@ -310,7 +310,7 @@ window.confirmUpload = function() {
     // ── loading 状态: OCR 跑分需 ~1-3s, 给用户即时反馈避免以为卡死
     var _confirmBtn = document.querySelector('.preview-actions .btn-confirm');
     var _origBtnText = _confirmBtn ? _confirmBtn.textContent : '';
-    if (_confirmBtn) { _confirmBtn.disabled = true; _confirmBtn.textContent = '⏳ 识别中...'; }
+    if (_confirmBtn) { _confirmBtn.disabled = true; _confirmBtn.textContent = '⏳ 上传中...'; }
     var _restoreBtn = function() {
         if (_confirmBtn) { _confirmBtn.disabled = false; _confirmBtn.textContent = _origBtnText; }
     };

@@ -9,6 +9,9 @@ import uuid
 import base64
 import re
 import json
+import threading
+import logging
+import time
 from datetime import date as date_cls, timedelta, datetime
 from flask import Blueprint, render_template, request, jsonify, current_app, session
 from models import (
@@ -21,41 +24,192 @@ from blueprints._helpers import (
     get_ypp, calc_hint, check_remark, summarize_remarks,
     get_piece_conversion, calc_piece_quantity, check_piece_mismatch,
     validate_image_content, check_uploaded_image,
-    match_label_to_row,
+    match_label_to_row, detect_bg_color,
 )
 from blueprints.ocr_engine import PaddleOCREngine, get_ocr_engine, OCR_MATCH_PROMPT_VERSION
 from blueprints import _helpers
+from models._db import get_db
 
 
 bp = Blueprint('shipping', __name__)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+logger = logging.getLogger(__name__)
 
-def _run_label_match(image_abspath, record):
-    """对一张行级图跑 OCR + 本地匹配，返回 (status, score, reason)。失败则 ('', None, '') 不阻断上传。
+# ── 行级图异步 OCR+AI 处理 ─────────────────────────────────────────────
+# 单用户本地部署，用进程内存登记任务进度即可，无需 Redis/Celery。
+# _ASYNC_JOBS[image_id] = {'state': 'processing'|'done'|'error', 'started': ts, 'finished': ts}
+_ASYNC_JOBS = {}
 
-    走 get_ocr_engine('paddleocr') 单例:与本文件其他 OCR 调用点(事件记录/ai-match)保持同一实例,
-    避免每次上传重复加载 PaddleOCR 模型。
+# PaddleOCR 推理与 DeepSeek 调用都不是严格线程安全的，且 API 有速率限制，
+# 统一用一把锁串行化"抽字→比对"过程，避免多图并发上传时互相踩踏。
+_OCR_LOCK = threading.Lock()
 
-    OCR 文本为空时返回空 status —— 语义是"没证据"而非"不符":
-    match_label_to_row('') 会判 red,但那对用户是误导(标签没识别出来 ≠ 货不对)。
-    空 status 让调用方跳过 set_match(不打徽章),事件表里 ai_match_status 落 NULL,
-    与 plan「OCR 失败信号」的约定一致。
+
+def _process_record_image_async(image_id, filepath, record, order_id, record_id):
+    """后台线程：对单张行级图跑 OCR + 背景色 + AI 比对，并把结果写库。
+
+    调用方(上传端点)在请求线程里完成图片落盘后立即返回 processing:true，
+    真正的重活(2~4s PaddleOCR + 可能的 DeepSeek 联网)在这里异步完成，
+    前端通过 /images/<id>/match-status 轮询结果并局部刷新。
     """
     try:
-        with open(image_abspath, 'rb') as f:
-            img_bytes = f.read()
-        text = get_ocr_engine('paddleocr').extract_text(img_bytes)
-        if not (text or '').strip():
+        # 仅"抽字→比对"受锁保护；DB 写库在锁外执行，缩短临界区。
+        with _OCR_LOCK:
+            # 1) PaddleOCR 抽字(单次)
+            ocr_text = ''
+            try:
+                with open(filepath, 'rb') as _f:
+                    ocr_text = get_ocr_engine('paddleocr').extract_text(_f.read()) or ''
+            except Exception:
+                logger.exception('记录 OCR 文本失败(不阻断): %s', filepath)
+            # 1.5) 图片背景色检测:对标签不写颜色的品类(如磅布三文治),从背景推断实物颜色
+            bg = detect_bg_color(filepath)
+            if bg and ocr_text.strip():
+                ocr_text = ocr_text + '\n[标签背景: ' + ('黑色' if bg == 'black' else '白色') + ']'
+            if bg:
+                try:
+                    ShippingImage.set_bg_color(image_id, bg)
+                except Exception:
+                    logger.exception('set_bg_color 失败(不阻断) image_id=%s', image_id)
+            # 2) 走新流程:DeepSeek 优先 → fallback 本地
+            result = _classify_and_match_image(filepath, record, ocr_text)
+        status, score, reason, source_label = (
+            result['status'], result['score'], result['reason'], result['source']
+        )
+        if status:
+            ShippingImage.set_match(image_id, status, score, reason, source=source_label)
+        # 新增:append-only record_ocr 事件(写入失败不阻断主流程)
+        try:
+            OcrMatchEvent.create(
+                'record_ocr', record_id=record_id, order_id=order_id, image_id=image_id,
+                ocr_text=ocr_text,
+                ocr_engine='paddleocr',
+                ai_engine=source_label or 'local_fuzzy',
+                ai_match_status=status or None,
+                ai_match_score=score,
+                ai_match_reason=reason or None,
+                product_name=record.get('product_name', ''),
+                specification=record.get('specification', ''),
+            )
+        except Exception:
+            logger.exception('record_ocr 事件写库失败(不阻断)')
+        # 若 DeepSeek 参与,额外写入 ai_match 事件保留提示词+原始返回(供详情审计)
+        if source_label == 'deepseek' and result.get('prompt_text'):
+            try:
+                OcrMatchEvent.create(
+                    'ai_match',
+                    record_id=record_id,
+                    order_id=order_id,
+                    image_id=image_id,
+                    ocr_text=ocr_text,
+                    ocr_engine='paddleocr',
+                    prompt_payload=result['prompt_text'],
+                    ai_engine='deepseek',
+                    ai_match_status=status,
+                    ai_match_score=score,
+                    ai_match_reason=reason or None,
+                    ai_raw_response=result['raw_response'],
+                    prompt_version=OCR_MATCH_PROMPT_VERSION,
+                    product_name=record.get('product_name', ''),
+                    specification=record.get('specification', ''),
+                )
+            except Exception:
+                logger.exception('ai_match 事件写库失败(不阻断)')
+        _ASYNC_JOBS[image_id] = {'state': 'done', 'finished': time.time()}
+    except Exception:
+        logger.exception('行级图异步 OCR+AI 处理失败 image_id=%s', image_id)
+        _ASYNC_JOBS[image_id] = {'state': 'error', 'finished': time.time(), 'error': 'processing failed'}
+
+
+def _spawn_record_image_processing(image_id, filepath, record, order_id, record_id,
+                                    rel_path, original_name, sort_order):
+    """登记任务并启动后台线程，返回"处理中"图片字典(供上传端点立即返回)。"""
+    _ASYNC_JOBS[image_id] = {'state': 'processing', 'started': time.time()}
+    t = threading.Thread(
+        target=_process_record_image_async,
+        args=(image_id, filepath, record, order_id, record_id),
+        daemon=True,
+    )
+    t.start()
+    return {
+        'image_id': image_id,
+        'image': rel_path,
+        'original_name': original_name,
+        'sort_order': sort_order,
+        'processing': True,          # 前端据此显示"识别中"并启动轮询
+        'match_status': None,
+        'match_score': None,
+        'reason': '',
+        'match_source': None,
+        'bg_color': None,
+    }
+
+
+def _run_label_match(image_abspath, record, ocr_text=''):
+    """对一张行级图跑本地匹配 (RapidFuzz)，返回 (status, score, reason)。
+
+    2026-07-30 改造:本函数只负责【本地 fallback】逻辑(DeepSeek 调用由
+    _classify_and_match_image 调度)。调用方先抽 OCR文本,如已抽取则复用避免重跑 PaddleOCR。
+    """
+    try:
+        if not ocr_text:
+            with open(image_abspath, 'rb') as f:
+                img_bytes = f.read()
+            ocr_text = get_ocr_engine('paddleocr').extract_text(img_bytes) or ''
+        if not ocr_text.strip():
             return '', None, ''
         status, score, reason = match_label_to_row(
-            text, record.get('product_name', ''), record.get('specification', '')
+            ocr_text, record.get('product_name', ''), record.get('specification', '')
         )
         return status, score, reason
     except Exception:
-        current_app.logger.exception('行级图片 OCR 匹配失败（不阻断上传）')
+        logger.exception('行级图片本地匹配失败（不阻断上传）')
         return '', None, ''
+
+
+def _classify_and_match_image(filepath, record, ocr_text):
+    """2026-07-30 改造:对一张图先 OCR → 优先调 DeepSeek 单 record 比对 → fallback 本地 RapidFuzz。
+    2026-07-31:增加 prompt_text / raw_response 返回,供 upload 流程写入 ai_match 事件。
+
+    Returns:
+        {
+            'status': 'green' | 'yellow' | 'red' | '',  # 空 = OCR 无文字,不打徽章
+            'score':  float | None,
+            'reason': str,
+            'source': 'deepseek' | 'local_fuzzy' | '',
+            'prompt_text': str,   # DeepSeek 时有效,调用方写 ai_match 事件用
+            'raw_response': str,  # DeepSeek 时有效
+        }
+    """
+    # 1. OCR 文本为空 → 跳过所有引擎,不打徽章(语义:没证据 ≠ 不符)
+    if not (ocr_text or '').strip():
+        return {'status': '', 'score': None, 'reason': '', 'source': '', 'prompt_text': '', 'raw_response': ''}
+
+    # 2. 优先调 DeepSeek(联网时)
+    try:
+        ds = get_ocr_engine('deepseek')
+        if getattr(ds, 'API_KEY', ''):  # 有 key 才联网
+            res = ds.compare_single_record(ocr_text, record)
+            ms = (res.get('match_status') or '').lower()
+            if ms in ('green', 'yellow', 'red'):
+                return {'status': ms, 'score': res.get('score'),
+                        'reason': res.get('reason') or '', 'source': 'deepseek',
+                        'prompt_text': res.get('prompt_text', ''),
+                        'raw_response': res.get('raw_response', '')}
+            # ms 不是合法状态:fallback 到本地(LLM 异常返回)
+            logger.warning('DeepSeek compare_single_record 返回非合法状态: %r, 改走本地', ms)
+        else:
+            logger.info('DeepSeek API key 未配置, 行级图上传走本地 RapidFuzz')
+    except Exception as e:
+        # 联网但调用失败(超时/网络/配额):fallback 本地,并标本地补
+        logger.warning('DeepSeek 单 record 比对失败, fall back 本地: %s', e)
+
+    # 3. fallback:本地 RapidFuzz
+    status, score, reason = _run_label_match(filepath, record, ocr_text=ocr_text)
+    return {'status': status, 'score': score, 'reason': reason, 'source': 'local_fuzzy',
+            'prompt_text': '', 'raw_response': ''}
 
 
 def _as_bool(value, default=True):
@@ -116,6 +270,11 @@ def shipping_records():
     _status_rank = {'red': 1, 'yellow': 2, 'green': 3}
     record_worst_status_map = {}  # record_id -> 'green'/'yellow'/'red'(行级徽章,取最差)
     record_worst_reason_map = {}  # record_id -> 该 record 最差档图对应的 reason(给 hover 用)
+    # 2026-07-30:行级徽章也按来源分两套符号(本地 ✓/⚠/✗ + 云端 ⊛/◇/◆,共 6 种)。
+    # 记最差档对应的来源——同档位时优先保留更早出现的那张图的来源(不重要,只要不空)。
+    record_worst_source_map = {}  # record_id -> 'local_fuzzy' | 'deepseek'
+    # 2026-08-03:行级是否有「已人工确认」的图 —— 用于首屏把行级 match_status 图标渲染成 👤
+    record_human_verified_map = {}
     for grp in groups:
         all_record_imgs = []
         for rec in grp.get('records', []):
@@ -123,6 +282,9 @@ def shipping_records():
             all_record_imgs.extend(record_imgs)
             # 2026-07-27:行级有图 → 模板渲染 🖼️ 按钮加红框 has-image class(刷新不丢)
             rec['has_image'] = bool(record_imgs)
+            # 2026-08-03:该行任意一张图已人工确认 → 行级图标渲染 👤
+            if any(img.get('human_verified') for img in record_imgs):
+                record_human_verified_map[rec['id']] = True
             for img in record_imgs:
                 status = img.get('match_status') or ''
                 if not status:
@@ -135,6 +297,7 @@ def shipping_records():
                 if cur is None or _status_rank.get(status, 0) < _status_rank.get(cur, 0):
                     record_worst_status_map[rec['id']] = status
                     record_worst_reason_map[rec['id']] = img.get('reason') or ''
+                    record_worst_source_map[rec['id']] = img.get('match_source') or 'local_fuzzy'
         for img in all_record_imgs:
             target = ai_images if img.get('source') == 'ai' else order_non_ai
             target.setdefault(grp['id'], []).append(img)
@@ -231,6 +394,8 @@ def shipping_records():
         ai_images=ai_images,
         record_worst_status_map=record_worst_status_map,
         record_worst_reason_map=record_worst_reason_map,
+        record_worst_source_map=record_worst_source_map,   # 2026-07-30 新增:行级徽章按来源分 6 种
+        record_human_verified_map=record_human_verified_map,  # 2026-08-03:行级已人工确认 → 渲染 👤
         record_by_pk=record_by_pk,   # 2026-07-24 新增:图片叠加文字用的 record 查表
         page_title='出货记录',
         today=today,
@@ -652,6 +817,171 @@ def api_v1_shipping_orders_manual_verify_image(image_id):
     return jsonify({'success': True, 'image_id': image_id, 'human_verified': verified})
 
 
+@bp.route('/api/v1/shipping-orders/images/<int:image_id>/fuzzy-match', methods=['POST'])
+def api_v1_shipping_orders_fuzzy_match_image(image_id):
+    """对已上传图片重新运行本地 RapidFuzz 模糊匹配 → 返回新的判别结果。
+    
+    流程: 取图→取关联商品行→取OCR文字→运行 match_label_to_row→更新 shipping_images→返回
+    """
+    img = ShippingImage.get_by_id(image_id)
+    if not img:
+        return jsonify({'success': False, 'error': '图片不存在'}), 404
+    order = ShippingOrder.get_by_id(img['order_pk'])
+    if order and order.get('is_locked'):
+        return jsonify({'success': False, 'error': '订单已锁定，无法操作'}), 403
+    record_pk = img.get('record_pk')
+    if not record_pk:
+        return jsonify({'success': False, 'error': '该图片未关联商品行'}), 400
+    record = ShippingRecord.get_by_id(record_pk)
+    if not record:
+        return jsonify({'success': False, 'error': '关联商品行不存在'}), 404
+
+    # 1) 取 OCR 文字：优先从 ocr_match_event 历史取，没有则重跑 PaddleOCR
+    ocr_text = ''
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(
+            'SELECT ocr_text FROM ocr_match_event '
+            'WHERE image_id = ? AND event_type = ? AND ocr_text IS NOT NULL '
+            'ORDER BY id DESC LIMIT 1',
+            (image_id, 'record_ocr'))
+        row = cur.fetchone()
+        conn.close()
+        if row:
+            ocr_text = row['ocr_text'] or ''
+    except Exception:
+        pass
+    if not ocr_text.strip():
+        try:
+            with open(img['file_path'], 'rb') as _f:
+                ocr_text = get_ocr_engine('paddleocr').extract_text(_f.read()) or ''
+        except Exception:
+            current_app.logger.exception('重跑 PaddleOCR 失败(image_id=%s)', image_id)
+    if ocr_text.strip():
+        bg = detect_bg_color(img['file_path'])
+        if bg:
+            ocr_text = ocr_text + '\n[标签背景: ' + ('黑色' if bg == 'black' else '白色') + ']'
+    else:
+        return jsonify({'success': False, 'error': 'OCR 无文字，无法匹配'}), 400
+
+    # 2) 运行本地模糊匹配
+    status, score, reason = match_label_to_row(
+        ocr_text, record.get('product_name', ''), record.get('specification', ''))
+
+    # 3) 更新图片匹配结果
+    ShippingImage.set_match(image_id, status, score or 0, reason, source='local_fuzzy')
+
+    return jsonify({
+        'success': True,
+        'image_id': image_id,
+        'match_status': status,
+        'match_score': score,
+        'reason': reason,
+        'match_source': 'local_fuzzy',
+    })
+
+
+@bp.route('/api/v1/shipping-orders/images/<int:image_id>/ai-judge', methods=['POST'])
+def api_v1_shipping_orders_ai_judge_image(image_id):
+    """对已上传图片重新运行 DeepSeek AI 比对 → 返回新的判别结果。
+    
+    流程: 取图→取关联商品行→取OCR文字→调用 DeepSeek compare_single_record→更新 shipping_images→返回
+    """
+    img = ShippingImage.get_by_id(image_id)
+    if not img:
+        return jsonify({'success': False, 'error': '图片不存在'}), 404
+    order = ShippingOrder.get_by_id(img['order_pk'])
+    if order and order.get('is_locked'):
+        return jsonify({'success': False, 'error': '订单已锁定，无法操作'}), 403
+    record_pk = img.get('record_pk')
+    if not record_pk:
+        return jsonify({'success': False, 'error': '该图片未关联商品行'}), 400
+    record = ShippingRecord.get_by_id(record_pk)
+    if not record:
+        return jsonify({'success': False, 'error': '关联商品行不存在'}), 404
+
+    # 1) 取 OCR 文字
+    ocr_text = ''
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(
+            'SELECT ocr_text FROM ocr_match_event '
+            'WHERE image_id = ? AND event_type = ? AND ocr_text IS NOT NULL '
+            'ORDER BY id DESC LIMIT 1',
+            (image_id, 'record_ocr'))
+        row = cur.fetchone()
+        conn.close()
+        if row:
+            ocr_text = row['ocr_text'] or ''
+    except Exception:
+        pass
+    if not ocr_text.strip():
+        try:
+            with open(img['file_path'], 'rb') as _f:
+                ocr_text = get_ocr_engine('paddleocr').extract_text(_f.read()) or ''
+        except Exception:
+            current_app.logger.exception('重跑 PaddleOCR 失败(image_id=%s)', image_id)
+    if ocr_text.strip():
+        bg = detect_bg_color(img['file_path'])
+        if bg:
+            ocr_text = ocr_text + '\n[标签背景: ' + ('黑色' if bg == 'black' else '白色') + ']'
+    else:
+        return jsonify({'success': False, 'error': 'OCR 无文字，无法判断'}), 400
+
+    # 2) 调用 DeepSeek
+    try:
+        ds = get_ocr_engine('deepseek')
+        if not getattr(ds, 'API_KEY', ''):
+            return jsonify({'success': False, 'error': 'DeepSeek API Key 未配置'}), 503
+        res = ds.compare_single_record(ocr_text, record)
+        ms = (res.get('match_status') or '').lower()
+        if ms not in ('green', 'yellow', 'red'):
+            return jsonify({'success': False, 'error': f'DeepSeek 返回异常: {ms}'}), 502
+        status, score, reason = ms, res.get('match_score'), res.get('reason') or ''
+        source_label = 'deepseek'
+        prompt_text = res.get('prompt_text', '')
+        raw_response = res.get('raw_response', '')
+    except Exception as e:
+        current_app.logger.exception('DeepSeek AI 判断失败(image_id=%s)', image_id)
+        return jsonify({'success': False, 'error': f'AI 判断失败: {e}'}), 502
+
+    # 3) 更新图片匹配结果
+    ShippingImage.set_match(image_id, status, score or 0, reason, source=source_label)
+
+    # 4) 持久化 AI 判断事件(prompt + 结果),供前端「详情」按钮审计
+    try:
+        OcrMatchEvent.create(
+            'ai_match',
+            record_id=record_pk,
+            order_id=img['order_pk'],
+            image_id=image_id,
+            ocr_text=ocr_text,
+            ocr_engine='paddleocr',
+            prompt_payload=prompt_text,
+            ai_engine='deepseek',
+            ai_match_status=status,
+            ai_match_score=score,
+            ai_match_reason=reason or None,
+            ai_raw_response=raw_response,
+            prompt_version=OCR_MATCH_PROMPT_VERSION,
+            product_name=record.get('product_name', ''),
+            specification=record.get('specification', ''),
+        )
+    except Exception:
+        current_app.logger.exception('ai_match 事件写库失败(不阻断)')
+
+    return jsonify({
+        'success': True,
+        'image_id': image_id,
+        'match_status': status,
+        'match_score': score,
+        'reason': reason,
+        'match_source': source_label,
+    })
+
+
 # ── 商品行级图片(挂在 record 上,合并订单级共享图展示) ──
 def _save_one_uploaded_file(file, upload_dir):
     """保存一个上传文件到 upload_dir,返回 (filepath, original_name)。失败抛 ValueError。"""
@@ -720,44 +1050,15 @@ def api_v1_shipping_orders_record_upload_images(record_id):
             rel_path = os.path.join(month_str, os.path.basename(filepath)).replace('\\', '/')
             # 取刚插入的 sort_order
             img = ShippingImage.get_by_id(image_id)
-            # 提取 OCR 文本(用于事件记录)—— 直接调 paddleocr engine,不去碰 _run_label_match 的现有契约
-            ocr_text = ''
-            try:
-                with open(filepath, 'rb') as _f:
-                    ocr_text = get_ocr_engine('paddleocr').extract_text(_f.read()) or ''
-            except Exception:
-                current_app.logger.exception('记录 OCR 文本失败(不阻断): %s', filepath)
-            status, score, reason = _run_label_match(filepath, record)
-            if status:
-                ShippingImage.set_match(image_id, status, score, reason)
-            # 新增:append-only record_ocr 事件(写入失败不阻断主流程)
-            try:
-                OcrMatchEvent.create(
-                    'record_ocr', record_id=record_id, order_id=record['order_pk'], image_id=image_id,
-                    ocr_text=ocr_text,
-                    ocr_engine='paddleocr',
-                    ai_engine='local_fuzzy',
-                    ai_match_status=status or None,
-                    ai_match_score=score,
-                    ai_match_reason=reason or None,
-                    product_name=record.get('product_name', ''),
-                    specification=record.get('specification', ''),
-                )
-            except Exception:
-                current_app.logger.exception('record_ocr 事件写库失败(不阻断)')
-            saved.append({
-                'image_id': image_id,
-                'image': rel_path,
-                'original_name': original_name,
-                'sort_order': img['sort_order'],
-                'match_status': status or None,
-                'match_score': score,
-                'reason': reason or '',
-            })
+            # 落盘即返回:真正的 OCR + AI 比对放到后台线程异步跑(见 _process_record_image_async)
+            saved.append(_spawn_record_image_processing(
+                image_id, filepath, record, record['order_pk'], record_id,
+                rel_path, original_name, img['sort_order'],
+            ))
         for s in saved:
             AuditLog.log('upload_image', 'shipping_order', record['order_pk'],
                          detail={'filename': s['image'], 'source': source, 'record_id': record_id})
-        return jsonify({'success': True, 'images': saved, 'count': len(saved)}), 201
+        return jsonify({'success': True, 'images': saved, 'count': len(saved), 'async': True}), 201
 
     # 单文件 base64(JSON)
     if request.is_json:
@@ -776,41 +1077,46 @@ def api_v1_shipping_orders_record_upload_images(record_id):
         )
         rel_path = os.path.join(month_str, os.path.basename(filepath)).replace('\\', '/')
         img = ShippingImage.get_by_id(image_id)
-        # 跑 OCR 拿文本(用于事件记录) + 跑匹配(供徽章)
-        ocr_text = ''
-        try:
-            with open(filepath, 'rb') as _f:
-                ocr_text = get_ocr_engine('paddleocr').extract_text(_f.read()) or ''
-        except Exception:
-            current_app.logger.exception('记录 OCR 文本失败(不阻断): %s', filepath)
-        status, score, reason = _run_label_match(filepath, record)
-        if status:
-            ShippingImage.set_match(image_id, status, score, reason)
-        # 新增:append-only record_ocr 事件(写入失败不阻断主流程)
-        try:
-            OcrMatchEvent.create(
-                'record_ocr', record_id=record_id, order_id=record['order_pk'], image_id=image_id,
-                ocr_text=ocr_text,
-                ocr_engine='paddleocr',
-                ai_engine='local_fuzzy',
-                ai_match_status=status or None,
-                ai_match_score=score,
-                ai_match_reason=reason or None,
-                product_name=record.get('product_name', ''),
-                specification=record.get('specification', ''),
-            )
-        except Exception:
-            current_app.logger.exception('record_ocr 事件写库失败(不阻断)')
+        # 落盘即返回:OCR + AI 比对放到后台线程异步跑
+        saved = [_spawn_record_image_processing(
+            image_id, filepath, record, record['order_pk'], record_id,
+            rel_path, original_name, img['sort_order'],
+        )]
         AuditLog.log('upload_image', 'shipping_order', record['order_pk'],
                      detail={'filename': rel_path, 'source': source, 'record_id': record_id})
-        return jsonify({'success': True, 'images': [{
-            'image_id': image_id, 'image': rel_path,
-            'original_name': original_name, 'sort_order': img['sort_order'],
-            'match_status': status or None, 'match_score': score,
-            'reason': reason or '',
-        }], 'count': 1}), 201
+        return jsonify({'success': True, 'images': saved, 'count': 1, 'async': True}), 201
 
     return jsonify({'success': False, 'error': '未提供图片'}), 400
+
+
+@bp.route('/api/v1/shipping-orders/images/<int:image_id>/match-status', methods=['GET'])
+def api_v1_shipping_orders_image_match_status(image_id):
+    """查询行级图 OCR+AI 异步处理的进度。
+
+    前端上传后立即拿到 processing:true,随后轮询本端点:
+      - processing:true  → 仍在后台跑
+      - processing:false → 已结束,image 里带最新 match_status / match_source / bg_color
+    超时保护:任务登记超过 150s 仍未标记完成(线程异常/重启),直接回落到 DB 真实状态。
+    """
+    job = _ASYNC_JOBS.get(image_id)
+    if job and job.get('state') == 'processing' and (time.time() - job.get('started', 0)) < 150:
+        return jsonify({'success': True, 'processing': True})
+    img = ShippingImage.get_by_id(image_id)
+    if not img:
+        return jsonify({'success': False, 'error': '图片不存在'}), 404
+    return jsonify({
+        'success': True,
+        'processing': False,
+        'image': {
+            'image_id': image_id,
+            'match_status': img.get('match_status') or None,
+            'match_score': img.get('match_score'),
+            'reason': img.get('reason') or '',
+            'match_source': img.get('match_source') or 'local_fuzzy',
+            'bg_color': img.get('bg_color') or None,
+            'human_verified': bool(img.get('human_verified')),
+        },
+    })
 
 
 @bp.route('/api/v1/shipping-orders/records/<int:record_id>/images-area', methods=['GET'])
@@ -1135,18 +1441,106 @@ def api_v1_shipping_orders_generate_prompt_suggestion(image_id):
     cls = classify_record(product_name=(record or {}).get('product_name', ''),
                           specification=(record or {}).get('specification', ''))
     suggestion_text = _build_suggestion_text(img, record)
+    # 查同品类/同规格已有的自定义提示词
+    pn = (record or {}).get('product_name', '')
+    spec = (record or {}).get('specification', '')
+    cc = cls['category_code'] if cls else None
+    existing = CategoryPrompt.list_for_record(category_code=cc, product_name=pn, specification=spec)
     return jsonify({
         'success': True,
         'suggestion': {
             'prompt_text': suggestion_text,
-            'scope': 'category',  # 前端可切到 'spec'
-            'category_code': cls['category_code'] if cls else None,
-            'product_name_keyword': (record or {}).get('product_name', '') or None,
+            'scope': 'category',
+            'category_code': cc,
+            'product_name_keyword': pn or None,
             'spec_pattern': '',
-            'source_event_id': img.get('_source_event_id'),  # 上一个 human-verify 事件 id(可选)
+            'source_event_id': img.get('_source_event_id'),
             'source_ocr_text': (img.get('ocr_text') or '')[:200],
             'source_ai_status': img.get('match_status') or '',
             'source_human_status': 'green',
+            'existing_prompts': existing,  # {category_prompts: [...], spec_prompts: [...]}
+        }
+    })
+
+
+@bp.route('/api/v1/shipping-orders/images/<int:image_id>/ocr-detail', methods=['GET'])
+def api_v1_shipping_orders_image_ocr_detail(image_id):
+    """图片 AI 比对详情:返回 OCR 原文 + 提示词 + 推理结果(给前端「详情」按钮用)。
+
+    Returns:
+      {
+        'success': True,
+        'detail': {
+          'image_id', 'record_id', 'order_id',
+          'product_name', 'specification',
+          'match_status', 'match_reason',
+          'human_verified',
+          'ocr':  {ocr_text, ocr_engine, ai_match_status, ai_match_reason, created_at} | None,
+          'ai':   {prompt_payload, ai_raw_response, ai_match_reason, ai_match_status,
+                    ai_engine, prompt_version, created_at} | None,
+          'human':{human_status, human_reason, operator_name, created_at} | None,
+        }
+      }
+
+    - ocr 段取自最新 record_ocr 事件(同 image_id);
+    - ai 段取自最新 ai_match 事件(同 record_id, 跨 image 共享);DeepSeek 调用过才有
+    - human 段取自最新 human_verify 事件(同 image_id);有人点过才有
+    """
+    img = ShippingImage.get_by_id(image_id)
+    if not img:
+        return jsonify({'success': False, 'error': '图片不存在'}), 404
+    record = None
+    if img.get('record_pk'):
+        record = ShippingRecord.get_by_id(img['record_pk'])
+
+    def _latest_event(event_type: str, image_id_arg=None, record_id_arg=None):
+        """取某类型下对应 image/record 的最新事件(没事件返回 None)。"""
+        from models import OcrMatchEvent
+        if image_id_arg is not None:
+            return OcrMatchEvent.get_latest_by_image(image_id_arg, event_type=event_type)
+        if record_id_arg is not None:
+            return OcrMatchEvent.get_latest_by_record(record_id_arg, event_type=event_type)
+        return None
+
+    ocr_event = _latest_event('record_ocr', image_id_arg=image_id)
+    ai_event = _latest_event('ai_match', record_id_arg=img.get('record_pk'))
+    human_event = _latest_event('human_verify', image_id_arg=image_id)
+
+    def _staff_name(staff_id):
+        if not staff_id:
+            return None
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute('SELECT name FROM staff WHERE id=?', (staff_id,))
+        row = cur.fetchone()
+        conn.close()
+        return row['name'] if row else None
+
+    return jsonify({
+        'success': True,
+        'detail': {
+            'image_id': image_id,
+            'record_id': img.get('record_pk'),
+            'order_id': img.get('order_pk'),
+            'product_name': (record or {}).get('product_name', '') or '',
+            'specification': (record or {}).get('specification', '') or '',
+            'match_status': img.get('match_status') or '',
+            'match_reason': img.get('reason') or '',
+            'human_verified': bool(img.get('human_verified')),
+            # 2026-07-30 UX 一致性:与 refreshRowMatchBadge 升级逻辑对齐
+            #   - yellow/red + human_verified=1 → green (人工覆盖)
+            #   - 其他情况 → 透传 match_status
+            'effective_match_status': (
+                'green'
+                if img.get('human_verified') and img.get('match_status') in ('yellow', 'red')
+                else (img.get('match_status') or '')
+            ),
+            'ocr': (dict(ocr_event) if ocr_event else None),
+            'ai': (dict(ai_event) if ai_event else None),
+            'human': ({
+                **dict(human_event),
+                'operator_name': _staff_name(human_event.get('human_verified_by')),
+            } if human_event else None),
         }
     })
 

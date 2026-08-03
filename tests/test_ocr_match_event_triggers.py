@@ -141,7 +141,10 @@ class RecordOcrTriggerTests(_Base):
 
     @mock.patch('blueprints.shipping.get_ocr_engine')
     def test_record_ocr_event_on_base64_upload(self, mock_factory):
-        """base64 行级上传(JSON)成功后,同样写一条 record_ocr 事件。"""
+        """base64 行级上传(JSON)成功后,同样写一条 record_ocr 事件。
+
+        2026-07-31 改造:OCR+AI 比对改成后台线程异步跑,等待 _ASYNC_JOBS[iid] 完成。
+        """
         fake_paddle = mock.MagicMock()
         fake_paddle.extract_text.return_value = ''
         mock_factory.side_effect = lambda name: fake_paddle if name == 'paddleocr' else mock.DEFAULT
@@ -155,6 +158,14 @@ class RecordOcrTriggerTests(_Base):
             json={'image': data_url},
         )
         self.assertEqual(resp.status_code, 201, resp.get_json())
+
+        # 等待后台线程完成
+        from blueprints.shipping import _ASYNC_JOBS
+        import time
+        iid = resp.get_json()['images'][0]['image_id']
+        deadline = time.time() + 5
+        while time.time() < deadline and _ASYNC_JOBS.get(iid, {}).get('state') == 'processing':
+            time.sleep(0.05)
 
         events = OcrMatchEvent.get_by_record(self.rid)
         self.assertEqual(len(events), 1)

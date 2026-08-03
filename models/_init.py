@@ -205,6 +205,23 @@ def init_db():
     except Exception:
         pass  # 列已存在
 
+    # 迁移：loading_order_images 加 match_status/match_score/reason/human_verified
+    for tbl in ('loading_order_images',):
+        for col, default in [('match_status', "TEXT DEFAULT NULL"),
+                             ('match_score', 'REAL DEFAULT NULL')]:
+            try:
+                cursor.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} {default}")
+            except Exception:
+                pass
+    try:
+        cursor.execute("ALTER TABLE loading_order_images ADD COLUMN reason TEXT DEFAULT NULL")
+    except Exception:
+        pass
+    try:
+        cursor.execute("ALTER TABLE loading_order_images ADD COLUMN human_verified INTEGER DEFAULT 0")
+    except Exception:
+        pass
+
     # 迁移(2026-07-27):出货 OCR 比对事件 append-only 日志,供未来提示词优化用
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS ocr_match_event (
@@ -249,9 +266,63 @@ def init_db():
             match_score REAL DEFAULT NULL,
             reason TEXT DEFAULT NULL,
             human_verified INTEGER DEFAULT 0,
+            match_source TEXT DEFAULT NULL,        -- 'local_fuzzy' | 'deepseek' | NULL(老记录)
+            bg_color TEXT DEFAULT NULL,             -- 自动识别的背景色 'black'|'white'|NULL
             FOREIGN KEY (order_pk) REFERENCES shipping_orders(id)
         )
     ''')
+    # 2026-07-30: 老表增量加 match_source 列(若已存在则 skip)
+    for tbl in ('shipping_images', 'loading_order_images'):
+        try:
+            cursor.execute(f"ALTER TABLE {tbl} ADD COLUMN match_source TEXT DEFAULT NULL")
+        except Exception:
+            pass
+    # 2026-08-02: 增量加 bg_color 列(自动检测背景色)
+    for tbl in ('shipping_images', 'loading_order_images'):
+        try:
+            cursor.execute(f"ALTER TABLE {tbl} ADD COLUMN bg_color TEXT DEFAULT NULL")
+        except Exception:
+            pass
+
+    # ── 2026-08-02: 入库图片补齐 record-level 匹配能力 ──
+    # 补齐之前遗漏的 source 列(InboundImage.create 已经写了 source,但建表未声明)
+    try:
+        cursor.execute("ALTER TABLE inbound_images ADD COLUMN source TEXT DEFAULT 'upload'")
+    except Exception:
+        pass
+    for col, default in [('record_pk', 'INTEGER DEFAULT NULL'),
+                         ('sort_order', 'INTEGER NOT NULL DEFAULT 0')]:
+        try:
+            cursor.execute(f"ALTER TABLE inbound_images ADD COLUMN {col} {default}")
+        except Exception:
+            pass
+    for col, default in [('match_status', "TEXT DEFAULT NULL"),
+                         ('match_score', 'REAL DEFAULT NULL')]:
+        try:
+            cursor.execute(f"ALTER TABLE inbound_images ADD COLUMN {col} {default}")
+        except Exception:
+            pass
+    try:
+        cursor.execute("ALTER TABLE inbound_images ADD COLUMN reason TEXT DEFAULT NULL")
+    except Exception:
+        pass
+    try:
+        cursor.execute("ALTER TABLE inbound_images ADD COLUMN human_verified INTEGER DEFAULT 0")
+    except Exception:
+        pass
+    try:
+        cursor.execute("ALTER TABLE inbound_images ADD COLUMN match_source TEXT DEFAULT NULL")
+    except Exception:
+        pass
+    try:
+        cursor.execute("ALTER TABLE inbound_images ADD COLUMN bg_color TEXT DEFAULT NULL")
+    except Exception:
+        pass
+    # 入库图片 record_pk 索引
+    try:
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_inbound_images_record_pk ON inbound_images(record_pk)')
+    except Exception:
+        pass
 
     # ── inbound_images（入库订单图片） ──
     cursor.execute('''

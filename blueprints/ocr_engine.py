@@ -832,17 +832,96 @@ class DeepSeekEngine(BaseOCREngine):
             prompt_text = base_prompt + '\n\n════════════════════════════════════════\n【自适应提示词(同品类 / 同规格历史人工案例)】\n════════════════════════════════════════\n' + layer_text
         else:
             prompt_text = base_prompt
-        client = openai.OpenAI(api_key=self.API_KEY, base_url=self.BASE_URL)
-        response = client.chat.completions.create(
-            model=self.MODEL,
-            messages=[{'role': 'user', 'content': prompt_text}],
-            max_tokens=self.MAX_TOKENS, timeout=self.TIMEOUT)
-        raw = response.choices[0].message.content.strip()
+        verdicts = self._call_api_with_prompt(prompt_text, multi=True)
+        return {'verdicts': verdicts, 'prompt': prompt_text}
+
+    def compare_single_record(self, ocr_text, record):
+        """2026-07-30 新增:对单条 record 比对 OCR 文字,供行级图上传及 AI判别按钮调用。
+
+        与 compare_rows 区别:prompt 只含 1 行(单 record),省 token、省时间。
+        2026-07-31 改造:返回 prompt_text + raw_response 供前端「详情」按钮审计。
+
+        返回 {'match_status', 'match_score', 'reason', 'prompt_text', 'raw_response'}
+
+        调用方负责异常处理 — 失败应 fall back 到本地 RapidFuzz。
+        """
+        row_json = json.dumps(
+            {'record_id': record.get('id', 0), 'product_name': record.get('product_name', ''),
+             'specification': record.get('specification', '')},
+            ensure_ascii=False)
+        prompt_text = (self.COMPARE_PROMPT + '\n【OCR文字】\n' + ocr_text +
+                       '\n【明细行】\n' + row_json)
+        raw = ''
+        try:
+            result = self._call_api_with_prompt(prompt_text, multi=False)
+            if isinstance(result, list):
+                result = result[0] if result else {}
+            # 尝试获取 raw_response(可能是 JSON 字符串,也可能不是)
+            raw = json.dumps(result, ensure_ascii=False)
+        except Exception:
+            # _call_api_with_prompt 可能抛出异常(raw 保持为空)
+            raise
+        return {
+            'match_status': (result.get('match_status') or '').lower(),
+            'match_score': 95.0 if result.get('match_status') == 'green' else
+                           70.0 if result.get('match_status') == 'yellow' else
+                           30.0 if result.get('match_status') == 'red' else None,
+            'reason': result.get('reason') or '',
+            'prompt_text': prompt_text,
+            'raw_response': raw,
+        }
+
+    def _call_api_with_prompt(self, prompt_text, multi: bool):
+        """共用:对 prompt 调 DeepSeek,清洗 markdown,解析 JSON,统一返回格式。
+
+        2026-07-30 改造:改用 httpx 直接打 — 避开 openai 库的 X-Stainless-* 头
+        (这些 SDK 标识头会让 DeepSeek governor 模块误判为异常流量,返回
+        'Authentication Fails (governor)'。curl 直接打 200,openai 库 401)。
+
+        multi=True  → expect list[{record_id, match_status, reason}]
+        multi=False → expect {match_status, reason} 或 [{...}](单 record 容错)
+        """
+        import httpx
+        url = self.BASE_URL.rstrip('/') + '/chat/completions'
+        headers = {
+            'Authorization': 'Bearer ' + self.API_KEY,
+            'Content-Type': 'application/json',
+            # 不带 X-Stainless-* / User-Agent(裸 httpx 默认只有 python-httpx)
+        }
+        body = {
+            'model': self.MODEL,
+            'messages': [{'role': 'user', 'content': prompt_text}],
+            'max_tokens': self.MAX_TOKENS,
+        }
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as cli:
+                resp = cli.post(url, headers=headers, json=body)
+                resp.raise_for_status()
+                data = resp.json()
+        except httpx.HTTPStatusError as e:
+            # 401/403/429 等 SDK 风格的异常(确保 _classify_and_match_image 的 try/except 能 fallback)
+            raise openai.APIStatusError(
+                f'DeepSeek 服务异常({e.response.status_code}): {e.response.text[:200]}',
+                request=e.request, response=e.response,
+            )
+        except httpx.HTTPError as e:
+            # 网络/连接问题
+            raise openai.APIConnectionError(
+                f'无法连接 DeepSeek 服务: {type(e).__name__}: {e}') from e
+        raw = ''
+        try:
+            raw = data['choices'][0]['message']['content'].strip()
+        except (KeyError, IndexError, TypeError) as e:
+            raise openai.APIError(f'DeepSeek 响应结构异常: {data}') from e
         raw = re.sub(r'^\s*```[a-zA-Z]*\s*\n?', '', raw)
         raw = re.sub(r'\n?\s*```\s*$', '', raw).strip()
-        data = json.loads(raw)
-        verdicts = data if isinstance(data, list) else data.get('results', [])
-        return {'verdicts': verdicts, 'prompt': prompt_text}
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as e:
+            raise openai.APIError(f'DeepSeek 返回非 JSON: {raw[:200]}') from e
+        if multi:
+            return parsed if isinstance(parsed, list) else parsed.get('results', [])
+        return parsed
 
     def __init__(self):
         self._ocr_engine = PaddleOCREngine()

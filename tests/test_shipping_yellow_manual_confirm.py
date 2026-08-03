@@ -21,6 +21,8 @@ import models._db as _db
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SHIPPING_TPL = REPO_ROOT / 'templates' / 'shipping-records.html'
+# 被 shipping-records.html include 进来的脚本文件(里面含 JS appendOrderImageArea 等)
+SHIPPING_INCLUDES = SHIPPING_TPL.parent / '_record_image_script.html'
 
 
 class TempDbBase(unittest.TestCase):
@@ -64,6 +66,11 @@ def _make_yellow_image(suffix='.png'):
 
 # ── 1. 静态防回归（模板） ──────────────────────────────────────────────────
 class TemplateGuardTests(unittest.TestCase):
+    def setUp(self):
+        # 2026-07-31:appendOrderImageArea 等 JS 守卫在 _record_image_script.html
+        # (被 shipping-records.html include),合并两文件一起搜
+        self.src = SHIPPING_TPL.read_text(encoding='utf-8') + '\n' + SHIPPING_INCLUDES.read_text(encoding='utf-8')
+
     def test_server_template_renders_button_for_yellow(self):
         """服务端 img-meta 块:yellow 也要渲染 .manual-confirm-btn / .manual-verified-marker。
 
@@ -71,7 +78,7 @@ class TemplateGuardTests(unittest.TestCase):
         选「守卫块内含 manual-confirm-btn」的那个（最外层那个）；
         断言守卫条件同时含 red 与 yellow。
         """
-        src = SHIPPING_TPL.read_text(encoding='utf-8')
+        src = self.src  # 合并 shipping-records.html + _record_image_script.html(由 setUp 准备)
         body_start = src.index('</style>')
         body_src = src[body_start:]
 
@@ -107,8 +114,13 @@ class TemplateGuardTests(unittest.TestCase):
         src = SHIPPING_TPL.read_text(encoding='utf-8')
         # 找 (status === 'red' && ...) 守卫 → 改后应当同时含 'yellow'
         m = re.search(
-            r"if\s*\(\s*\(?\s*status\s*===\s*'red'\s*\|\|\s*status\s*===\s*'yellow'\s*\)?\s*&&\s*!img\.human_verified\s*\).*?\}\s*else\s*if\s*\(",
+            r"if\s*\(\s*\(?\s*status\s*===\s*'red'\s*\|\|\s*status\s*===\s*'yellow'\s*\)?\s*&&\s*!?(?:img\.)?human_verified\s*\).*?\}\s*else\s*if\s*\(",
             src, re.S)
+        # 备选:也可能用 _hv / !_hv(局部变量)
+        if not m:
+            m = re.search(
+                r"if\s*\(\s*\(?\s*status\s*===\s*'red'\s*\|\|\s*status\s*===\s*'yellow'\s*\)?\s*&&\s*!?_hv\s*\).*?\}\s*else\s*if\s*\(",
+                src, re.S)
         self.assertIsNotNone(m, 'JS 守卫 if ((status === "red" || status === "yellow") && ...) 应存在')
         chunk = m.group(0)
         self.assertIn("'yellow'", chunk, 'JS 守卫应处理 yellow（黄牌也要人工确认）')
@@ -128,8 +140,7 @@ class RenderTests(TempDbBase):
         html = res.get_data(as_text=True)
         # 找该图所在的 img-meta 块（用 data-image-id 定位）
         m = re.search(
-            r'<div class="img-meta">\s*'
-            r'<span class="match-badge" data-match-status="yellow".*?'
+            r'<span class="match-badge[^"]*" data-match-status="yellow".*?'
             r'<button class="manual-confirm-btn[^"]*" data-image-id="' + str(iid) + r'"',
             html, re.S)
         self.assertIsNotNone(m, '黄牌图 img-meta 必须含 .manual-confirm-btn')
@@ -173,7 +184,7 @@ class RenderTests(TempDbBase):
         html = res.get_data(as_text=True)
         m = re.search(
             r'<div class="img-meta">\s*'
-            r'<span class="match-badge" data-match-status="green".*?'
+            r'<span class="match-badge[^"]*" data-match-status="green".*?'
             r'<button class="manual-confirm-btn[^"]*" data-image-id="' + str(iid) + r'"',
             html, re.S)
         self.assertIsNone(m, '绿牌图不应渲染按钮（未触发任何警告无需确认）')

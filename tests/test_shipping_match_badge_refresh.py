@@ -12,13 +12,15 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SHIPPING_TPL = REPO_ROOT / 'templates' / 'shipping-records.html'
+SHIPPING_INCLUDES = SHIPPING_TPL.parent / '_record_image_script.html'  # 被 shipping-records.html include
 
 
 class RefreshUpgradeTests(unittest.TestCase):
     """badgeHtml / refreshRowMatchBadge 的源码层断言 —— 避免 jsdom 抽取函数带来的复杂度。"""
 
     def setUp(self):
-        self.src = SHIPPING_TPL.read_text(encoding='utf-8')
+        # 合并 shipping-records.html + _record_image_script.html(被它 include 的脚本)
+        self.src = SHIPPING_TPL.read_text(encoding='utf-8') + '\n' + SHIPPING_INCLUDES.read_text(encoding='utf-8')
 
     def _extract_fn(self, name):
         """从模板 <script> 里抽函数体。"""

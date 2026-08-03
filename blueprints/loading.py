@@ -8,20 +8,69 @@ import os
 import re
 import base64
 from datetime import date, timedelta, datetime
-from flask import Blueprint, render_template, request, jsonify, current_app
+from flask import Blueprint, render_template, request, jsonify, current_app, session
 from models import (
-    LoadingOrder, LoadingOrderRecord, LoadingOrderImage, ProductUnit, PieceConversion, get_db, AuditLog
+    LoadingOrder, LoadingOrderRecord, LoadingOrderImage, ProductUnit, PieceConversion, get_db, AuditLog,
+    OcrMatchEvent,
+    classify_record, CategoryPrompt,
 )
 from blueprints._helpers import (
     get_upload_dir as get_helpers_upload_dir,
     get_ypp, calc_hint, check_remark, summarize_remarks,
     get_piece_conversion, calc_piece_quantity, check_piece_mismatch,
     validate_image_content, check_uploaded_image,
+    match_label_to_row, detect_bg_color,
 )
+from blueprints.ocr_engine import PaddleOCREngine, get_ocr_engine, OCR_MATCH_PROMPT_VERSION
+from blueprints import _helpers
+from models._db import get_db
 
 bp = Blueprint('loading', __name__)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _as_bool(value, default=True):
+    """把 JSON 里可能出现的多种"假值写法"统一成 bool。
+
+    坑:bool('false') / bool('0') 在 Python 里都是 True —— 前端只要把布尔序列化成字符串
+    (常见于 FormData、某些 fetch 封装、手写 JSON),取消操作就会被反向解读成"确认"。
+    这里显式识别字符串假值,数字 0 与 None 也算假。
+    """
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() not in ('false', '0', 'no', 'off', '')
+    return bool(value)
+
+
+def _get_upload_dir():
+    """薄包装，返回 (upload_dir, month_str)。"""
+    return get_helpers_upload_dir()
+
+
+def _build_suggestion_text(img: dict, record: dict | None) -> str:
+    """模板化生成:基于 OCR 原文 + AI/人裁决,产出可供用户编辑的"补充提示词"草稿。
+
+    不调 LLM(避免 API key 依赖),按行内变量渲染,用户可在前端编辑器再改。
+    模板自带 [yellow→green] / [red→green] 上下文 + 品名/规格/部分 OCR 关键词,作为"该案例的判决依据"。
+    """
+    ai = img.get('match_status') or '?'
+    ai_reason = img.get('reason') or ''
+    pn = (record or {}).get('product_name', '') or ''
+    sp = (record or {}).get('specification', '') or ''
+
+    # 截 OCR 原文前 200 字(避免提示词太长压垮上下文)
+    return (
+        f'[{ai}→人工确认] 商品「{pn}」规格「{sp}」OCR标签此前判 {ai},'
+        f'原因为「{ai_reason[:120]}」,但人工复核与录入明细一致。'
+        f'同类案例在后续比对中,即使 OCR 文本中只出现部分关键词(如 7P / 加面 / 厚度)'
+        f'也视为该规则命中,判 green。'
+    )
 
 
 # ── 页面 ──────────────────────────────────────────────
@@ -642,6 +691,350 @@ def api_v1_loading_orders_record_upload_images(record_id):
         }], 'count': 1}), 201
 
     return jsonify({'success': False, 'error': '未提供图片'}), 400
+
+
+@bp.route('/api/v1/loading-orders/images/<int:image_id>/manual-verify', methods=['POST'])
+def api_v1_loading_orders_manual_verify_image(image_id):
+    """人工覆盖 AI 比对结果(把红牌标记为已确认)→ 200
+
+    Body (可选): {"verified": true|false}，默认 true。
+    副作用:写 loading_order_images.human_verified + 写审计日志。
+    """
+    img = LoadingOrderImage.get_by_id(image_id)
+    if not img:
+        return jsonify({'success': False, 'error': '图片不存在'}), 404
+    order = LoadingOrder.get_by_id(img['order_pk'])
+    if order and order.get('is_locked'):
+        return jsonify({'success': False, 'error': '订单已锁定，无法操作'}), 403
+    data = request.get_json(silent=True) or {}
+    verified = _as_bool(data.get('verified'), default=True)
+
+    # 新增:append-only human_verify 事件(先读 AI 当前状态快照)
+    # 写入失败不阻断主流程 — 与 AuditLog 哲学一致
+    try:
+        ai_snapshot = LoadingOrderImage.get_by_id(image_id)
+        ai_status = ai_snapshot.get('match_status') if ai_snapshot else None
+        ai_reason = ai_snapshot.get('reason') if ai_snapshot else None
+        OcrMatchEvent.create(
+            'human_verify',
+            record_id=img.get('record_pk'),  # 行级图才有 record_pk,订单级共享图为 None
+            order_id=img['order_pk'],
+            image_id=image_id,
+            ai_match_status=ai_status,
+            ai_match_reason=ai_reason,
+            human_status='green' if verified else None,  # 取消核查不写状态
+            human_verified_by=session.get('operator_id'),
+        )
+    except Exception:
+        current_app.logger.exception('human_verify 事件写库失败(不阻断)')
+
+    LoadingOrderImage.set_human_verified(image_id, verified)
+    AuditLog.log(
+        'manual_verify_image', 'loading_order', img['order_pk'],
+        detail={'image_id': image_id, 'human_verified': 1 if verified else 0},
+    )
+    return jsonify({'success': True, 'image_id': image_id, 'human_verified': verified})
+
+
+@bp.route('/api/v1/loading-orders/images/<int:image_id>/fuzzy-match', methods=['POST'])
+def api_v1_loading_orders_fuzzy_match_image(image_id):
+    """对已上传图片重新运行本地 RapidFuzz 模糊匹配 → 返回新的判别结果。
+    
+    流程: 取图→取关联商品行→取OCR文字→运行 match_label_to_row→更新 loading_order_images→返回
+    """
+    img = LoadingOrderImage.get_by_id(image_id)
+    if not img:
+        return jsonify({'success': False, 'error': '图片不存在'}), 404
+    order = LoadingOrder.get_by_id(img['order_pk'])
+    if order and order.get('is_locked'):
+        return jsonify({'success': False, 'error': '订单已锁定，无法操作'}), 403
+    record_pk = img.get('record_pk')
+    if not record_pk:
+        return jsonify({'success': False, 'error': '该图片未关联商品行'}), 400
+    record = LoadingOrderRecord.get_by_id(record_pk)
+    if not record:
+        return jsonify({'success': False, 'error': '关联商品行不存在'}), 404
+
+    # 1) 取 OCR 文字：优先从 ocr_match_event 历史取，没有则重跑 PaddleOCR
+    ocr_text = ''
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(
+            'SELECT ocr_text FROM ocr_match_event '
+            'WHERE image_id = ? AND event_type = ? AND ocr_text IS NOT NULL '
+            'ORDER BY id DESC LIMIT 1',
+            (image_id, 'record_ocr'))
+        row = cur.fetchone()
+        conn.close()
+        if row:
+            ocr_text = row['ocr_text'] or ''
+    except Exception:
+        pass
+    if not ocr_text.strip():
+        try:
+            with open(img['file_path'], 'rb') as _f:
+                ocr_text = get_ocr_engine('paddleocr').extract_text(_f.read()) or ''
+        except Exception:
+            current_app.logger.exception('重跑 PaddleOCR 失败(image_id=%s)', image_id)
+    if ocr_text.strip():
+        bg = detect_bg_color(img['file_path'])
+        if bg:
+            ocr_text = ocr_text + '\n[标签背景: ' + ('黑色' if bg == 'black' else '白色') + ']'
+    else:
+        return jsonify({'success': False, 'error': 'OCR 无文字，无法匹配'}), 400
+
+    # 2) 运行本地模糊匹配
+    status, score, reason = match_label_to_row(
+        ocr_text, record.get('product_name', ''), record.get('specification', ''))
+
+    # 3) 更新图片匹配结果
+    LoadingOrderImage.set_match(image_id, status, score or 0, reason, source='local_fuzzy')
+
+    return jsonify({
+        'success': True,
+        'image_id': image_id,
+        'match_status': status,
+        'match_score': score,
+        'reason': reason,
+        'match_source': 'local_fuzzy',
+    })
+
+
+@bp.route('/api/v1/loading-orders/images/<int:image_id>/ai-judge', methods=['POST'])
+def api_v1_loading_orders_ai_judge_image(image_id):
+    """对已上传图片重新运行 DeepSeek AI 比对 → 返回新的判别结果。
+    
+    流程: 取图→取关联商品行→取OCR文字→调用 DeepSeek compare_single_record→更新 loading_order_images→返回
+    """
+    img = LoadingOrderImage.get_by_id(image_id)
+    if not img:
+        return jsonify({'success': False, 'error': '图片不存在'}), 404
+    order = LoadingOrder.get_by_id(img['order_pk'])
+    if order and order.get('is_locked'):
+        return jsonify({'success': False, 'error': '订单已锁定，无法操作'}), 403
+    record_pk = img.get('record_pk')
+    if not record_pk:
+        return jsonify({'success': False, 'error': '该图片未关联商品行'}), 400
+    record = LoadingOrderRecord.get_by_id(record_pk)
+    if not record:
+        return jsonify({'success': False, 'error': '关联商品行不存在'}), 404
+
+    # 1) 取 OCR 文字
+    ocr_text = ''
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(
+            'SELECT ocr_text FROM ocr_match_event '
+            'WHERE image_id = ? AND event_type = ? AND ocr_text IS NOT NULL '
+            'ORDER BY id DESC LIMIT 1',
+            (image_id, 'record_ocr'))
+        row = cur.fetchone()
+        conn.close()
+        if row:
+            ocr_text = row['ocr_text'] or ''
+    except Exception:
+        pass
+    if not ocr_text.strip():
+        try:
+            with open(img['file_path'], 'rb') as _f:
+                ocr_text = get_ocr_engine('paddleocr').extract_text(_f.read()) or ''
+        except Exception:
+            current_app.logger.exception('重跑 PaddleOCR 失败(image_id=%s)', image_id)
+    if ocr_text.strip():
+        bg = detect_bg_color(img['file_path'])
+        if bg:
+            ocr_text = ocr_text + '\n[标签背景: ' + ('黑色' if bg == 'black' else '白色') + ']'
+    else:
+        return jsonify({'success': False, 'error': 'OCR 无文字，无法判断'}), 400
+
+    # 2) 调用 DeepSeek
+    try:
+        ds = get_ocr_engine('deepseek')
+        if not getattr(ds, 'API_KEY', ''):
+            return jsonify({'success': False, 'error': 'DeepSeek API Key 未配置'}), 503
+        res = ds.compare_single_record(ocr_text, record)
+        ms = (res.get('match_status') or '').lower()
+        if ms not in ('green', 'yellow', 'red'):
+            return jsonify({'success': False, 'error': f'DeepSeek 返回异常: {ms}'}), 502
+        status, score, reason = ms, res.get('match_score'), res.get('reason') or ''
+        source_label = 'deepseek'
+        prompt_text = res.get('prompt_text', '')
+        raw_response = res.get('raw_response', '')
+    except Exception as e:
+        current_app.logger.exception('DeepSeek AI 判断失败(image_id=%s)', image_id)
+        return jsonify({'success': False, 'error': f'AI 判断失败: {e}'}), 502
+
+    # 3) 更新图片匹配结果
+    LoadingOrderImage.set_match(image_id, status, score or 0, reason, source=source_label)
+
+    # 4) 持久化 AI 判断事件(prompt + 结果),供前端「详情」按钮审计
+    try:
+        OcrMatchEvent.create(
+            'ai_match',
+            record_id=record_pk,
+            order_id=img['order_pk'],
+            image_id=image_id,
+            ocr_text=ocr_text,
+            ocr_engine='paddleocr',
+            prompt_payload=prompt_text,
+            ai_engine='deepseek',
+            ai_match_status=status,
+            ai_match_score=score,
+            ai_match_reason=reason or None,
+            ai_raw_response=raw_response,
+            prompt_version=OCR_MATCH_PROMPT_VERSION,
+            product_name=record.get('product_name', ''),
+            specification=record.get('specification', ''),
+        )
+    except Exception:
+        current_app.logger.exception('ai_match 事件写库失败(不阻断)')
+
+    return jsonify({
+        'success': True,
+        'image_id': image_id,
+        'match_status': status,
+        'match_score': score,
+        'reason': reason,
+        'match_source': source_label,
+    })
+
+
+@bp.route('/api/v1/loading-orders/images/<int:image_id>/generate-prompt-suggestion', methods=['POST'])
+def api_v1_loading_orders_generate_prompt_suggestion(image_id):
+    """生成提示词草稿:调人工确认"✓ 确认通过"后,图下方的按钮触发。
+
+    Returns:
+      {
+        'success': True,
+        'suggestion': {
+          'prompt_text': str,              # 可编辑草稿
+          'scope': 'category',             # 默认大类,前端可改成 spec
+          'category_code': str|None,
+          'product_name_keyword': str|None,
+          'spec_pattern': '',              # spec 时由用户填
+          'source_ocr_text': str,          # 摘要
+          'source_ai_status': str,
+          'source_human_status': 'green',
+        }
+      }
+    """
+    img = LoadingOrderImage.get_by_id(image_id)
+    if not img:
+        return jsonify({'success': False, 'error': '图片不存在'}), 404
+    record = None
+    if img.get('record_pk'):
+        record = LoadingOrderRecord.get_by_id(img['record_pk'])
+    if not img.get('human_verified'):
+        return jsonify({'success': False, 'error': '仅当 human_verified=1 后才能生成提示词'}), 400
+
+    # 自动分类
+    cls = classify_record(product_name=(record or {}).get('product_name', ''),
+                          specification=(record or {}).get('specification', ''))
+    suggestion_text = _build_suggestion_text(img, record)
+    # 查同品类/同规格已有的自定义提示词
+    pn = (record or {}).get('product_name', '')
+    spec = (record or {}).get('specification', '')
+    cc = cls['category_code'] if cls else None
+    existing = CategoryPrompt.list_for_record(category_code=cc, product_name=pn, specification=spec)
+    return jsonify({
+        'success': True,
+        'suggestion': {
+            'prompt_text': suggestion_text,
+            'scope': 'category',
+            'category_code': cc,
+            'product_name_keyword': pn or None,
+            'spec_pattern': '',
+            'source_event_id': img.get('_source_event_id'),
+            'source_ocr_text': (img.get('ocr_text') or '')[:200],
+            'source_ai_status': img.get('match_status') or '',
+            'source_human_status': 'green',
+            'existing_prompts': existing,  # {category_prompts: [...], spec_prompts: [...]}
+        }
+    })
+
+
+@bp.route('/api/v1/loading-orders/images/<int:image_id>/ocr-detail', methods=['GET'])
+def api_v1_loading_orders_image_ocr_detail(image_id):
+    """图片 AI 比对详情:返回 OCR 原文 + 提示词 + 推理结果(给前端「详情」按钮用)。
+
+    Returns:
+      {
+        'success': True,
+        'detail': {
+          'image_id', 'record_id', 'order_id',
+          'product_name', 'specification',
+          'match_status', 'match_reason',
+          'human_verified',
+          'ocr':  {ocr_text, ocr_engine, ai_match_status, ai_match_reason, created_at} | None,
+          'ai':   {prompt_payload, ai_raw_response, ai_match_reason, ai_match_status,
+                    ai_engine, prompt_version, created_at} | None,
+          'human':{human_status, human_reason, operator_name, created_at} | None,
+        }
+      }
+
+    - ocr 段取自最新 record_ocr 事件(同 image_id);
+    - ai 段取自最新 ai_match 事件(同 record_id, 跨 image 共享);DeepSeek 调用过才有
+    - human 段取自最新 human_verify 事件(同 image_id);有人点过才有
+    """
+    img = LoadingOrderImage.get_by_id(image_id)
+    if not img:
+        return jsonify({'success': False, 'error': '图片不存在'}), 404
+    record = None
+    if img.get('record_pk'):
+        record = LoadingOrderRecord.get_by_id(img['record_pk'])
+
+    def _latest_event(event_type: str, image_id_arg=None, record_id_arg=None):
+        """取某类型下对应 image/record 的最新事件(没事件返回 None)。"""
+        from models import OcrMatchEvent
+        if image_id_arg is not None:
+            return OcrMatchEvent.get_latest_by_image(image_id_arg, event_type=event_type)
+        if record_id_arg is not None:
+            return OcrMatchEvent.get_latest_by_record(record_id_arg, event_type=event_type)
+        return None
+
+    ocr_event = _latest_event('record_ocr', image_id_arg=image_id)
+    ai_event = _latest_event('ai_match', record_id_arg=img.get('record_pk'))
+    human_event = _latest_event('human_verify', image_id_arg=image_id)
+
+    def _staff_name(staff_id):
+        if not staff_id:
+            return None
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute('SELECT name FROM staff WHERE id=?', (staff_id,))
+        row = cur.fetchone()
+        conn.close()
+        return row['name'] if row else None
+
+    return jsonify({
+        'success': True,
+        'detail': {
+            'image_id': image_id,
+            'record_id': img.get('record_pk'),
+            'order_id': img.get('order_pk'),
+            'product_name': (record or {}).get('product_name', '') or '',
+            'specification': (record or {}).get('specification', '') or '',
+            'match_status': img.get('match_status') or '',
+            'match_reason': img.get('reason') or '',
+            'human_verified': bool(img.get('human_verified')),
+            # 2026-07-30 UX 一致性:与 refreshRowMatchBadge 升级逻辑对齐
+            #   - yellow/red + human_verified=1 → green (人工覆盖)
+            #   - 其他情况 → 透传 match_status
+            'effective_match_status': (
+                'green'
+                if img.get('human_verified') and img.get('match_status') in ('yellow', 'red')
+                else (img.get('match_status') or '')
+            ),
+            'ocr': (dict(ocr_event) if ocr_event else None),
+            'ai': (dict(ai_event) if ai_event else None),
+            'human': ({
+                **dict(human_event),
+                'operator_name': _staff_name(human_event.get('human_verified_by')),
+            } if human_event else None),
+        }
+    })
 
 
 @bp.route('/api/v1/loading-orders/records/<int:record_id>/images-area', methods=['GET'])

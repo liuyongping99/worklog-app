@@ -221,7 +221,92 @@
 
 /* 图片上传弹框样式见共享 partial _image_upload_modal.html（.img-upload-modal） */
 
+/* ── Record 级图片样式（与出货页一致）── */
+.inbound-page .order-images-area { display: grid; margin: 0.75rem 0; gap: 0.75rem; padding: 0.75rem 0; border-top: 1px solid #eee; }
+.inbound-page .order-images-area.columns-1 { grid-template-columns: 1fr; }
+.inbound-page .order-images-area.columns-2 { grid-template-columns: repeat(2, 1fr); }
+.inbound-page .order-images-area.columns-3 { grid-template-columns: repeat(3, 1fr); }
+.inbound-page .order-images-area.columns-4 { grid-template-columns: repeat(4, 1fr); }
+.inbound-page .order-images-area.columns-5 { grid-template-columns: repeat(5, 1fr); }
+.inbound-page .order-images-area img {
+    width: 100%; height: 100%; object-fit: cover;
+    border-radius: 8px; border: 1px solid #dee2e6;
+    cursor: pointer; transition: transform 0.15s; display: block;
+}
+.inbound-page .order-images-area img:hover { transform: scale(1.01); }
+.inbound-page .img-item { position: relative; overflow: hidden; border-radius: 8px; }
+.inbound-page .img-item:hover .del-img-btn { opacity: 1; }
+.inbound-page .img-item-record {
+    display: flex; flex-direction: column;
+    background: #fff; border: 1px solid #ced4da;
+}
+.inbound-page .img-item-record .img-photo {
+    position: relative; width: 100%; height: 180px; overflow: hidden;
+    background: #f8f9fa;
+}
+.inbound-page .img-item-record .img-photo > img {
+    border-radius: 0; border: none;
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    object-fit: cover;
+}
+.inbound-page .img-meta {
+    display: flex; flex-direction: column; align-items: flex-start;
+    gap: 0.18rem; padding: 4px 8px;
+    border-top: 1px solid #eee; min-height: 32px; font-size: 0.78rem;
+}
+.inbound-page .img-meta .img-meta-row {
+    display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap;
+}
+.inbound-page .img-meta .match-badge { font-size: 1.05rem; font-weight: 700; cursor: help; }
+.inbound-page .img-overlay-name {
+    position: absolute; left: 0.3rem; bottom: 1.4rem;
+    background: rgba(0,0,0,.6); color: #ff6b6b;
+    padding: 0 0.3rem; border-radius: 3px; font-size: 0.65rem;
+    pointer-events: none; z-index: 2;
+}
+.inbound-page .img-overlay-spec {
+    position: absolute; left: 0.3rem; bottom: 0.2rem;
+    background: rgba(0,0,0,.6); color: #ff6b6b;
+    padding: 0 0.3rem; border-radius: 3px; font-size: 0.65rem;
+    pointer-events: none; z-index: 2;
+}
+.inbound-page .del-img-btn {
+    position: absolute; top: 8px; right: 8px;
+    background: rgba(200,30,30,0.85); color: white;
+    border: none; border-radius: 6px;
+    padding: 0.35rem 0.75rem; font-size: 0.8rem;
+    cursor: pointer; font-weight: 600; opacity: 0;
+    transition: opacity 0.2s; z-index: 5;
+}
+.inbound-page .manual-confirm-btn {
+    background: #10b981; color: #fff; border: none;
+    padding: 3px 8px; border-radius: 4px; cursor: pointer;
+    font-size: 0.72rem; font-weight: 600;
+    transition: background 0.15s;
+}
+.inbound-page .manual-confirm-btn:hover { background: #059669; }
+.inbound-page .manual-undo-btn {
+    padding: 2px 8px; font-size: 0.7rem;
+    background: #10b981; color: #fff;
+    border: none; border-radius: 4px; cursor: pointer;
+}
+.inbound-page .bg-color-tag { display: inline-block; }
+.inbound-page .img-col-btn {
+    background: #e9ecef; color: #495057; border: 1px solid #ced4da;
+    border-radius: 5px; padding: 0.2rem 0.6rem; font-size: 0.78rem;
+    cursor: pointer;
+}
+.inbound-page .img-col-btn:hover { background: #d0e8d0; border-color: #00b894; color: #00b894; }
+.inbound-page .img-col-btn.active { background: #00b894; color: white; border-color: #00b894; font-weight: 600; }
+.inbound-page .record-table .match-col { text-align: center; padding: 0.25rem; }
+.inbound-page .record-table.no-match .match-col { display: none; }
+
 </style>
+
+<script>
+{% set api_prefix = '/api/v1/inbound-orders' %}
+{% include '_record_image_script.html' %}
+</script>
 
 <div class="container inbound-page">
     <!-- 新建入库单（日期+供应商） -->
@@ -411,7 +496,7 @@
         </div>
         {% endif %}
 
-        <table class="record-table">
+        <table class="record-table{% if not group.has_match %} no-match{% endif %}">
             <thead>
                 <tr>
                     <th style="width: 18%;">商品名称</th>
@@ -420,6 +505,7 @@
                     <th style="width: 8%;">单位</th>
                     <th style="width: 14%;">备注</th>
                     <th style="width: 12%;">辅助单位提示</th>
+                    <th class="match-col" style="width:55px;">AI 比对</th>
                     <th style="width: 24%; white-space: nowrap;">操作</th>
                 </tr>
             </thead>
@@ -429,17 +515,20 @@
                     data-verified="{{ '1' if record.verified else '0' }}"
                     data-verified-warnings="{{ record.verified_warnings or '{}' }}"
                     class="{% if record.mismatch == 'warn' or record.piece_mismatch == 'warn' %}row-warn{% elif record.mismatch == 'info' or record.piece_mismatch == 'info' %}row-info{% endif %}">
-                    <td class="product-name" style="max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ record.product_name }}">{% if record.mismatch == 'warn' or record.piece_mismatch == 'warn' %}❌ {% elif record.mismatch == 'info' or record.piece_mismatch == 'info' %}💡 {% endif %}{{ record.product_name }}</td>
-                    <td class="spec">{{ record.specification }}</td>
+                    <td class="product-name product-name-cell" style="max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ record.product_name }}">{% if record.mismatch == 'warn' or record.piece_mismatch == 'warn' %}❌ {% elif record.mismatch == 'info' or record.piece_mismatch == 'info' %}💡 {% endif %}{{ record.product_name }}</td>
+                    <td class="spec spec-cell">{{ record.specification }}</td>
                     <td><span class="qty-badge">{{ record.quantity }}</span></td>
                     <td><span class="unit-badge">{{ record.unit }}</span></td>
                     <td class="remark-cell{% if record.remark %} has-content{% endif %}">{{ record.remark or '-' }}</td>
                     <td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">{{ record.unit_hint or '—' }}{% if record.piece_hint %}<br><span style="color:#0984e3;">{{ record.piece_hint }}</span>{% endif %}</td>
+                    <td class="match-col" style="text-align:center;"></td>
                     <td style="white-space: nowrap;">
                         <button type="button" class="btn btn-sm move-up-btn lock-hide" data-id="{{ record.id }}" title="上移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.2rem 0.4rem;font-size:0.75rem;">▲</button>
                         <button type="button" class="btn btn-sm move-down-btn lock-hide" data-id="{{ record.id }}" title="下移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.2rem 0.4rem;font-size:0.75rem;">▼</button>
                         <button type="button" class="btn btn-primary btn-sm edit-inbound-btn lock-hide" data-id="{{ record.id }}">✏️</button>
                         <button type="button" class="btn btn-danger btn-sm lock-hide" onclick="deleteInboundRecord({{ record.id }}, this)">删除</button>
+                        <button type="button" class="btn btn-sm record-image-btn lock-hide{% if record.has_image %} has-image{% endif %}" data-record-id="{{ record.id }}" title="上传图片到此商品{% if record.has_image %}（已上传）{% endif %}" style="background:#74b9ff;color:#fff;">🖼️</button>
+                        <input type="file" class="record-image-input" data-record-id="{{ record.id }}" accept="image/*" multiple style="display:none;">
                     </td>
                 </tr>
                 {% endfor %}
@@ -482,27 +571,63 @@
         </div>
         {% endif %}
         
-        <!-- 图片预览区域 -->
-        {% set upload_imgs = group.images | selectattr('source', 'ne', 'ai') | list %}
-        {% if upload_imgs %}
-        <div class="image-section" id="images-{{ group.id }}">
-            <h4>📷 单据图片 ({{ upload_imgs|length }}张)</h4>
-            <div class="image-upload-area" data-cols="1">
-                <div style="grid-column: 1 / -1; display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.25rem;">
-                    <span style="font-size:0.8rem;color:#888;">每行：</span>
-                    <button class="img-col-btn" onclick="setImgCols(this, 1)">1</button>
-                    <button class="img-col-btn" onclick="setImgCols(this, 2)">2</button>
-                    <button class="img-col-btn" onclick="setImgCols(this, 3)">3</button>
-                    <button class="img-col-btn" onclick="setImgCols(this, 4)">4</button>
-                    <button class="img-col-btn" onclick="setImgCols(this, 5)">5</button>
-                </div>
-                {% for image in upload_imgs %}
-                <div class="image-item">
-                    <img src="/upload/{{ image.relative_path }}" alt="单据图片" onclick="showImgPreview('/upload/{{ image.relative_path }}')">
-                    <button class="delete-btn lock-hide" onclick="deleteImage({{ image.id }}, {{ group.id }})">×</button>
-                </div>
-                {% endfor %}
+        <!-- 图片预览区域（合并订单级 + 行级图片） -->
+        {% set all_order_imgs = group.images | selectattr('source', 'ne', 'ai') | list %}
+        {% if all_order_imgs %}
+        <div class="order-images-area columns-{{ group.img_cols | default(5) }}" data-cols="{{ group.img_cols | default(5) }}" data-order-id="{{ group.id }}">
+            <div style="grid-column: 1 / -1; display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.25rem;">
+                <span style="font-size:0.8rem;color:#888;">显示：</span>
+                <button class="img-col-btn" onclick="setImgCols(this, 1)">1</button>
+                <button class="img-col-btn" onclick="setImgCols(this, 2)">2</button>
+                <button class="img-col-btn" onclick="setImgCols(this, 3)">3</button>
+                <button class="img-col-btn" onclick="setImgCols(this, 4)">4</button>
+                <button class="img-col-btn active" onclick="setImgCols(this, 5)">5</button>
             </div>
+            {% for img in all_order_imgs %}
+            <div class="img-item{% if img.record_pk %} img-item-record{% else %} img-item-order{% endif %}"{% if img.record_pk %} data-record-pk="{{ img.record_pk }}"{% endif %} data-image-id="{{ img.id }}">
+                <div class="img-photo">
+                    <img src="/upload/{{ img.relative_path }}" alt="{{ img.original_name or '图片' }}" onclick="showImgPreview('/upload/{{ img.relative_path }}')">
+                    <button class="del-img-btn lock-hide" data-image-id="{{ img.id }}">× 删除</button>
+                    {% if img.record_pk and record_by_pk and record_by_pk.get(img.record_pk) %}
+                        {% set _overlay_rec = record_by_pk[img.record_pk] %}
+                        {% if _overlay_rec.product_name %}<div class="img-overlay-name">{{ _overlay_rec.product_name }}</div>{% endif %}
+                        {% if _overlay_rec.specification %}<div class="img-overlay-spec">{{ _overlay_rec.specification }}</div>{% endif %}
+                    {% endif %}
+                </div>
+                {% if img.record_pk %}
+                <div class="img-meta">
+                    <div class="img-meta-row img-meta-row-1">
+                        {% set _ms = img.match_source or 'local_fuzzy' %}
+                        {% set _source_label = '云端 DeepSeek' if _ms == 'deepseek' else '本地 RapidFuzz' %}
+                        {% set _hv = img.human_verified %}
+                        {% set _eff = _hv and img.match_status in ('yellow','red') %}
+                        {% if img.match_status == 'green' %}
+                            <span class="match-badge match-badge-{{ _ms }}" data-match-status="green" data-match-source="{{ _ms }}" title="图文相符({{ _source_label }}){% if img.reason %} — {{ img.reason }}{% endif %}" style="color:#16a34a;">{{ '⊛' if _ms == 'deepseek' else '✓' }}</span>
+                        {% elif _eff %}
+                            <span class="match-badge match-badge-{{ _ms }} match-badge-overridden" data-match-status="green" data-match-source="{{ _ms }}" data-overridden-by-human="1" title="人工确认通过(覆盖原始 {{ img.match_status }})" style="color:#10b981;">👤</span>
+                        {% elif img.match_status == 'yellow' %}
+                            <span class="match-badge match-badge-{{ _ms }}" data-match-status="yellow" data-match-source="{{ _ms }}" title="存疑，请人工核对({{ _source_label }}){% if img.reason %} — {{ img.reason }}{% endif %}" style="color:#d97706;">{{ '◇' if _ms == 'deepseek' else '⚠' }}</span>
+                        {% elif img.match_status == 'red' %}
+                            <span class="match-badge match-badge-{{ _ms }}" data-match-status="red" data-match-source="{{ _ms }}" title="可能不符({{ _source_label }}){% if img.reason %} — {{ img.reason }}{% endif %}" style="color:#dc2626;">{{ '◆' if _ms == 'deepseek' else '✗' }}</span>
+                        {% endif %}
+                        {% if img.match_status in ['red', 'yellow'] %}
+                            {% if img.human_verified %}
+                                <button class="manual-undo-btn lock-hide" data-verified-marker="{{ img.id }}" data-undo-btn="{{ img.id }}" title="人工已确认(覆盖 {{ img.match_status }});点击撤销" style="padding:2px 8px;font-size:0.7rem;background:#10b981;color:#fff;border:none;border-radius:4px;cursor:pointer;">👤 已确认</button>
+                            {% else %}
+                                <button class="manual-confirm-btn lock-hide" data-image-id="{{ img.id }}" data-confirm-btn="{{ img.id }}">✓ 确认通过</button>
+                            {% endif %}
+                        {% endif %}
+                        {% if img.bg_color %}<span class="bg-color-tag" title="自动识别背景色" style="padding:1px 6px;font-size:0.65rem;border-radius:3px;{% if img.bg_color == 'black' %}background:#2d3436;color:#fff;{% else %}background:#f1f3f5;color:#2d3436;border:1px solid #ced4da;{% endif %}">{% if img.bg_color == 'black' %}⬛ 黑底{% else %}⬜ 白底{% endif %}</span>{% endif %}
+                    </div>
+                    <div class="img-meta-row img-meta-row-2">
+                        <button type="button" class="fuzzy-match-btn lock-hide" data-fuzzy-match="{{ img.id }}" title="用 RapidFuzz 对该图 OCR 文字与商品名/规格做本地模糊匹配" style="padding:.1rem .5rem;font-size:.7rem;background:#74b9ff;color:#fff;border:none;border-radius:4px;cursor:pointer;">模糊匹配</button>
+                        <button type="button" class="ai-judge-btn lock-hide" data-ai-judge="{{ img.id }}" title="将 OCR 文字发给 DeepSeek 大模型进行 AI 判别" style="padding:.1rem .5rem;font-size:.7rem;background:#a29bfe;color:#fff;border:none;border-radius:4px;cursor:pointer;">AI判别</button>
+                        <button type="button" class="ocr-detail-btn lock-hide" data-ocr-detail="{{ img.id }}" title="查看 OCR 原文 / 提示词 / 推理结果" style="padding:.1rem .5rem;font-size:.7rem;background:#dfe6e9;color:#2d3436;border:1px solid #b2bec3;border-radius:4px;cursor:pointer;">详情</button>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
         </div>
         {% endif %}
     </div>
@@ -751,40 +876,41 @@ document.addEventListener('input', function(e) {
 
 
 
-// 图片上传成功回调（局部插入图片，弹框逻辑见 _image_upload_modal.html）
+// 图片上传成功回调（订单级图片通过弹框上传后回调，插入 order-images-area）
 function onImageUploaded(data, orderPk) {
     var dateGroup = document.querySelector('.date-group[data-order-id="' + orderPk + '"]');
     if (!dateGroup) { location.reload(); return; }
-    var imageSection = dateGroup.querySelector('.image-section');
-    var imageArea = imageSection ? imageSection.querySelector('.image-upload-area') : null;
-    if (!imageSection) {
-        // 从未有过图片区域，先创建
-        imageSection = document.createElement('div');
-        imageSection.className = 'image-section';
-        imageSection.id = 'images-' + orderPk;
-        var savedCols = localStorage.getItem('inboundImgCols') || '5';
-        imageSection.innerHTML =
-            '<h4>📷 单据图片 (<span class="img-count">0</span>张)</h4>' +
-            '<div class="image-upload-area columns-' + savedCols + '" data-cols="' + savedCols + '"></div>';
-        dateGroup.appendChild(imageSection);
-        imageArea = imageSection.querySelector('.image-upload-area');
+    var imgArea = dateGroup.querySelector('.order-images-area');
+    if (!imgArea) {
+        // 从未有过图片区域，先创建 order-images-area
+        imgArea = document.createElement('div');
+        imgArea.className = 'order-images-area columns-5';
+        imgArea.dataset.cols = '5';
+        imgArea.dataset.orderId = orderPk;
+        var colsBar = document.createElement('div');
+        colsBar.style.cssText = 'grid-column: 1 / -1; display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.25rem;';
+        colsBar.innerHTML = '<span style="font-size:0.8rem;color:#888;">显示：</span>' +
+            '<button class="img-col-btn" onclick="setImgCols(this, 1)">1</button>' +
+            '<button class="img-col-btn" onclick="setImgCols(this, 2)">2</button>' +
+            '<button class="img-col-btn" onclick="setImgCols(this, 3)">3</button>' +
+            '<button class="img-col-btn" onclick="setImgCols(this, 4)">4</button>' +
+            '<button class="img-col-btn active" onclick="setImgCols(this, 5)">5</button>';
+        imgArea.appendChild(colsBar);
+        dateGroup.appendChild(imgArea);
     }
-    if (!imageArea) { location.reload(); return; }
     var imgItem = document.createElement('div');
-    imgItem.className = 'image-item';
+    imgItem.className = 'img-item img-item-order';
+    imgItem.setAttribute('data-image-id', data.image_id);
     imgItem.innerHTML =
-        '<img src="/upload/' + escAttr(data.image) + '" alt="单据图片" onclick="showImgPreview(\'/upload/' + escAttr(data.image) + '\')">' +
-        '<button class="delete-btn lock-hide" onclick="deleteImage(' + Number(data.image_id) + ', ' + Number(orderPk) + ')">×</button>';
-    imageArea.appendChild(imgItem);
-    // 更新计数
-    var countEl = imageSection.querySelector('.img-count');
-    if (countEl) {
-        var count = imageArea.querySelectorAll('.image-item').length;
-        countEl.textContent = count;
-    }
+        '<div class="img-photo">' +
+            '<img src="/upload/' + escAttr(data.image) + '" alt="单据图片" onclick="showImgPreview(\'/upload/' + escAttr(data.image) + '\')">' +
+            '<button class="del-img-btn lock-hide" data-image-id="' + data.image_id + '">× 删除</button>' +
+        '</div>';
+    imgArea.appendChild(imgItem);
+    bindDeleteImageButtons();
 }
 
-// 删除图片
+// 删除图片（兼容订单级图片在 order-images-area 中）
 function deleteImage(imageId, orderPk) {
     if (!confirm('确定删除这张图片吗？')) return;
 
@@ -797,25 +923,24 @@ function deleteImage(imageId, orderPk) {
     })
     .then(function(data) {
         if (data.success) {
-            // 从 DOM 中移除图片元素
             var dateGroup = document.querySelector('.date-group[data-order-id="' + orderPk + '"]');
             if (!dateGroup) { location.reload(); return; }
-            var imageSection = dateGroup.querySelector('.image-section');
-            var imageArea = imageSection ? imageSection.querySelector('.image-upload-area') : null;
-            if (imageArea) {
-                // 找到包含此 imageId 的删除按钮，移除其父元素
-                var delBtn = imageArea.querySelector('.delete-btn[onclick*="deleteImage(' + imageId + '"]');
-                if (delBtn) {
-                    delBtn.closest('.image-item').remove();
+            // 在 order-images-area 中找到此图片并移除
+            var imgArea = dateGroup.querySelector('.order-images-area');
+            if (imgArea) {
+                var imgItem = imgArea.querySelector('.img-item[data-image-id="' + imageId + '"]');
+                if (imgItem) {
+                    imgItem.style.transition = 'opacity 0.3s';
+                    imgItem.style.opacity = '0';
+                    setTimeout(function() { imgItem.remove(); }, 300);
                 }
-                // 更新计数
-                var count = imageArea.querySelectorAll('.image-item').length;
-                var countEl = imageSection.querySelector('.img-count');
-                if (countEl) countEl.textContent = count;
-                // 如果没有图片了，移除整个图片区域
-                if (count === 0 && imageSection) {
-                    imageSection.remove();
-                }
+                // 如果没有非 cols-bar 子元素了，移除整个区域
+                setTimeout(function() {
+                    var items = imgArea.querySelectorAll('.img-item');
+                    if (items.length === 0 && imgArea.parentNode) {
+                        imgArea.remove();
+                    }
+                }, 400);
             }
         } else {
             alert('删除失败: ' + (data.error || '未知错误'));
@@ -827,27 +952,7 @@ function deleteImage(imageId, orderPk) {
     });
 }
 
-// 图片列数切换
-window.setImgCols = function(btn, cols) {
-    var area = btn.closest('.image-upload-area');
-    if (!area) return;
-    area.classList.remove('columns-1','columns-2','columns-3','columns-4','columns-5');
-    area.classList.add('columns-' + cols);
-    area.dataset.cols = cols;
-    localStorage.setItem('inboundImgCols', cols);
-    area.querySelectorAll('.img-col-btn').forEach(function(b) { b.classList.remove('active'); });
-    btn.classList.add('active');
-}
-
-document.addEventListener('DOMContentLoaded', function() {
-    var savedCols = localStorage.getItem('inboundImgCols') || '1';
-    document.querySelectorAll('.inbound-page .image-upload-area').forEach(function(area) {
-        area.classList.add('columns-' + savedCols);
-        area.parentElement.querySelectorAll('.img-col-btn').forEach(function(b) {
-            b.classList.toggle('active', parseInt(b.textContent.trim()) === parseInt(savedCols));
-        });
-    });
-});
+// 图片列数切换已由 _record_image_script.html 中的 setImgCols 处理
 
 // === 订单备注功能 ===
 var currentNoteOrderPk = null;
@@ -1259,6 +1364,7 @@ setTimeout(() => {
                     if (!tbody) { location.reload(); return; }
                     var newTr = buildInboundRecordRow(result.record, orderPk);
                     tbody.appendChild(newTr);
+                    bindRecordImageButtons();
                     recalcInboundSummary(dateGroup);
                     this.reset();
                     // 高亮新行
@@ -1289,17 +1395,20 @@ setTimeout(() => {
         else if (mismatch === 'info' || pieceMismatch === 'info') { tr.classList.add('row-info'); }
         var escapedName = escAttr(rec.product_name);
         tr.innerHTML =
-            '<td class="product-name" style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapedName + '">' + mismatchIcon(mismatch) + escHtml(rec.product_name) + '</td>' +
-            '<td class="spec">' + escHtml(rec.specification || '') + '</td>' +
+            '<td class="product-name product-name-cell" style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapedName + '">' + mismatchIcon(mismatch) + escHtml(rec.product_name) + '</td>' +
+            '<td class="spec spec-cell">' + escHtml(rec.specification || '') + '</td>' +
             '<td><span class="qty-badge">' + escHtml(rec.quantity) + '</span></td>' +
             '<td><span class="unit-badge">' + escHtml(rec.unit) + '</span></td>' +
             '<td class="remark-cell' + (rec.remark ? ' has-content' : '') + '">' + escHtml(rec.remark || '-') + '</td>' +
             '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">' + escHtml(unitHint) + (pieceHint ? '<br><span style="color:#0984e3;">' + escHtml(pieceHint) + '</span>' : '') + '</td>' +
+            '<td class="match-col" style="text-align:center;"></td>' +
             '<td style="white-space:nowrap;">' +
                 '<button type="button" class="btn btn-sm move-up-btn lock-hide" data-id="' + rec.id + '" title="上移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.2rem 0.4rem;font-size:0.75rem;">▲</button> ' +
                 '<button type="button" class="btn btn-sm move-down-btn lock-hide" data-id="' + rec.id + '" title="下移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.2rem 0.4rem;font-size:0.75rem;">▼</button> ' +
                 '<button type="button" class="btn btn-primary btn-sm edit-inbound-btn lock-hide" data-id="' + rec.id + '">✏️</button> ' +
                 '<button type="button" class="btn btn-danger btn-sm lock-hide" onclick="deleteInboundRecord(' + rec.id + ', this)">删除</button>' +
+                '<button type="button" class="btn btn-sm record-image-btn lock-hide" data-record-id="' + rec.id + '" title="上传图片到此商品" style="background:#74b9ff;color:#fff;">🖼️</button>' +
+                '<input type="file" class="record-image-input" data-record-id="' + rec.id + '" accept="image/*" multiple style="display:none;">' +
             '</td>';
         // 绑定事件
         bindInboundRowEvents(tr);
@@ -1535,6 +1644,7 @@ setTimeout(() => {
                                 var tr = buildInboundRecordRow(item, _smartFillOrderId);
                                 tbody.appendChild(tr);
                             });
+                            bindRecordImageButtons();
                             recalcInboundSummary(dateGroup);
                             if (imgData && imgData.success && imgData.image) insertAiImage(imgData, dateGroup);
                         }
@@ -1551,10 +1661,45 @@ setTimeout(() => {
         } else { doBatchAdd(null); }
     };
 
-    // 页面加载时绑定已有的 AI 图片删除按钮
+    // ── 覆盖共享模板的 applyAllRecordImageOverlays（入库页用 .inbound-page 选择器）──
+    applyAllRecordImageOverlays = function() {
+        document.querySelectorAll('.inbound-page .img-item-record[data-record-pk]').forEach(function(item) {
+            var pk = item.getAttribute('data-record-pk');
+            // applyRecordImageOverlay 已由 _record_image_script.html 定义
+            if (typeof applyRecordImageOverlay === 'function') {
+                applyRecordImageOverlay(item, pk);
+            }
+        });
+    };
+
+    // 页面加载时绑定已有的 AI 图片删除按钮和 record 图片功能
     document.addEventListener('DOMContentLoaded', function() {
         bindDeleteImageButtons();
+        bindRecordImageButtons();
+        bindManualConfirmButtons();
+        bindFuzzyMatchButtons();
+        bindAiJudgeButtons();
+        applyAllRecordImageOverlays();
+        if (typeof bindOcrDetailButtons === 'function') bindOcrDetailButtons();
     });
+
+    // ── Record 图片辅助函数 ──
+    window.buildRecordInfoMap = function() {
+        var map = {};
+        document.querySelectorAll('.record-table tr[data-record-id]').forEach(function(tr) {
+            var id = tr.getAttribute('data-record-id');
+            var nameEl = tr.querySelector('.product-name-cell');
+            var specEl = tr.querySelector('.spec-cell');
+            if (id && nameEl) {
+                map[id] = { record_pk: id, product_name: nameEl.textContent.trim(), specification: specEl ? specEl.textContent.trim() : '' };
+            }
+        });
+        return map;
+    };
+    window.findRecordInfoById = function(recordId) {
+        window._recordInfoMap = window._recordInfoMap || buildRecordInfoMap();
+        return window._recordInfoMap[recordId];
+    };
 </script>
 
 {% endblock %}
