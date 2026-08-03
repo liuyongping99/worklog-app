@@ -72,11 +72,14 @@ class TemplateGuardTests(unittest.TestCase):
         self.src = SHIPPING_TPL.read_text(encoding='utf-8') + '\n' + SHIPPING_INCLUDES.read_text(encoding='utf-8')
 
     def test_server_template_renders_button_for_yellow(self):
-        """服务端 img-meta 块:yellow 也要渲染 .manual-confirm-btn / .manual-verified-marker。
+        """服务端 img-meta 块:yellow 也要渲染 .manual-confirm-btn / .manual-undo-btn。
 
         用法：找模板里所有 `{% if img.match_status ... %}` 守卫行，
         选「守卫块内含 manual-confirm-btn」的那个（最外层那个）；
         断言守卫条件同时含 red 与 yellow。
+
+        2026-08-03:已确认态由 <span class="manual-verified-marker"> 改成
+        <button class="manual-undo-btn" data-verified-marker=...>（可点击撤销）。
         """
         src = self.src  # 合并 shipping-records.html + _record_image_script.html(由 setUp 准备)
         body_start = src.index('</style>')
@@ -99,7 +102,7 @@ class TemplateGuardTests(unittest.TestCase):
             endif = after.find('{% endif')
             if endif < 0: continue
             block = after[:endif]
-            if 'manual-confirm-btn' in block and 'manual-verified-marker' in block:
+            if 'manual-confirm-btn' in block and 'manual-undo-btn' in block:
                 guard_block = block
                 break
         self.assertIsNotNone(guard_block, '找不到包住 manual-confirm-btn 的守卫块')
@@ -110,8 +113,11 @@ class TemplateGuardTests(unittest.TestCase):
         self.assertIn("'red'", guard_block, '服务端守卫应仍覆盖 red（防回归）')
 
     def test_js_dynamic_path_handles_yellow(self):
-        """JS 里的 recordImageUploaded/buildRecordImages 块:yellow 也要按钮。"""
-        src = SHIPPING_TPL.read_text(encoding='utf-8')
+        """JS 里的 recordImageUploaded/buildRecordImages 块:yellow 也要按钮。
+
+        2026-07-31:这段 JS 已抽到 _record_image_script.html,搜合并后的源。
+        """
+        src = self.src
         # 找 (status === 'red' && ...) 守卫 → 改后应当同时含 'yellow'
         m = re.search(
             r"if\s*\(\s*\(?\s*status\s*===\s*'red'\s*\|\|\s*status\s*===\s*'yellow'\s*\)?\s*&&\s*!?(?:img\.)?human_verified\s*\).*?\}\s*else\s*if\s*\(",
@@ -146,15 +152,24 @@ class RenderTests(TempDbBase):
         self.assertIsNotNone(m, '黄牌图 img-meta 必须含 .manual-confirm-btn')
 
     def test_yellow_image_after_confirm_renders_marker(self):
+        """人工确认后渲染「👤 已确认」撤销按钮。
+
+        2026-08-03:由 <span class="manual-verified-marker"> 改为
+        <button class="manual-undo-btn" data-verified-marker=...>，点击可撤销。
+        """
         _, iid = _make_yellow_image()
         from models import ShippingImage
         ShippingImage.set_human_verified(iid, True)
         res = self.client.get('/shipping-records?start_date=2026-07-30&end_date=2026-07-30')
         html = res.get_data(as_text=True)
         m = re.search(
-            r'<span class="manual-verified-marker" data-verified-marker="' + str(iid) + r'"',
+            r'<button class="manual-undo-btn[^"]*"[^>]*data-verified-marker="' + str(iid) + r'"',
             html)
-        self.assertIsNotNone(m, '黄牌图人工确认后必须渲染 .manual-verified-marker')
+        self.assertIsNotNone(m, '黄牌图人工确认后必须渲染 .manual-undo-btn(👤 已确认)')
+        # 防回归:确认态下不应再同时渲染「✓ 确认通过」
+        self.assertIsNone(
+            re.search(r'<button class="manual-confirm-btn[^"]*" data-image-id="' + str(iid) + r'"', html),
+            '已确认的图不应再渲染 .manual-confirm-btn')
 
     def test_red_image_still_works(self):
         """防回归:red 仍然有按钮(本次不能把红牌按钮弄没)。"""

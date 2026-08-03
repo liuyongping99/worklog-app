@@ -10,6 +10,7 @@ import io
 import os
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -37,12 +38,44 @@ class _TempDb(unittest.TestCase):
         self.rid = ShippingRecord.create('2026-07-30', 'C', '环保杂胶', '0.8黑中加面', '50', 'y', '', self.oid)
 
     def tearDown(self):
+        # 行级图上传是异步的(daemon 线程)。若线程活过 tearDown，DB_PATH 已被
+        # 还原成生产库,线程里的 set_match / OcrMatchEvent.create 就会写到
+        # worklog.db 上 —— 必须先等干净再还原。
+        self._drain_async_jobs()
         _db.DB_PATH = self._orig
         for ext in ('', '-wal', '-shm'):
             p = self.tmp.name + ext
             if os.path.exists(p):
                 try: os.unlink(p)
                 except OSError: pass
+
+    @staticmethod
+    def _drain_async_jobs(timeout=15):
+        """等待所有在飞的行级图后台任务结束(测试隔离用)。"""
+        from blueprints.shipping import _ASYNC_JOBS
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if not any(j.get('state') == 'processing' for j in list(_ASYNC_JOBS.values())):
+                return
+            time.sleep(0.02)
+        raise AssertionError('后台 OCR 任务超时未结束,可能污染生产库')
+
+    def _wait_async(self, image_id, timeout=15):
+        """等单张图的后台 OCR+比对跑完,返回终态 'done'|'error'。"""
+        from blueprints.shipping import _ASYNC_JOBS
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            state = _ASYNC_JOBS.get(image_id, {}).get('state')
+            if state in ('done', 'error'):
+                return state
+            time.sleep(0.02)
+        raise AssertionError(f'异步任务超时未完成: image_id={image_id}')
+
+    @staticmethod
+    def _db_image(image_id):
+        """异步化后 match_status/score/reason/source 只在 DB 里,不在上传响应里。"""
+        from models import ShippingImage
+        return ShippingImage.get_by_id(image_id)
 
 
 class ShippingImageMatchSourceSchemaTests(_TempDb):
@@ -125,11 +158,18 @@ class RecordUploadImageDeepSeekFallbackTests(_TempDb):
                 return fake_paddle if name == 'paddleocr' else fake_ds
             mock_factory.side_effect = side
 
-            return self.client.post(
+            resp = self.client.post(
                 f'/api/v1/shipping-orders/records/{self.rid}/images',
                 data=files_dict,
                 content_type='multipart/form-data',
             )
+            # 2026-07-31 改造:上传立即返回,OCR+比对在后台线程。必须在 mock
+            # 仍然生效的作用域内等它跑完,否则线程会去调真的 PaddleOCR。
+            if resp.status_code == 201:
+                for im in resp.get_json().get('images', []):
+                    if im.get('image_id'):
+                        self._wait_async(im['image_id'])
+            return resp
 
     def test_with_api_key_uses_deepseek(self):
         png = self._fake_upload_file('deepseek.png')
@@ -139,10 +179,13 @@ class RecordUploadImageDeepSeekFallbackTests(_TempDb):
             self.assertEqual(res.status_code, 201)
             data = res.get_json()
             self.assertTrue(data['success'])
-            self.assertEqual(data['images'][0]['match_status'], 'green')
-            self.assertEqual(data['images'][0]['match_source'], 'deepseek',
+            self.assertTrue(data['images'][0]['processing'],
+                '上传端点应立即返回 processing=True(比对在后台线程)')
+            rec = self._db_image(data['images'][0]['image_id'])
+            self.assertEqual(rec['match_status'], 'green')
+            self.assertEqual(rec['match_source'], 'deepseek',
                 '联网时 match_source 应为 deepseek')
-            self.assertEqual(data['images'][0]['reason'], '云端比对理由')
+            self.assertEqual(rec['reason'], '云端比对理由')
             mock_local.assert_not_called()  # 关键:本地匹配不应被调用
 
     def test_without_api_key_falls_back_to_local(self):
@@ -152,10 +195,11 @@ class RecordUploadImageDeepSeekFallbackTests(_TempDb):
             res = self._post_upload({'image': png}, with_api_key=False, deepseek_status='green')
             self.assertEqual(res.status_code, 201)
             data = res.get_json()
-            self.assertEqual(data['images'][0]['match_status'], 'yellow')
-            self.assertEqual(data['images'][0]['match_source'], 'local_fuzzy',
+            rec = self._db_image(data['images'][0]['image_id'])
+            self.assertEqual(rec['match_status'], 'yellow')
+            self.assertEqual(rec['match_source'], 'local_fuzzy',
                 '未联网时 match_source 应为 local_fuzzy')
-            self.assertEqual(data['images'][0]['reason'], '本地匹配理由')
+            self.assertEqual(rec['reason'], '本地匹配理由')
             mock_local.assert_called_once()  # 本地匹配必须被调用
 
     def test_deepseek_failure_falls_back_to_local(self):
@@ -179,10 +223,12 @@ class RecordUploadImageDeepSeekFallbackTests(_TempDb):
                 )
                 self.assertEqual(res.status_code, 201)
                 data = res.get_json()
-                self.assertEqual(data['images'][0]['match_status'], 'green')
-                self.assertEqual(data['images'][0]['match_source'], 'local_fuzzy',
+                self._wait_async(data['images'][0]['image_id'])
+                rec = self._db_image(data['images'][0]['image_id'])
+                self.assertEqual(rec['match_status'], 'green')
+                self.assertEqual(rec['match_source'], 'local_fuzzy',
                     'DeepSeek 失败时 match_source 应为 local_fuzzy(fallback)')
-                self.assertEqual(data['images'][0]['reason'], '本地补算理由')
+                self.assertEqual(rec['reason'], '本地补算理由')
                 mock_local.assert_called_once()
 
     def test_ocr_empty_text_skips_both_engines(self):
@@ -205,7 +251,11 @@ class RecordUploadImageDeepSeekFallbackTests(_TempDb):
                 )
                 self.assertEqual(res.status_code, 201)
                 data = res.get_json()
-                self.assertIsNone(data['images'][0]['match_status'],
+                # 必须等后台线程跑完再断言"没被调用",否则线程还没起步,
+                # assert_not_called 会假通过。
+                self._wait_async(data['images'][0]['image_id'])
+                rec = self._db_image(data['images'][0]['image_id'])
+                self.assertIsNone(rec['match_status'],
                     'OCR 空时 match_status 应为 None(不打徽章)')
                 # DeepSeek / 本地都不该被调
                 fake_ds.compare_single_record.assert_not_called()

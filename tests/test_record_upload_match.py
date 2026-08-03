@@ -63,7 +63,8 @@ class RecordUploadMatchTests(unittest.TestCase):
         rec = ShippingImage.get_by_id(iid)
         self.assertEqual(rec['match_status'], 'green',
             f'异步处理后应为 green,实际 {rec}')
-        self.assertGreaterEqual(img['match_score'], 85)
+        # 异步后 score 也只在 DB 里(上传响应的 match_score 恒为 None)
+        self.assertGreaterEqual(rec['match_score'], 85)
 
 
 if __name__ == '__main__':

@@ -39,6 +39,31 @@ def rendered_match_statuses(html):
     return vals
 
 
+def _drain_async_jobs(timeout=15):
+    """等待所有在飞的行级图后台 OCR 任务结束(测试隔离用)。"""
+    import time
+    from blueprints.shipping import _ASYNC_JOBS
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if not any(j.get('state') == 'processing' for j in list(_ASYNC_JOBS.values())):
+            return
+        time.sleep(0.02)
+    raise AssertionError('后台 OCR 任务超时未结束,可能污染生产库')
+
+
+def _wait_async(image_id, timeout=15):
+    """等单张图的后台 OCR+比对跑完,返回终态 'done'|'error'。"""
+    import time
+    from blueprints.shipping import _ASYNC_JOBS
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        state = _ASYNC_JOBS.get(image_id, {}).get('state')
+        if state in ('done', 'error'):
+            return state
+        time.sleep(0.02)
+    raise AssertionError(f'异步任务超时未完成: image_id={image_id}')
+
+
 class P1Base(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
@@ -52,6 +77,9 @@ class P1Base(unittest.TestCase):
         self._cleanup_files = []
 
     def tearDown(self):
+        # 行级图上传走后台线程;线程活过 tearDown 会在 DB_PATH 还原后
+        # 写到生产库,且 Windows 上会锁住临时 db 导致 unlink 失败。
+        _drain_async_jobs()
         _db.DB_PATH = self._orig
         os.unlink(self.tmp.name)
         for p in self._cleanup_files:
@@ -206,8 +234,12 @@ class RecordUploadTests(P1Base):
                                 data=data, content_type='multipart/form-data')
         self.assertEqual(resp.status_code, 201)
         img = resp.get_json()['images'][0]
+        # 2026-07-31 异步化:上传立即返回,reason 由后台线程写库,响应里恒为空
         self.assertIn('reason', img)
-        self.assertTrue(img['reason'])  # 命中应有 reason
+        self.assertTrue(img['processing'])
+        _wait_async(img['image_id'])
+        self.assertTrue(ShippingImage.get_by_id(img['image_id'])['reason'],
+                        '命中应有 reason')
 
         # 文件名单点校验
         saved = ShippingImage.get_by_record(rid)[0]
