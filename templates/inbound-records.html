@@ -299,8 +299,6 @@
 .inbound-page .img-col-btn:hover { background: #d0e8d0; border-color: #00b894; color: #00b894; }
 .inbound-page .img-col-btn.active { background: #00b894; color: white; border-color: #00b894; font-weight: 600; }
 .inbound-page .record-table .match-col { text-align: center; padding: 0.25rem; }
-.inbound-page .record-table.no-match .match-col { display: none; }
-
 </style>
 
 <script>
@@ -496,7 +494,7 @@
         </div>
         {% endif %}
 
-        <table class="record-table{% if not group.has_match %} no-match{% endif %}">
+        <table class="record-table">
             <thead>
                 <tr>
                     <th style="width: 18%;">商品名称</th>
@@ -505,7 +503,6 @@
                     <th style="width: 8%;">单位</th>
                     <th style="width: 14%;">备注</th>
                     <th style="width: 12%;">辅助单位提示</th>
-                    <th class="match-col" style="width:55px;">AI 比对</th>
                     <th style="width: 24%; white-space: nowrap;">操作</th>
                 </tr>
             </thead>
@@ -521,7 +518,6 @@
                     <td><span class="unit-badge">{{ record.unit }}</span></td>
                     <td class="remark-cell{% if record.remark %} has-content{% endif %}">{{ record.remark or '-' }}</td>
                     <td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">{{ record.unit_hint or '—' }}{% if record.piece_hint %}<br><span style="color:#0984e3;">{{ record.piece_hint }}</span>{% endif %}</td>
-                    <td class="match-col" style="text-align:center;"></td>
                     <td style="white-space: nowrap;">
                         <button type="button" class="btn btn-sm move-up-btn lock-hide" data-id="{{ record.id }}" title="上移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.2rem 0.4rem;font-size:0.75rem;">▲</button>
                         <button type="button" class="btn btn-sm move-down-btn lock-hide" data-id="{{ record.id }}" title="下移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.2rem 0.4rem;font-size:0.75rem;">▼</button>
@@ -1401,7 +1397,6 @@ setTimeout(() => {
             '<td><span class="unit-badge">' + escHtml(rec.unit) + '</span></td>' +
             '<td class="remark-cell' + (rec.remark ? ' has-content' : '') + '">' + escHtml(rec.remark || '-') + '</td>' +
             '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">' + escHtml(unitHint) + (pieceHint ? '<br><span style="color:#0984e3;">' + escHtml(pieceHint) + '</span>' : '') + '</td>' +
-            '<td class="match-col" style="text-align:center;"></td>' +
             '<td style="white-space:nowrap;">' +
                 '<button type="button" class="btn btn-sm move-up-btn lock-hide" data-id="' + rec.id + '" title="上移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.2rem 0.4rem;font-size:0.75rem;">▲</button> ' +
                 '<button type="button" class="btn btn-sm move-down-btn lock-hide" data-id="' + rec.id + '" title="下移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.2rem 0.4rem;font-size:0.75rem;">▼</button> ' +

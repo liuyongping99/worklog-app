@@ -263,18 +263,9 @@ def shipping_records():
         if non_ai: order_non_ai[oid] = non_ai
         if ai: ai_images[oid] = ai
     # 把每个订单的所有 record 级图也按 source 分到上面两个 dict
-    # 同时按 record 汇总【最差】档位(red < yellow < green),给前端做「行级徽章」首屏渲染(刷新不丢)。
-    # 为什么取最差而不是最好:徽章的作用是【暴露风险】。一行挂 3 张图,只要有 1 张判红,
-    # 就说明这行可能装错货 —— 若按最好档显绿,那张红图就被静默吞掉,徽章反而成了帮凶。
-    # 例外:human_verified=1 的红牌已被人工看过并放行,先降级为 green 再参与比较。
-    _status_rank = {'red': 1, 'yellow': 2, 'green': 3}
-    record_worst_status_map = {}  # record_id -> 'green'/'yellow'/'red'(行级徽章,取最差)
-    record_worst_reason_map = {}  # record_id -> 该 record 最差档图对应的 reason(给 hover 用)
-    # 2026-07-30:行级徽章也按来源分两套符号(本地 ✓/⚠/✗ + 云端 ⊛/◇/◆,共 6 种)。
-    # 记最差档对应的来源——同档位时优先保留更早出现的那张图的来源(不重要,只要不空)。
-    record_worst_source_map = {}  # record_id -> 'local_fuzzy' | 'deepseek'
-    # 2026-08-03:行级是否有「已人工确认」的图 —— 用于首屏把行级 match_status 图标渲染成 👤
-    record_human_verified_map = {}
+    # 2026-08-04:match-col 服务端不再渲染,改由 JS 在首次有匹配结果时通过
+    # `_ensureMatchColumn` 动态插入。所以这里不再算 record_worst_*_map /
+    # record_human_verified_map / has_match —— 那块逻辑下沉到 JS。
     for grp in groups:
         all_record_imgs = []
         for rec in grp.get('records', []):
@@ -282,22 +273,6 @@ def shipping_records():
             all_record_imgs.extend(record_imgs)
             # 2026-07-27:行级有图 → 模板渲染 🖼️ 按钮加红框 has-image class(刷新不丢)
             rec['has_image'] = bool(record_imgs)
-            # 2026-08-03:该行任意一张图已人工确认 → 行级图标渲染 👤
-            if any(img.get('human_verified') for img in record_imgs):
-                record_human_verified_map[rec['id']] = True
-            for img in record_imgs:
-                status = img.get('match_status') or ''
-                if not status:
-                    continue
-                # 2026-07-24:human_verified=1 的红牌视为已通过(等价 green)
-                # 这样:刷新页面时,人工确认过的红牌不会让行级徽章仍然是 ✗
-                if status == 'red' and img.get('human_verified'):
-                    status = 'green'
-                cur = record_worst_status_map.get(rec['id'])
-                if cur is None or _status_rank.get(status, 0) < _status_rank.get(cur, 0):
-                    record_worst_status_map[rec['id']] = status
-                    record_worst_reason_map[rec['id']] = img.get('reason') or ''
-                    record_worst_source_map[rec['id']] = img.get('match_source') or 'local_fuzzy'
         for img in all_record_imgs:
             target = ai_images if img.get('source') == 'ai' else order_non_ai
             target.setdefault(grp['id'], []).append(img)
@@ -378,7 +353,8 @@ def shipping_records():
             and '加面' in r.get('specification', '')
             for r in group['records']
         )
-        group['has_match'] = any(record_worst_status_map.get(r['id']) for r in group['records'])
+        # 2026-08-04:has_match 服务端不再需要 —— match-col 由 JS 动态插入,首次
+        # 有匹配结果时整列首次可见,所以「整组无匹配就隐藏整列」的 no-match 思路废弃。
 
     # 2026-07-24: 把所有 group 的 records 合并成 record_by_pk,模板里给图片叠加品名/规格用
     # (服务端渲染,不依赖 JS 加载 — 之前靠 JS append 在某些场景下不稳定)
@@ -392,10 +368,6 @@ def shipping_records():
         groups=groups,
         order_images=order_non_ai,  # 模板里变量名仍叫 order_images,但内容已剔 AI
         ai_images=ai_images,
-        record_worst_status_map=record_worst_status_map,
-        record_worst_reason_map=record_worst_reason_map,
-        record_worst_source_map=record_worst_source_map,   # 2026-07-30 新增:行级徽章按来源分 6 种
-        record_human_verified_map=record_human_verified_map,  # 2026-08-03:行级已人工确认 → 渲染 👤
         record_by_pk=record_by_pk,   # 2026-07-24 新增:图片叠加文字用的 record 查表
         page_title='出货记录',
         today=today,

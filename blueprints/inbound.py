@@ -213,30 +213,13 @@ def inbound_records():
                 item['piece_mismatch'] = ''
         group.update(summarize_remarks(group['records']))
 
-    # 2026-08-02: 行级图片支持 — 构建 has_image 标记 + record_by_pk 查询表 +
-    # record_worst_status_map（行级 AI 比对徽章）
-    _status_rank = {'red': 1, 'yellow': 2, 'green': 3}
-    record_worst_status_map = {}
-    record_worst_reason_map = {}
-    record_worst_source_map = {}
+    # 2026-08-04:match-col 服务端不再渲染,改由 JS `_ensureMatchColumn`
+    # 在首次有匹配结果时动态插入。所以这里不再算 record_worst_*_map /
+    # has_match —— 那块逻辑下沉到 JS。
     for grp in groups:
-        has_match = False
         for rec in grp.get('records', []):
             record_imgs = [img for img in grp.get('images', []) if img.get('record_pk') == rec['id']]
             rec['has_image'] = bool(record_imgs)
-            for img in record_imgs:
-                status = img.get('match_status') or ''
-                if not status:
-                    continue
-                if status == 'red' and img.get('human_verified'):
-                    status = 'green'
-                cur = record_worst_status_map.get(rec['id'])
-                if cur is None or _status_rank.get(status, 0) < _status_rank.get(cur, 0):
-                    record_worst_status_map[rec['id']] = status
-                    record_worst_reason_map[rec['id']] = img.get('reason') or ''
-                    record_worst_source_map[rec['id']] = img.get('match_source') or 'local_fuzzy'
-                has_match = True
-        grp['has_match'] = has_match
 
     record_by_pk = {}
     for grp in groups:
@@ -253,9 +236,6 @@ def inbound_records():
         unit_list=unit_list,
         piece_conversions=piece_conv_list,
         record_by_pk=record_by_pk,
-        record_worst_status_map=record_worst_status_map,
-        record_worst_reason_map=record_worst_reason_map,
-        record_worst_source_map=record_worst_source_map,
     )
 
 

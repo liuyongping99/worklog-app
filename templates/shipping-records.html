@@ -32,9 +32,8 @@
 /* 重点标识列:整组无环保且无加面时整列隐藏(避免空列占位) */
 .shipping-page .record-table .eco-col { text-align: center; padding: 0.25rem; }
 .shipping-page .record-table.no-eco .eco-col { display: none; }
-/* AI 比对结果独立列:整组无 AI 比对结果时整列隐藏 */
+/* AI 比对结果独立列:由 JS 动态插入,match-col 单元格基础样式 */
 .shipping-page .record-table .match-col { text-align: center; padding: 0.25rem; }
-.shipping-page .record-table.no-match .match-col { display: none; }
 .shipping-page .quick-add { display: grid; grid-template-columns: 1fr 90px 80px 70px auto; align-items: end; }
 .shipping-page .quick-add input:focus, .shipping-page .quick-add select:focus { border-color: var(--page-accent); }
 .shipping-page .form-grid { display: grid; grid-template-columns: 150px 1fr; gap: var(--space-md); align-items: end; }
@@ -448,16 +447,14 @@
             </div>
             {% endif %}
             {% set has_eco = group.has_eco|default(false) %}
-            {% set has_match = group.has_match|default(false) %}
             {% set has_jia_mian = group.has_jia_mian|default(false) %}
-            <table class="record-table{% if not has_eco and not has_jia_mian %} no-eco{% endif %}{% if not has_match %} no-match{% endif %}">
+            <table class="record-table{% if not has_eco and not has_jia_mian %} no-eco{% endif %}">
                 <thead>
                     <tr>
                         <th style="width:35px;">序号</th>
                         <th class="eco-col" style="width:35px;">重点</th>
                         <th style="width:22%;">商品名称</th>
                         <th style="width:18%;">规格</th>
-                        <th class="match-col" style="width:55px;">AI 比对</th>
                         <th style="width:12%;">数量</th>
                         <th style="width:8%;">单位</th>
                         <th style="width:15%;">备注</th>
@@ -475,7 +472,6 @@
                     <td class="eco-col">{% if '环保' in item.product_name %}<span class="eco-icon" title="环保产品">🌿</span>{% endif %}{% if '杂胶' in item.product_name and '加面' in item.specification %}<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" class="jia-mian-icon" title="加面工艺"><defs><pattern id="jm-mesh-{{ loop.index }}" width="2" height="2" patternUnits="userSpaceOnUse"><path d="M 2 0 L 0 0 0 2" fill="none" stroke="currentColor" stroke-width="0.5"/></pattern></defs><rect width="16" height="16" fill="url(#jm-mesh-{{ loop.index }})"/><line x1="0" y1="8" x2="16" y2="8" stroke="currentColor" stroke-width="1"/></svg>{% endif %}</td>
                     <td class="product-name-cell" style="font-size:0.9rem;" data-record-id-cell="{{ item.id }}">{{ item.product_name }}</td>
                     <td class="spec-cell" style="color:#636e72; font-size:0.9rem;">{{ item.specification }}</td>
-                    <td class="match-col">{% set _bst = record_worst_status_map.get(item.id) %}{% set _reason = record_worst_reason_map.get(item.id, '') %}{% set _bsrc = record_worst_source_map.get(item.id, 'local_fuzzy') %}{% set _src_label = '云端 DeepSeek' if _bsrc == 'deepseek' else '本地 RapidFuzz' %}{% if _bsrc == 'deepseek' %}{% set _sym = {'green': '⊛', 'yellow': '◇', 'red': '◆'} %}{% set _col = {'green': '#0d9488', 'yellow': '#b45309', 'red': '#b91c1c'} %}{% else %}{% set _sym = {'green': '✓', 'yellow': '⚠', 'red': '✗'} %}{% set _col = {'green': '#16a34a', 'yellow': '#d97706', 'red': '#dc2626'} %}{% endif %}{% set _hv_row = record_human_verified_map.get(item.id) %}{% if _hv_row %}<span class="match-badge match-badge-overridden" data-match-status="green" data-overridden-by-human="1" title="人工确认通过(覆盖原始 {{ (_bst or '无') }})" style="color:#10b981;">👤</span>{% elif _bst == 'green' %}<span class="match-badge match-badge-{{ _bsrc }}" data-match-status="green" data-match-source="{{ _bsrc }}" title="图文相符（{{ _src_label }}）{% if _reason %} — {{ _reason }}{% endif %}" style="color:{{ _col.green }};">{{ _sym.green }}</span>{% elif _bst == 'yellow' %}<span class="match-badge match-badge-{{ _bsrc }}" data-match-status="yellow" data-match-source="{{ _bsrc }}" title="存疑，请人工核对（{{ _src_label }}）{% if _reason %} — {{ _reason }}{% endif %}" style="color:{{ _col.yellow }};">{{ _sym.yellow }}</span>{% elif _bst == 'red' %}<span class="match-badge match-badge-{{ _bsrc }}" data-match-status="red" data-match-source="{{ _bsrc }}" title="可能不符（{{ _src_label }}）{% if _reason %} — {{ _reason }}{% endif %}" style="color:{{ _col.red }};">{{ _sym.red }}</span>{% endif %}</td>
                     <td class="qty-cell"><span class="qty-badge">{{ item.quantity }}</span></td>
                     <td class="unit-cell"><span class="unit-badge">{{ item.unit }}</span></td>
                     <td class="remark-cell {% if item.remark %}has-content{% endif %}">{{ item.remark or '—' }}</td>

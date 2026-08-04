@@ -96,7 +96,6 @@
 .manual-undo-btn { padding: 2px 8px; font-size: .7rem; background: #10b981; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
 .bg-color-tag { display: inline-block; }
 .loading-page .record-table .match-col { text-align: center; padding: .25rem; }
-.loading-page .record-table.no-match .match-col { display: none; }
 </style>
 
 <div class="loading-page">
@@ -233,7 +232,6 @@
                         <th>单位</th>
                         <th>备注</th>
                         <th>辅助单位提示</th>
-                        <th class="match-col" style="width:55px;">AI 比对</th>
                         <th>操作</th>
                     </tr>
                 </thead>
@@ -252,7 +250,6 @@
                             {{ record.remark or '-' }}
                         </td>
                         <td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">{{ record.unit_hint or '—' }}{% if record.piece_hint %}<br><span style="color:#0984e3;">{{ record.piece_hint }}</span>{% endif %}</td>
-                        <td class="match-col" style="text-align:center;"></td>
                         <td style="white-space: nowrap;">
                             <button type="button" class="move-up-btn lock-hide" data-id="{{ record.id }}" onclick="moveRecord({{ record.id }}, 'up', this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;" title="上移">▲</button>
                             <button type="button" class="move-down-btn lock-hide" data-id="{{ record.id }}" onclick="moveRecord({{ record.id }}, 'down', this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;margin-right:0.3rem;" title="下移">▼</button>
@@ -889,7 +886,6 @@ document.addEventListener('DOMContentLoaded', function() {
             '<td><select name="unit" style="padding:0.65rem;border:1px solid #dfe6e9;border-radius:4px;font-size:1.1rem;box-sizing:border-box;">'+unitOptions+'</select></td>' +
             '<td><input type="text" name="remark" value="'+escAttr(remark)+'" oninput="autoFillQtyFromRemark(this)" style="width:100%;padding:0.65rem;border:1px solid #dfe6e9;border-radius:4px;font-size:1.1rem;box-sizing:border-box;"></td>' +
             '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">'+editingHint+(editingPieceHint ? '<br><span style="color:#0984e3;">'+editingPieceHint+'</span>' : '')+'</td>' +
-            '<td class="match-col" style="text-align:center;">' + (tr.dataset.matchBadgeHtml || '') + '</td>' +
             '<td style="white-space:nowrap;">' +
                 "<button type='button' onclick='saveEdit(this)' style='background:#00b894;color:white;border:none;border-radius:4px;padding:0.2rem 0.5rem;font-size:0.75rem;cursor:pointer;margin-right:0.25rem;'>保存</button>" +
                 "<button type='button' onclick='cancelEdit(this)' style='background:#b2bec3;color:white;border:none;border-radius:4px;padding:0.2rem 0.5rem;font-size:0.75rem;cursor:pointer;'>取消</button></td>";
@@ -930,7 +926,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     '<td><span class="unit-badge">' + escHtml(r.unit) + '</span></td>' +
                     '<td class="' + remarkClass + '">' + escHtml(r.remark || '-') + '</td>' +
                     '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">' + escHtml(unitHint) + (pieceHint ? '<br><span style="color:#0984e3;">' + escHtml(pieceHint) + '</span>' : '') + '</td>' +
-                    '<td class="match-col" style="text-align:center;">' + (tr.dataset.matchBadgeHtml || '') + '</td>' +
                     '<td style="white-space:nowrap;">' +
                         '<button type="button" class="move-up-btn lock-hide" data-id="' + r.id + '" onclick="moveRecord(' + r.id + ',\'up\',this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;" title="上移">▲</button>' +
                         '<button type="button" class="move-down-btn lock-hide" data-id="' + r.id + '" onclick="moveRecord(' + r.id + ',\'down\',this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;margin-right:0.3rem;" title="下移">▼</button>' +
@@ -974,7 +969,6 @@ document.addEventListener('DOMContentLoaded', function() {
             '<td>'+escHtml(orig.unit)+'</td>' +
             '<td class="remark-cell '+(orig.remark ? 'has-content' : '')+'">'+escHtml(orig.remark)+'</td>' +
             '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">'+escHtml(unitHint)+(pieceHint ? '<br><span style="color:#0984e3;">'+escHtml(pieceHint)+'</span>' : '')+'</td>' +
-            '<td class="match-col" style="text-align:center;">' + (tr.dataset.matchBadgeHtml || '') + '</td>' +
             '<td class="lock-hide" style="white-space:nowrap;">' +
                 "<button type='button' class='move-up-btn lock-hide' data-id='"+tr.dataset.editId+"' onclick='moveRecord("+tr.dataset.editId+",\"up\",this)' style='background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;' title='上移'>▲</button>" +
                 "<button type='button' class='move-down-btn lock-hide' data-id='"+tr.dataset.editId+"' onclick='moveRecord("+tr.dataset.editId+",\"down\",this)' style='background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;margin-right:0.3rem;' title='下移'>▼</button>" +
@@ -1126,7 +1120,6 @@ document.addEventListener('DOMContentLoaded', function() {
             '<td><span class="unit-badge">' + escHtml(rec.unit) + '</span></td>' +
             '<td class="remark-cell' + (rec.remark ? ' has-content' : '') + '">' + escHtml(rec.remark || '-') + '</td>' +
             '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">' + escHtml(unitHint) + (pieceHint ? '<br><span style="color:#0984e3;">' + escHtml(pieceHint) + '</span>' : '') + '</td>' +
-            '<td class="match-col" style="text-align:center;"></td>' +
             '<td style="white-space:nowrap;">' +
                 '<button type="button" class="move-up-btn lock-hide" data-id="' + rec.id + '" onclick="moveRecord(' + rec.id + ',\'up\',this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;" title="上移">▲</button>' +
                 '<button type="button" class="move-down-btn lock-hide" data-id="' + rec.id + '" onclick="moveRecord(' + rec.id + ',\'down\',this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;margin-right:0.3rem;" title="下移">▼</button>' +

@@ -17,7 +17,9 @@ var _smartFillOrderPk = null, _smartFillOrderId = null;
 // 不再整页 location.reload(),避免闪烁 + 滚动位置丢失。
 // ── 客户端构建出货明细行(tr)— 与 server 模板(templates/shipping-records.html:441-461)1:1 对齐 ──
 // 10 列固定:序号/重点/商品名称/规格/AI 比对/数量/单位/备注/辅助单位提示/操作
-// 「重点」「AI 比对」是虚拟占位列,服务端用 .no-eco / .no-match class 决定显示隐藏。
+// 「重点」是虚拟占位列,服务端用 .no-eco class 决定显示隐藏。
+// 「AI 比对」占位 td 始终保留(2026-08-04 后 match-col 服务端不渲染,
+// 由 JS 通过 _ensureMatchColumn 在首次有匹配结果时插入)。
 // 改 server 模板列结构时,这里必须同步改 —— 否则新旧行单元格数不一致会导致列错位。
 function buildShippingRecordRow(rec, tbody) {
     var tr = document.createElement('tr');
