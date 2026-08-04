@@ -63,11 +63,26 @@ class RefreshUpgradeTests(unittest.TestCase):
         self.assertIn('manual-verified-marker', body)
         self.assertIn('已人工确认', body)
 
-    def test_record_worst_status_map_is_server_source_of_truth(self):
-        """服务端首次渲染仍由 record_worst_status_map 决定 match-col,与 JS 刷新互不干扰。"""
-        # 服务端模板里的 match-col 守卫
-        m = re.search(r'<td class="match-col">\{%[^%]*set\s+_bst\s*=\s*record_worst_status_map', self.src)
-        self.assertIsNotNone(m, '服务端 match-col 仍由 record_worst_status_map 渲染(未删除该路径)')
+    def test_first_render_no_match_col_in_template(self):
+        """服务端首次渲染不渲染 match-col th/td;match-col 由 JS 动态插入。"""
+        # 1) 服务端模板里不应该出现 <td class="match-col">
+        self.assertNotRegex(
+            self.src,
+            r'<td\s+class="match-col"',
+            '服务端模板不应再渲染 <td class="match-col">',
+        )
+        # 2) 服务端模板里不应该出现 <th class="match-col">
+        self.assertNotRegex(
+            self.src,
+            r'<th\s+class="match-col"',
+            '服务端模板不应再渲染 <th class="match-col">',
+        )
+        # 3) 服务端模板里不应该再引用 record_worst_status_map
+        self.assertNotIn(
+            'record_worst_status_map',
+            self.src,
+            '服务端模板不应再引用 record_worst_status_map',
+        )
 
     def test_change_comments_mention_2026_07_30_fix(self):
         """留下修复日期锚点,后续维护者能通过 git blame 找到 bug 报告。"""

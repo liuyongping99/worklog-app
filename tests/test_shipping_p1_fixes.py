@@ -10,6 +10,7 @@
 - P1-10 批量新增原子化 + 报告跳过 + 全无效返回 400
 - P1-11 multipart 文件名单点(uuid.png,非 uuid..png)
 """
+import gc
 import io
 import os
 import re
@@ -26,19 +27,20 @@ from tests import fake_png_bytes as _PNG  # noqa: E402,F401
 import models._db as _db
 
 
-def rendered_match_statuses(html):
-    """只从服务端渲染的 <td class="match-col"> 单元格里取 data-match-status。
+def _extract_match_badges(html):
+    """从服务端渲染的 HTML 提取每行的 match_status。
 
-    不用纯文本 assertIn / HTMLParser —— 页面 <script> 里有徽章模板字符串,
-    且 JS 中 </script> 拆分会让 HTMLParser 的 CDATA 模式提前退出而误解析。
-    只匹配真实表格单元格最稳。
+    2026-08-04 改造:服务端不再渲染 match-col。match-col 由 JS 动态插入。
+    本测试现在只校验「服务端不渲染 match-col」(用 _server_has_match_col_html),
+    match-col 的行为测试在 tests/record_image_match_column_check.js (jsdom)。
     """
-    vals = []
-    for cell in re.findall(r'<td class="match-col">(.*?)</td>', html, re.S):
-        m = re.search(r'data-match-status="(\w+)"', cell)
-        if m:
-            vals.append(m.group(1))
-    return vals
+    return []
+
+
+def _server_has_match_col_html(html):
+    """服务端 HTML 是否包含 match-col 渲染(JS 字符串不算)。"""
+    server_html = re.sub(r'<script\b[^>]*>.*?</script>', '', html, flags=re.S | re.I)
+    return '<th class="match-col"' in server_html or '<td class="match-col"' in server_html
 
 
 def _drain_async_jobs(timeout=15):
@@ -83,6 +85,8 @@ class P1Base(unittest.TestCase):
         # 写到生产库,且 Windows 上会锁住临时 db 导致 unlink 失败。
         _drain_async_jobs()
         _db.DB_PATH = self._orig
+        # StaffDB 的旧连接依赖循环 GC 释放;Windows 删除临时 DB 前显式回收。
+        gc.collect()
         os.unlink(self.tmp.name)
         for p in self._cleanup_files:
             try:
@@ -189,7 +193,7 @@ class BadgeAggregationTests(P1Base):
             s['operator_id'] = sid
 
     def test_worst_wins_red_over_green(self):
-        """一行有 green + red 两张图时,首屏行级徽章应显红(突显最差)。"""
+        """服务端不渲染 match-col(match-col 由 JS 插入,行为测试在 jsdom)。"""
         from models import ShippingOrder, ShippingRecord, ShippingImage
         oid = ShippingOrder.create('2026-07-25', 'C')
         rid = ShippingRecord.create('2026-07-25', 'C', 'P', 'S', '1', 'y', '', oid)
@@ -199,13 +203,12 @@ class BadgeAggregationTests(P1Base):
         ShippingImage.set_match(r, 'red', 30.0, 'bad')
         self._login()
         html = self.client.get('/shipping-records?start_date=2026-07-25&end_date=2026-07-25').get_data(as_text=True)
-        # 该行 match-col 应含红牌(突显最差),不应是绿牌
-        statuses = rendered_match_statuses(html)
-        self.assertIn('red', statuses)
-        self.assertNotIn('green', statuses)
+        self.assertFalse(_server_has_match_col_html(html),
+            'match-col 应由 JS 动态插入,服务端不渲染')
+        # match-badge 行为由 tests/record_image_match_column_check.js (jsdom) 覆盖。
 
     def test_verified_red_downgraded(self):
-        """人工确认过的红牌视为已解决,单张确认红牌 → 显 green。"""
+        """服务端不渲染 match-col;人工确认后的徽章行为由 jsdom 覆盖。"""
         from models import ShippingOrder, ShippingRecord, ShippingImage
         oid = ShippingOrder.create('2026-07-25', 'C')
         rid = ShippingRecord.create('2026-07-25', 'C', 'P', 'S', '1', 'y', '', oid)
@@ -214,9 +217,9 @@ class BadgeAggregationTests(P1Base):
         ShippingImage.set_human_verified(r, True)
         self._login()
         html = self.client.get('/shipping-records?start_date=2026-07-25&end_date=2026-07-25').get_data(as_text=True)
-        statuses = rendered_match_statuses(html)
-        self.assertIn('green', statuses)
-        self.assertNotIn('red', statuses)
+        self.assertFalse(_server_has_match_col_html(html),
+            'match-col 应由 JS 动态插入,服务端不渲染')
+        # match-badge 行为由 tests/record_image_match_column_check.js (jsdom) 覆盖。
 
 
 class RecordUploadTests(P1Base):
