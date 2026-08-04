@@ -56,3 +56,88 @@ class TestClassifyProduct:
     def test_none_input(self):
         """None 输入 → None（不抛异常）."""
         assert self._classify(None) is None
+
+
+class TestGetHvCases:
+    """Test _get_hv_cases() — runs against real DB (integration)."""
+
+    def test_returns_list(self):
+        from blueprints.ocr_engine import DeepSeekEngine
+        cases = DeepSeekEngine._get_hv_cases('0201')
+        assert isinstance(cases, list)
+
+    def test_returns_at_most_3(self):
+        from blueprints.ocr_engine import DeepSeekEngine
+        cases = DeepSeekEngine._get_hv_cases('0201')
+        assert len(cases) <= 3
+
+    def test_unknown_category_returns_empty(self):
+        from blueprints.ocr_engine import DeepSeekEngine
+        cases = DeepSeekEngine._get_hv_cases('9999')
+        assert cases == []
+
+    def test_each_case_has_required_keys(self):
+        from blueprints.ocr_engine import DeepSeekEngine
+        cases = DeepSeekEngine._get_hv_cases('0201')
+        for c in cases:
+            assert 'product_name' in c
+            assert 'specification' in c
+
+
+class TestBuildFewShot:
+    """Test _build_few_shot() — pure string formatting."""
+
+    def test_empty_cases_returns_empty_string(self):
+        from blueprints.ocr_engine import DeepSeekEngine
+        assert DeepSeekEngine._build_few_shot([]) == ''
+
+    def test_format_includes_product_names(self):
+        from blueprints.ocr_engine import DeepSeekEngine
+        cases = [
+            {'product_name': '7P环保杂胶', 'specification': '0.8单面加面'},
+            {'product_name': '无纺布 A料', 'specification': 'A1.5m 200g'},
+        ]
+        result = DeepSeekEngine._build_few_shot(cases)
+        assert '7P环保杂胶' in result
+        assert '无纺布 A料' in result
+        assert '人工确认' in result
+
+    def test_truncates_to_3_cases(self):
+        from blueprints.ocr_engine import DeepSeekEngine
+        cases = [
+            {'product_name': f'商品{i}', 'specification': f'规格{i}'}
+            for i in range(10)
+        ]
+        result = DeepSeekEngine._build_few_shot(cases)
+        assert '商品0' in result
+        assert '商品2' in result
+        assert '商品9' not in result
+
+
+class TestCompareRowsIntegration:
+    """Test the post-processing relaxation — pure logic, no real API call."""
+
+    def test_relaxation_red_to_yellow_when_hv_exists(self):
+        from blueprints.ocr_engine import DeepSeekEngine
+        result = DeepSeekEngine._apply_few_shot_and_relaxation([
+            {'record_id': 1, 'match_status': 'red', 'reason': 'no match'},
+            {'record_id': 2, 'match_status': 'green', 'reason': 'matched'},
+        ], '0201', True)
+        assert result[0]['match_status'] == 'yellow'  # red → yellow
+        assert result[1]['match_status'] == 'green'    # green unchanged
+
+    def test_no_relaxation_when_no_hv(self):
+        from blueprints.ocr_engine import DeepSeekEngine
+        result = DeepSeekEngine._apply_few_shot_and_relaxation([
+            {'record_id': 1, 'match_status': 'red', 'reason': 'no match'},
+        ], '0301', False)
+        assert result[0]['match_status'] == 'red'  # unchanged
+
+    def test_relaxation_preserves_reason(self):
+        from blueprints.ocr_engine import DeepSeekEngine
+        result = DeepSeekEngine._apply_few_shot_and_relaxation([
+            {'record_id': 1, 'match_status': 'red',
+             'reason': 'OCR文字中未找到该商品信息'},
+        ], '0201', True)
+        assert result[0]['match_status'] == 'yellow'
+        assert '未找到' in result[0]['reason']

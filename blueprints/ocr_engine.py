@@ -655,6 +655,26 @@ class PaddleOCREngine(BaseOCREngine):
 
 
 # ═══════════════════════════════════════════════════════════════════
+# 品类关键词兜底表（_classify_product 在用）
+# 格式: [(category_code, [keyword1, keyword2, ...]), ...]
+# 匹配规则：按列表顺序，第一个 product_name 中含有关键词的行即命中
+# 关键词去掉了 'A料'/'B料'（它们更可能是产品等级而非品类）、'LB'（可能不是独立品类）
+# ═══════════════════════════════════════════════════════════════════
+CLASS_FALLBACK_KEYWORDS = [
+    ('0201', ['杂胶']),
+    ('0301', ['纯胶']),
+    ('0401', ['回力胶', 'EVA']),
+    ('0204', ['无纺布']),
+    ('0701', ['鱼鳞布', 'HA']),
+    ('0208', ['潜水胶']),
+    ('0601', ['PE板', 'PE']),
+    ('0501', ['不织布']),
+    ('0205', ['路华里']),
+    ('0302', ['热熔胶']),
+]
+
+
+# ═══════════════════════════════════════════════════════════════════
 # DeepSeek 结构化引擎（PaddleOCR 提取文字 + DeepSeek 转 JSON）
 # ═══════════════════════════════════════════════════════════════════
 
@@ -827,13 +847,207 @@ class DeepSeekEngine(BaseOCREngine):
         # ── 2026-07-30 自适应提示词:如果 rows 里携带 _supplement(layer2 大类 / layer3 规格),
         # 把它们拼到 prompt 末尾,DeepSeek 能参照此前人工确认案例做更宽松的判断。 ──
         supplements = [r.get('_supplement') for r in rows if r.get('_supplement')]
+        # ── 2026-08-04 自适应优化:分类 + few-shot 注入 ──
+        # 取第一条记录的品名做分类(一个 order 内通常同品类),有 hv 案例就拼到 prompt
+        category_code = None
+        has_hv = False
+        few_shot_block = ''
+        if rows:
+            first_name = rows[0].get('product_name', '')
+            if first_name:
+                category_code = self._classify_product(first_name)
+                if category_code:
+                    hv_cases = self._get_hv_cases(category_code)
+                    if hv_cases:
+                        has_hv = True
+                        few_shot_block = self._build_few_shot(hv_cases)
         if supplements:
             layer_text = '\n\n'.join(supplements)
-            prompt_text = base_prompt + '\n\n════════════════════════════════════════\n【自适应提示词(同品类 / 同规格历史人工案例)】\n════════════════════════════════════════\n' + layer_text
+            prompt_text = (base_prompt + few_shot_block +
+                           '\n\n════════════════════════════════════════\n'
+                           '【自适应提示词(同品类 / 同规格历史人工案例)】\n'
+                           '════════════════════════════════════════\n' + layer_text)
         else:
-            prompt_text = base_prompt
+            prompt_text = base_prompt + few_shot_block
         verdicts = self._call_api_with_prompt(prompt_text, multi=True)
+        # ── 后处理松弛:该品类有 hv → red 降级 yellow(放宽而非直接判红) ──
+        verdicts = self._apply_few_shot_and_relaxation(verdicts, category_code, has_hv)
         return {'verdicts': verdicts, 'prompt': prompt_text}
+
+    @staticmethod
+    def _classify_product(product_name):
+        """品名 → 品类代码（level 3 category_code）。
+
+        1. 先查 product 表（product_name → category_id → 向上取 level=3 父节点）
+        2. 兜底：CLASS_FALLBACK_KEYWORDS 子串匹配
+        3. 都无匹配 → None
+        """
+        if not product_name:
+            return None
+        try:
+            from models._db import get_db
+            conn = get_db()
+            cur = conn.cursor()
+            # ── 策略 1: product 表精确匹配 ──
+            cur.execute(
+                'SELECT p.category_id FROM product p '
+                'WHERE p.product_name = ? AND p.category_id IS NOT NULL LIMIT 1',
+                (product_name,)
+            )
+            row = cur.fetchone()
+            if row:
+                cat_id = row[0]
+                for _ in range(10):  # safety limit
+                    cur.execute(
+                        'SELECT parent_id, category_code, level '
+                        'FROM product_categories WHERE id = ?',
+                        (cat_id,)
+                    )
+                    cat_row = cur.fetchone()
+                    if not cat_row:
+                        break
+                    parent, code, level = cat_row
+                    if level == 3:
+                        conn.close()
+                        return code
+                    cat_id = parent
+            # ── 策略 2: 关键词兜底 ──
+            pn_lower = product_name.lower()
+            for code, keywords in CLASS_FALLBACK_KEYWORDS:
+                for kw in keywords:
+                    if kw.lower() in pn_lower:
+                        conn.close()
+                        return code
+            conn.close()
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
+    def _get_hv_cases(category_code):
+        """查该品类下人工确认过的记录，返回最新 3 条。
+
+        匹配逻辑：找 shipping_records.product_name 归属该品类或含该品类关键词，
+        再取 shipping_images.human_verified=1 的图片,按 id DESC 取最新 3 条
+        不同 (product_name, specification) 组合。
+
+        Args:
+            category_code: str — 品类代码（如 "0201"）
+
+        Returns:
+            list[dict] — 每项 {'product_name': str, 'specification': str}
+                        最多 3 条，无匹配 → 空列表
+        """
+        if not category_code:
+            return []
+
+        try:
+            from models._db import get_db
+            conn = get_db()
+            cur = conn.cursor()
+
+            # 构造 WHERE 条件:product 表命中该品类的品名 OR 关键词 LIKE
+            conditions = []
+            params = []
+
+            # (a) product 表归属该品类的品名
+            cur.execute(
+                'SELECT DISTINCT p.product_name FROM product p '
+                'JOIN product_categories pc ON p.category_id = pc.id '
+                'WHERE pc.category_code = ?',
+                (category_code,)
+            )
+            known_names = [r[0] for r in cur.fetchall()]
+            if known_names:
+                placeholders = ','.join(['?'] * len(known_names))
+                conditions.append(f'sr.product_name IN ({placeholders})')
+                params.extend(known_names)
+
+            # (b) 关键词 LIKE(同品类的 fallback 关键词)
+            for code, keywords in CLASS_FALLBACK_KEYWORDS:
+                if code == category_code:
+                    for kw in keywords:
+                        conditions.append('sr.product_name LIKE ?')
+                        params.append(f'%{kw}%')
+
+            if not conditions:
+                conn.close()
+                return []
+
+            where_clause = ' OR '.join(conditions)
+            query = (
+                'SELECT sr.product_name, sr.specification '
+                'FROM shipping_images si '
+                'JOIN shipping_records sr ON si.record_pk = sr.id '
+                f'WHERE si.human_verified = 1 AND ({where_clause}) '
+                'GROUP BY sr.product_name, sr.specification '
+                'ORDER BY MAX(si.id) DESC '
+                'LIMIT 3'
+            )
+            cur.execute(query, params)
+            results = [
+                {'product_name': r[0] or '', 'specification': r[1] or ''}
+                for r in cur.fetchall()
+            ]
+            conn.close()
+            return results
+        except Exception:
+            return []
+
+    @staticmethod
+    def _build_few_shot(cases):
+        """将参考案例格式化为 COMPARE_PROMPT 注入块。
+
+        Args:
+            cases: list[dict] — _get_hv_cases 的返回值，每项含 product_name + specification
+
+        Returns:
+            str — 注入 text block，cases 为空则返回 ''
+        """
+        if not cases:
+            return ''
+
+        cases = cases[:3]  # safety cap
+        lines = [
+            '\n\n════════════════════════════════════════',
+            '【参考案例：该品类此前已人工确认的匹配】',
+            '',
+            '以下标签照片此前经人工核查,确认与录入明细匹配。',
+            '请在当前判断中参考这些案例的匹配标准,采用同等的宽松度:',
+            '',
+        ]
+        for i, c in enumerate(cases, 1):
+            pn = c.get('product_name', '')
+            sp = c.get('specification', '')
+            lines.append(
+                f'{i}. 品名"{pn}" + 规格"{sp}"'
+                f'  → 匹配 ✓（人工确认）'
+            )
+        lines.append('')
+        lines.append('请用与上述案例一致的宽松度判断当前行。')
+        return '\n'.join(lines)
+
+    @staticmethod
+    def _apply_few_shot_and_relaxation(results, category_code, has_hv):
+        """后处理：当品类有 hv 记录时，将 red 降级为 yellow。
+
+        设计意图:该品类此前有人工确认案例,说明 AI 之前的 red 判定过严。
+        这次同样案例降级为 yellow,留给后续人工二次核对,而非直接判红。
+
+        Args:
+            results: list[dict] — DeepSeek 返回的原始结果
+            category_code: str | None — 品类代码
+            has_hv: bool — 该品类是否有 hv 案例
+
+        Returns:
+            list[dict] — 处理后的结果
+        """
+        if not has_hv:
+            return results
+        for item in results:
+            if item.get('match_status') == 'red':
+                item['match_status'] = 'yellow'
+        return results
 
     def compare_single_record(self, ocr_text, record):
         """2026-07-30 新增:对单条 record 比对 OCR 文字,供行级图上传及 AI判别按钮调用。
