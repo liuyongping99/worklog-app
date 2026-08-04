@@ -121,6 +121,20 @@ class RecordOcrTriggerTests(_Base):
             data=data, content_type='multipart/form-data',
         )
         self.assertEqual(resp.status_code, 201, resp.get_json())
+        img = resp.get_json()['images'][0]
+        # 2026-07-31 改造:行级图上传走后台线程,record_ocr 事件在异步任务里写。
+        # 必须在 mock 失效前等它跑完,否则线程会去调真 PaddleOCR。
+        import time
+        from blueprints.shipping import _ASYNC_JOBS
+        iid = img['image_id']
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            state = _ASYNC_JOBS.get(iid, {}).get('state')
+            if state in ('done', 'error'):
+                break
+            time.sleep(0.05)
+        else:
+            self.fail('异步 OCR 任务超时未结束')
 
         events = OcrMatchEvent.get_by_record(self.rid)
         self.assertEqual(len(events), 1)

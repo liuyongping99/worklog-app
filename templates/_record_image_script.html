@@ -107,6 +107,9 @@ function bindDeleteImageButtons() {
             var imageId = clickedBtn.getAttribute('data-image-id');
             // 兼容两种容器: 普通订单图片用 .img-item，AI 识别图片用 .ai-img-wrap
             var imgDiv = clickedBtn.closest('.img-item, .ai-img-wrap');
+            // 行级图(record)才有"删完需清 record-image-btn 红框"语义
+            var imgItemRecord = clickedBtn.closest('.img-item-record');
+            var recordPk = imgItemRecord ? imgItemRecord.getAttribute('data-record-pk') : null;
             confirmDialog('确定要删除这张图片吗？', function() {
                 fetch('{{ api_prefix }}/images/' + imageId, {
                     method: "DELETE"
@@ -117,7 +120,19 @@ function bindDeleteImageButtons() {
                         if (imgDiv) {
                             imgDiv.style.transition = 'opacity 0.3s';
                             imgDiv.style.opacity = "0";
-                            setTimeout(function() { imgDiv.remove(); }, 300);
+                            setTimeout(function() {
+                                imgDiv.remove();
+                                // 行级图删完后,如该 record 已无任何图片,把 🖼️ 按钮的 has-image 红框去掉
+                                if (recordPk) {
+                                    var remaining = document.querySelectorAll(
+                                        '.img-item-record[data-record-pk="' + recordPk + '"]').length;
+                                    if (remaining === 0) {
+                                        var imgBtn = document.querySelector(
+                                            '.record-image-btn[data-record-id="' + recordPk + '"]');
+                                        if (imgBtn) imgBtn.classList.remove('has-image');
+                                    }
+                                }
+                            }, 300);
                         } else {
                             // 兜底: 没找到容器，直接刷新页面
                             location.reload();
@@ -439,9 +454,9 @@ window.recordImageUploaded = function(data, recordPk, orderPk) {
     var productName = '';
     var specification = '';
     if (row) {
-        var tds = row.querySelectorAll('td');
-        productName = (tds[1] ? tds[1].textContent : '').trim();
-        specification = (tds[2] ? tds[2].textContent : '').trim();
+        // 用 class 选，不再依赖 td 位置（早期 tds[1]/tds[2] 会跟 eco-col 重叠错列）
+        productName = ((row.querySelector('.product-name-cell') || {}).textContent || '').trim();
+        specification = ((row.querySelector('.spec-cell') || {}).textContent || '').trim();
     }
     appendOrderImageArea(orderPk, data.images, {
         record_pk: recordPk,

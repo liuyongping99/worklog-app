@@ -143,6 +143,36 @@ class AiMatchGateTests(unittest.TestCase):
         victim = ShippingImage.get_by_id(other_img)
         self.assertIsNone(victim['match_status'])
 
+    @mock.patch('blueprints.shipping.get_ocr_engine')
+    def test_ai_match_writes_match_source_deepseek(self, mock_get_engine):
+        """ai-match 整单跑完后,本单图片 match_source 应写 deepseek(云端图标 ⊛/◇/◆)。
+
+        回归:shipping.py:1350 早期漏传 source=,默认成 local_fuzzy,徽章显示
+        成本地图标 ✓/⚠/✗,跟实际跑的引擎对不上。
+        """
+        from models import ShippingImage
+        # 已有 1 张图(setup 里创建的),再加 1 张让两个 record 都覆盖到
+        ShippingImage.create(order_pk=self.oid,
+                             file_path='upload/2026-07/gate-2.png', record_pk=self.rid)
+
+        fake_paddle = mock.MagicMock()
+        fake_paddle.extract_text.return_value = '硬加面 黑色'
+        fake_ds = mock.MagicMock()
+        fake_ds.compare_rows.return_value = [
+            {'record_id': self.rid, 'match_status': 'yellow', 'reason': '存疑'},
+        ]
+        mock_get_engine.side_effect = lambda name: fake_paddle if name == 'paddleocr' else fake_ds
+
+        resp = self.client.post(f'/api/v1/shipping-orders/{self.oid}/ai-match')
+        self.assertEqual(resp.status_code, 200)
+
+        imgs = ShippingImage.get_by_record(self.rid)
+        self.assertEqual(len(imgs), 2)
+        for img in imgs:
+            self.assertEqual(img['match_source'], 'deepseek',
+                f'ai-match 写库后 match_source 应为 deepseek,实际 {img["match_source"]}')
+            self.assertEqual(img['match_status'], 'yellow')
+
 
 if __name__ == '__main__':
     unittest.main()

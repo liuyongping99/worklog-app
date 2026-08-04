@@ -1347,7 +1347,7 @@ def api_v1_shipping_orders_ai_match(order_id):
         score = _SCORE.get(status, 30.0)
         reason = v.get('reason', '') or ''
         for img in ShippingImage.get_by_record(rid):
-            ShippingImage.set_match(img['id'], status, score, reason)
+            ShippingImage.set_match(img['id'], status, score, reason, source='deepseek')
             # 重跑 AI = 新一轮裁决,旧的人工确认作废 —— 否则上一轮被人工"放行"的红牌
             # 会继续顶着已核查的绿色外观,新裁决的风险就被静默吞掉了。
             ShippingImage.set_human_verified(img['id'], False)
@@ -1446,6 +1446,10 @@ def api_v1_shipping_orders_generate_prompt_suggestion(image_id):
     spec = (record or {}).get('specification', '')
     cc = cls['category_code'] if cls else None
     existing = CategoryPrompt.list_for_record(category_code=cc, product_name=pn, specification=spec)
+    # 溯源链:找这张图最近一条 human_verify 事件,把 id 透传给前端的 category-prompts 保存请求
+    # 之前写 img.get('_source_event_id') 是误读 — shipping_images 没有该列,永远 None
+    hv_event = OcrMatchEvent.get_latest_by_image(image_id, 'human_verify')
+    source_event_id = hv_event['id'] if hv_event else None
     return jsonify({
         'success': True,
         'suggestion': {
@@ -1454,7 +1458,7 @@ def api_v1_shipping_orders_generate_prompt_suggestion(image_id):
             'category_code': cc,
             'product_name_keyword': pn or None,
             'spec_pattern': '',
-            'source_event_id': img.get('_source_event_id'),
+            'source_event_id': source_event_id,
             'source_ocr_text': (img.get('ocr_text') or '')[:200],
             'source_ai_status': img.get('match_status') or '',
             'source_human_status': 'green',

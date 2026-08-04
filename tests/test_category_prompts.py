@@ -265,6 +265,36 @@ class SuggestionApiTests(_TempDb):
         # 自动填入的 category_code 应非空
         self.assertTrue(data['suggestion']['category_code'])
 
+    def test_suggestion_endpoint_links_to_human_verify_event(self):
+        """source_event_id 应指向最新一条 human_verify 事件(溯源链不断)。
+
+        回归:shipping.py:1457 早期写 img.get('_source_event_id'),但 shipping_images
+        没有该列 → 永远 None → 自适应提示词与人工确认事件的溯源链是断的。
+        """
+        from models import ShippingOrder, ShippingRecord, ShippingImage, OcrMatchEvent
+        oid = ShippingOrder.create('2026-07-30', 'C')
+        rid = ShippingRecord.create('2026-07-30', 'C', '环保杂胶', '0.8黑中加面', '50', 'y', '', oid)
+        iid = ShippingImage.create(oid, 'upload/2026-07/x.png', 'x.png', 'ai', record_pk=rid)
+        ShippingImage.set_match(iid, 'red', 0.4, 'OCR 未找到')
+
+        self._login()
+        # 必须走 manual-verify 端点才会写 human_verify 事件(直接 set_human_verified 不写)
+        v = self.client.post(f'/api/v1/shipping-orders/images/{iid}/manual-verify',
+                             json={'verified': True})
+        self.assertEqual(v.status_code, 200)
+
+        res = self.client.post(f'/api/v1/shipping-orders/images/{iid}/generate-prompt-suggestion')
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+
+        seid = data['suggestion']['source_event_id']
+        self.assertIsNotNone(seid, 'source_event_id 应指向 human_verify 事件,不应为 None')
+
+        # 验证这个 id 真能在 ocr_match_event 表里查到且 event_type=human_verify
+        hv = OcrMatchEvent.get_latest_by_image(iid, 'human_verify')
+        self.assertIsNotNone(hv, 'human_verify 事件必须存在')
+        self.assertEqual(seid, hv['id'])
+
     def test_suggestion_endpoint_404_on_missing_image(self):
         self._login()
         res = self.client.post('/api/v1/shipping-orders/images/999999/generate-prompt-suggestion')
