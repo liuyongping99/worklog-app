@@ -27,20 +27,65 @@ function badgeHtml(status, reason) {
 // 2. setRowMatchBadge — 把徽章贴到某行的 AI 比对 cell 上
 // 先清掉旧徽章，再插入新徽章（status 为空则只清）
 // 2026-07-30: 加 source 参数（默认 'local_fuzzy'），按来源分符号
+// 2026-08-04: 改为先调 _ensureMatchColumn 动态插列（match-col 由 JS 维护，不靠服务端渲染）
 function setRowMatchBadge(recordId, status, reason, source) {
     var tr = document.querySelector('.record-table tr[data-record-id="' + recordId + '"]');
     if (!tr) return;
-    var cell = tr.querySelector('.match-col');
-    if (!cell) return;
-    // 清旧
-    cell.querySelectorAll('.match-badge').forEach(function(b) { b.remove(); });
+    var table = tr.closest('table');
     var html = badgeHtml(status, reason, source || 'local_fuzzy');
-    if (html) {
-        cell.insertAdjacentHTML('afterbegin', html);
-        tr.dataset.matchBadgeHtml = html;  // 让编辑保存时仍能恢复
-    } else {
+    if (!html) {
+        // status 为空 → 只清 dataset,不插列
         delete tr.dataset.matchBadgeHtml;
+        return;
     }
+    // 首次有匹配结果时:插 th + 目标 td + 兄弟空 td(列对齐),已有列时只更新目标 td
+    _ensureMatchColumn(table, tr, html);
+    tr.dataset.matchBadgeHtml = html;  // 让编辑保存时仍能恢复
+}
+
+// 2.5 _ensureMatchColumn — 在 table 内动态插入 AI 比对列(首次有匹配结果时)
+// 位置: 规格 cell 之后(td[4])。表头 + 目标行 + 其他兄弟行(保持对齐)。
+// 注: targetRow.querySelector 使用 'td.match-col' 而非 '.match-col',避免 CSS 同时匹配 th 选错。
+function _ensureMatchColumn(table, targetRow, badgeHtml) {
+    if (!table || !targetRow) return;
+    var theadRow = table.querySelector('thead tr');
+    // 表头宽容:smart-add modal 可能没有 spec-cell class,fallback th:nth-child(4)
+    var specTh = theadRow && theadRow.querySelector('th.spec-cell, th:nth-child(4)');
+    var specTd = targetRow.querySelector('td.spec-cell');
+    var insertAfter = function (parent, ref, newEl) {
+        if (ref && ref.nextElementSibling) parent.insertBefore(newEl, ref.nextElementSibling);
+        else parent.appendChild(newEl);
+    };
+
+    // 1) 表头:尚未插入 th 时加一个
+    if (theadRow && !theadRow.querySelector('th.match-col')) {
+        var th = document.createElement('th');
+        th.className = 'match-col';
+        th.style.width = '55px';
+        th.textContent = 'AI 比对';
+        insertAfter(theadRow, specTh, th);
+    }
+
+    // 2) 目标行:已有 td 则只写,没有则先插再写
+    var targetTd = targetRow.querySelector('td.match-col');
+    if (!targetTd) {
+        targetTd = document.createElement('td');
+        targetTd.className = 'match-col';
+        targetTd.style.textAlign = 'center';
+        insertAfter(targetRow, specTd, targetTd);
+    }
+    targetTd.innerHTML = badgeHtml;
+
+    // 3) 表内其他兄弟行:插空 td(对齐)
+    table.querySelectorAll('tbody tr').forEach(function (tr) {
+        if (tr === targetRow) return;
+        if (tr.querySelector('td.match-col')) return;
+        var emptyTd = document.createElement('td');
+        emptyTd.className = 'match-col';
+        emptyTd.style.textAlign = 'center';
+        var ref = tr.querySelector('td.spec-cell');
+        insertAfter(tr, ref, emptyTd);
+    });
 }
 
 // 3. refreshRowMatchBadge — 重算并刷新某个 record 的行级 AI 比对徽章
@@ -74,7 +119,8 @@ function refreshRowMatchBadge(recordPk) {
     });
     var tr = document.querySelector('.record-table tr[data-record-id="' + recordPk + '"]');
     if (!tr) return;
-    var cell = tr.querySelector('.match-col');
+    // 2026-08-04:用 'td.match-col'(不用 '.match-col')避开 th 选择器干扰,即便有 th.match-col 也不会选错
+    var cell = tr.querySelector('td.match-col');
     if (!cell) return;
     cell.querySelectorAll('.match-badge').forEach(function(b) { b.remove(); });
     // 2026-08-03:统计该 record 下「已人工确认」的图。标记元素为 .manual-undo-btn（服务端/JS 确认后生成），

@@ -4,20 +4,24 @@
 匹配结果时通过 `_ensureMatchColumn` 动态插入。Smart-add 弹框的占位 td
 单独保留(行尚未入库,列结构先存在)。
 
-覆盖范围(3 个测试):
+覆盖范围(4 个测试):
 - shipping 页面首次 GET 不含 match-col / no-match
 - inbound 页面首次 GET 不含 match-col / no-match
 - loading 页面首次 GET 不含 match-col / no-match
+- _ensureMatchColumn / setRowMatchBadge 行为 (jsdom runner,走 subprocess 跑 node)
 
 注:本测试不主动跑行级图上传,但仍保留 `_drain_async_jobs()` 以防
 其他后续测试共享 _TempDb 时的污染。
 """
 import os
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 import time
 import unittest
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -133,6 +137,35 @@ class ServerSideNoMatchColTests(_TempDb):
         self.assertNotIn('<th class="match-col"', body)
         self.assertNotIn('<td class="match-col"', body)
         self.assertNotIn('no-match', body)
+
+
+class JsdomMatchColumnTests(unittest.TestCase):
+    """_ensureMatchColumn / setRowMatchBadge 行为测试(jsdom 抽真实函数跑)。
+
+    2026-08-04 改造:match-col 由 JS 动态插入;这里调 subprocess 跑
+    node scripts/record_image_match_column_check.js 验证三 case:
+    Case 1 空 table 插列、Case 2 已有列不重复插、Case 3 5 行表兄弟行对齐。
+    """
+
+    @unittest.skipUnless(
+        Path('tests', 'record_image_match_column_check.js').exists()
+        and shutil.which('node') is not None,
+        '需要 node + tests/record_image_match_column_check.js 才能跑',
+    )
+    def test_ensure_match_column_jsdom(self):
+        proc = subprocess.run(
+            ['node', 'tests/record_image_match_column_check.js'],
+            capture_output=True,
+        )
+        if proc.returncode != 0:
+            self.fail(
+                f"record_image_match_column_check.js 退出码 {proc.returncode}\n"
+                f"STDOUT: {proc.stdout.decode('utf-8', errors='replace')}\n"
+                f"STDERR: {proc.stderr.decode('utf-8', errors='replace')}"
+            )
+        out = proc.stdout.decode('utf-8', errors='replace')
+        self.assertIn('✅ record_image_match_column_check 通过', out,
+                      f'jsdom 检查脚本未通过:\n{out}')
 
 
 if __name__ == '__main__':
