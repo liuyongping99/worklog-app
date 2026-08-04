@@ -666,7 +666,7 @@ def trunc(value, limit=200):
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `python -m pytest tests/test_ocr_logging.py -v`
-Expected: PASS（26 passed）
+Expected: PASS（25 passed；brief 里 "26 passed" 是笔误——Tasks 1-2 是 16 个，Task 3 新增 9 个，总数 25）
 
 - [ ] **Step 5: 提交**
 
