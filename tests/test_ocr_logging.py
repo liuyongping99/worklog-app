@@ -13,6 +13,8 @@ from logging_setup import (TraceIdFilter, get_trace_id, init_logging,
                            new_trace_id)
 from blueprints.ocr_log import (clear_log_context, get_log_context, scrub,
                                 set_log_context, trunc)
+from blueprints.ocr_log import (image_payload, items_outcome, log_ocr_call,
+                                parsed_outcome, prompt_payload, text_outcome)
 
 
 def _make_handler(tmp_path, prefix='ocr', day=date(2026, 8, 4)):
@@ -254,3 +256,181 @@ def test_trunc_cuts_long_text_and_marks_length():
 
 def test_trunc_leaves_short_text_intact():
     assert trunc('hello', 200) == 'hello'
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Task 4: @log_ocr_call 装饰器
+# ═══════════════════════════════════════════════════════════════════
+
+
+@pytest.fixture
+def logdir(tmp_path, monkeypatch):
+    """每个测试独立的日志目录，返回读取 ocr 日志全文的函数。"""
+    monkeypatch.setenv('OCR_LOG_LEVEL', 'INFO')
+    init_logging(log_root=str(tmp_path))
+
+    def read():
+        for h in logging.getLogger('ocr').handlers:
+            h.flush()
+        files = list(tmp_path.rglob('ocr-*.log'))
+        return files[0].read_text(encoding='utf-8') if files else ''
+
+    return read
+
+
+@pytest.fixture
+def logdir_debug(tmp_path, monkeypatch):
+    monkeypatch.setenv('OCR_LOG_LEVEL', 'DEBUG')
+    init_logging(log_root=str(tmp_path))
+
+    def read():
+        for h in logging.getLogger('ocr').handlers:
+            h.flush()
+        files = list(tmp_path.rglob('ocr-*.log'))
+        return files[0].read_text(encoding='utf-8') if files else ''
+
+    return read
+
+
+LONG_PROMPT = '请比对以下标签与明细行：' + 'A' * 3000
+
+
+class _FakeEngine:
+    """模拟 5 种被包装方法的行为。"""
+
+    @log_ocr_call('ocr.fake', evt='ok_call', payload=prompt_payload,
+                  outcome=parsed_outcome)
+    def ok_call(self, prompt_text, multi=False):
+        return {'match_status': 'green', 'reason': '完全一致'}
+
+    @log_ocr_call('ocr.fake', evt='raiser', payload=prompt_payload,
+                  outcome=parsed_outcome)
+    def raiser(self, prompt_text, multi=False):
+        raise ValueError('DeepSeek 返回非 JSON')
+
+    @log_ocr_call('ocr.fake', evt='recognize', failed_if=lambda r: not r.get('success'),
+                  payload=image_payload, outcome=items_outcome)
+    def recognize(self, image_bytes, filename=''):
+        return {'success': False, 'error': 'AI 识别功能未配置'}
+
+    @log_ocr_call('ocr.fake', evt='recognize_ok', failed_if=lambda r: not r.get('success'),
+                  payload=image_payload, outcome=items_outcome)
+    def recognize_ok(self, image_bytes, filename=''):
+        return {'success': True, 'items': [{'product_name': '杂胶'}, {'product_name': '纯胶'}]}
+
+    @log_ocr_call('ocr.fake', evt='extract_text', failed_if=lambda r: not r,
+                  payload=image_payload, outcome=text_outcome)
+    def extract_text(self, image_bytes):
+        return ''          # 现实中 PaddleOCR 失败就是返回空串
+
+
+def test_success_at_info_logs_summary_without_prompt(logdir):
+    _FakeEngine().ok_call(LONG_PROMPT)
+    text = logdir()
+    assert 'evt=ok_call' in text
+    assert 'elapsed=' in text
+    assert 'AAAA' not in text                 # INFO 不写 prompt 全文
+
+
+def test_success_at_debug_logs_full_prompt(logdir_debug):
+    _FakeEngine().ok_call(LONG_PROMPT)
+    text = logdir_debug()
+    assert 'A' * 3000 in text                 # DEBUG 写全文
+
+
+def test_exception_logs_full_payload_at_info_level(logdir):
+    """核心加强项：失败无条件全量，不受 DEBUG 开关约束。"""
+    with pytest.raises(ValueError):
+        _FakeEngine().raiser(LONG_PROMPT)
+    text = logdir()
+    assert 'ERROR' in text
+    assert 'A' * 3000 in text                 # DEBUG 没开也有全文
+    assert 'Traceback' in text
+    assert 'DeepSeek 返回非 JSON' in text
+
+
+def test_success_false_return_treated_as_failure(logdir):
+    """recognize 吞异常返回 success=False，必须判为失败。"""
+    _FakeEngine().recognize(b'\xff\xd8\xff' * 100, 'a.jpg')
+    text = logdir()
+    assert 'ERROR' in text
+    assert 'AI 识别功能未配置' in text
+
+
+def test_empty_string_return_treated_as_failure(logdir):
+    """extract_text 失败返回空串，必须判为失败。"""
+    _FakeEngine().extract_text(b'\xff\xd8\xff' * 100)
+    text = logdir()
+    assert 'ERROR' in text
+    assert 'evt=extract_text' in text
+
+
+def test_successful_recognize_logged_as_info_with_item_count(logdir):
+    _FakeEngine().recognize_ok(b'\xff\xd8\xff' * 100, 'b.jpg')
+    text = logdir()
+    assert 'ERROR' not in text
+    assert 'items=2' in text
+    assert 'img=b.jpg' in text
+
+
+def test_decorator_is_transparent_to_return_value(logdir):
+    assert _FakeEngine().ok_call('p') == {'match_status': 'green', 'reason': '完全一致'}
+    assert _FakeEngine().recognize_ok(b'x', 'c.jpg')['success'] is True
+    assert _FakeEngine().extract_text(b'x') == ''
+
+
+def test_decorator_reraises_original_exception(logdir):
+    with pytest.raises(ValueError, match='DeepSeek 返回非 JSON'):
+        _FakeEngine().raiser('p')
+
+
+def test_image_bytes_never_written_to_log(logdir):
+    """图片字节绝不入日志 —— Moonshot 单图 base64 数百 KB。"""
+    blob = b'\x89PNG\r\n\x1a\n' + bytes(range(256)) * 40
+    _FakeEngine().recognize_ok(blob, 'big.jpg')
+    text = logdir()
+    assert 'PNG' not in text
+    assert 'size=' in text                    # 只记大小
+    assert 'img=big.jpg' in text
+
+
+def test_api_key_scrubbed_from_logged_prompt(logdir_debug):
+    _FakeEngine().ok_call('前缀 sk-abcd1234efgh5678ijkl 后缀')
+    text = logdir_debug()
+    assert 'sk-abcd1234efgh5678ijkl' not in text
+    assert 'sk-***' in text
+
+
+def test_business_context_appears_in_log(logdir):
+    def run():
+        set_log_context(order_id=610, record_id=88)
+        _FakeEngine().ok_call('p')
+    contextvars.copy_context().run(run)
+    text = logdir()
+    assert 'order_id=610' in text
+    assert 'record_id=88' in text
+
+
+def test_logging_failure_does_not_break_business_call(logdir, monkeypatch):
+    """日志系统炸了也不能影响业务返回。"""
+    def boom(*a, **kw):
+        raise RuntimeError('payload 提取炸了')
+
+    class _E:
+        @log_ocr_call('ocr.fake', evt='x', payload=boom, outcome=boom)
+        def go(self, prompt_text):
+            return {'ok': True}
+
+    assert _E().go('p') == {'ok': True}
+
+
+def test_trace_id_shared_across_calls_in_one_context(logdir):
+    def run():
+        new_trace_id()
+        _FakeEngine().ok_call('p1')
+        _FakeEngine().ok_call('p2')
+    contextvars.copy_context().run(run)
+    lines = [ln for ln in logdir().splitlines() if 'evt=ok_call' in ln]
+    assert len(lines) == 2
+    trace_ids = {ln.split('[')[1].split(']')[0] for ln in lines}
+    assert len(trace_ids) == 1 and '-' not in trace_ids
