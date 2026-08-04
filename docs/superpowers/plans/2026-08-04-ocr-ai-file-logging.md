@@ -487,7 +487,7 @@ def init_logging(app=None, log_root=None):
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `python -m pytest tests/test_ocr_logging.py -v`
-Expected: PASS（17 passed）
+Expected: PASS（16 passed；brief 里 "17 passed" 是笔误——Task 1 是 7 个，Task 2 新增 9 个，总数 16）
 
 - [ ] **Step 5: 提交**
 
