@@ -11,6 +11,8 @@ import threading
 
 from logging_setup import (TraceIdFilter, get_trace_id, init_logging,
                            new_trace_id)
+from blueprints.ocr_log import (clear_log_context, get_log_context, scrub,
+                                set_log_context, trunc)
 
 
 def _make_handler(tmp_path, prefix='ocr', day=date(2026, 8, 4)):
@@ -183,3 +185,72 @@ def test_app_log_ignores_info_level(tmp_path):
     app_files = list(tmp_path.rglob('app-*.log'))
     text = app_files[0].read_text(encoding='utf-8') if app_files else ''
     assert 'GET /shipping-records' not in text
+
+
+def test_log_context_roundtrip():
+    def run():
+        assert get_log_context() == {}
+        set_log_context(order_id=610, record_id=88)
+        assert get_log_context() == {'order_id': 610, 'record_id': 88}
+        set_log_context(image_id=7)
+        assert get_log_context()['image_id'] == 7
+        assert get_log_context()['order_id'] == 610      # 累加不覆盖
+        clear_log_context()
+        assert get_log_context() == {}
+    contextvars.copy_context().run(run)
+
+
+def test_log_context_ignores_none_values():
+    def run():
+        set_log_context(order_id=610, record_id=None)
+        assert get_log_context() == {'order_id': 610}
+    contextvars.copy_context().run(run)
+
+
+def test_log_context_returns_copy_not_live_dict():
+    def run():
+        set_log_context(order_id=610)
+        snapshot = get_log_context()
+        snapshot['order_id'] = 999
+        assert get_log_context()['order_id'] == 610
+    contextvars.copy_context().run(run)
+
+
+def test_log_context_propagates_into_background_thread():
+    box = {}
+
+    def outer():
+        set_log_context(order_id=610, record_id=88)
+        ctx = contextvars.copy_context()
+        t = threading.Thread(target=ctx.run, args=(lambda: box.update(c=get_log_context()),))
+        t.start(); t.join()
+
+    contextvars.copy_context().run(outer)
+    assert box['c'] == {'order_id': 610, 'record_id': 88}
+
+
+def test_scrub_removes_api_keys():
+    assert 'sk-abcd1234efgh5678' not in scrub('Bearer sk-abcd1234efgh5678 rest')
+    assert 'sk-***' in scrub('Bearer sk-abcd1234efgh5678 rest')
+    assert scrub('Bearer sk-abcd1234efgh5678 rest').endswith(' rest')
+
+
+def test_scrub_leaves_normal_text_alone():
+    text = '杂胶 加面 1.2mm sk-短'          # 太短不像 key，不动
+    assert scrub(text) == text
+
+
+def test_scrub_handles_non_string():
+    assert scrub(None) == ''
+    assert scrub(123) == '123'
+
+
+def test_trunc_cuts_long_text_and_marks_length():
+    out = trunc('x' * 500, 200)
+    assert len(out) < 260
+    assert out.startswith('x' * 200)
+    assert '500' in out              # 标注原始长度
+
+
+def test_trunc_leaves_short_text_intact():
+    assert trunc('hello', 200) == 'hello'
