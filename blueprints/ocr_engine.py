@@ -692,7 +692,7 @@ class DeepSeekEngine(BaseOCREngine):
     API_KEY = os.environ.get('DEEPSEEK_API_KEY', '')
     BASE_URL = 'https://api.deepseek.com/v1'
     MODEL = 'deepseek-v4-flash'  # 当前活跃;v4-flash 比 v4-pro 便宜约 10 倍,纯文本结构化够用
-    MAX_TOKENS = 4000
+    MAX_TOKENS = 8000
     TIMEOUT = 30
 
     STRUCT_PROMPT = (
@@ -1176,9 +1176,28 @@ class DeepSeekEngine(BaseOCREngine):
                     'content': self.STRUCT_PROMPT + ocr_text
                 }],
                 max_tokens=self.MAX_TOKENS,
-                timeout=self.TIMEOUT
+                timeout=self.TIMEOUT,
+                # 强制 JSON 输出:防止 DeepSeek 输出 markdown 围栏/前言导致 parse 失败
+                # (历史 bug: 17 行订单含特殊字符时,模型用尽 reasoning token,返回空 content)
+                response_format={'type': 'json_object'},
             )
+            finish_reason = response.choices[0].finish_reason
             raw = response.choices[0].message.content.strip()
+            # finish_reason='length' 表示 max_tokens 用尽 → 响应被截断,通常是 reasoning
+            # token 把 budget 吃完,JSON 还没写完。明确告知用户,而不是说「格式无法解析」
+            if finish_reason == 'length':
+                return {
+                    'success': False,
+                    'error': 'DeepSeek 响应被截断(订单行数过多或备注过长)',
+                    'hint': '建议:1) 拆分订单图片(每张 ≤ 10 行);2) 简化商品行的备注文字;3) 重试一次'
+                }
+            # stop 但 content 为空:模型返回了空响应(罕见,可能是 prompt 触发)
+            if not raw:
+                return {
+                    'success': False,
+                    'error': 'DeepSeek 返回内容为空',
+                    'hint': '可能原因:OCR 文字过长触发模型空响应。建议重试或切换到 Moonshot 引擎'
+                }
             # 剥离 markdown 围栏
             raw = re.sub(r'^\s*```[a-zA-Z]*\s*\n?', '', raw)
             raw = re.sub(r'\n?\s*```\s*$', '', raw)
