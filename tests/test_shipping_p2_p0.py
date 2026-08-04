@@ -14,6 +14,8 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from tests import fake_png_bytes as _PNG  # noqa: E402,F401
+
 import models._db as _db
 
 
@@ -98,7 +100,7 @@ class AiRecognizeValidateTests(Base):
         self.assertIn('不支持', body['error'] or '')
 
         # 合法扩展名但超大(11MB,超过 10MB 上限)
-        big = io.BytesIO(b'\x89PNG\r\n\x1a\n' + b'0' * (11 * 1024 * 1024))
+        big = io.BytesIO(_PNG() + b'0' * (11 * 1024 * 1024))
         r = self.client.post('/api/v1/shipping-orders/ai-recognize',
                              data={'image': (big, 'big.png')},
                              content_type='multipart/form-data')

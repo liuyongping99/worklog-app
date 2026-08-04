@@ -21,6 +21,8 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from tests import fake_png_bytes as _PNG  # noqa: E402,F401
+
 import models._db as _db
 
 
@@ -161,7 +163,7 @@ class AiMatchClearsVerifyTests(P1Base):
         os.makedirs(upload_dir, exist_ok=True)
         abspath = os.path.join(upload_dir, 'ver.png')
         with open(abspath, 'wb') as f:
-            f.write(b'\x89PNG\r\n\x1a\n' + b'0' * 64)
+            f.write(_PNG())
         self._cleanup_files.append(abspath)
         iid = ShippingImage.create(order_pk=oid, file_path='upload/2026-07/ver.png', record_pk=rid)
         ShippingImage.set_human_verified(iid, True)
@@ -229,7 +231,7 @@ class RecordUploadTests(P1Base):
         fake_paddle.extract_text.return_value = '硬加面 黑色'
         mock_factory.side_effect = lambda name: fake_paddle if name == 'paddleocr' else mock.DEFAULT
 
-        data = {'image': (io.BytesIO(b'\x89PNG\r\n\x1a\n' + b'0' * 64), 'label.png')}
+        data = {'image': (io.BytesIO(_PNG()), 'label.png')}
         resp = self.client.post(f'/api/v1/shipping-orders/records/{rid}/images',
                                 data=data, content_type='multipart/form-data')
         self.assertEqual(resp.status_code, 201)
@@ -331,7 +333,7 @@ class OcrEmptyTextTests(P1Base):
         oid = ShippingOrder.create('2026-07-25', 'C')
         rid = ShippingRecord.create('2026-07-25', 'C', '硬加面', '黑色', '1', 'y', '', oid)
         MockPaddle.return_value.extract_text.return_value = '   '  # 空白
-        data = {'image': (io.BytesIO(b'\x89PNG\r\n\x1a\n' + b'0' * 64), 'x.png')}
+        data = {'image': (io.BytesIO(_PNG()), 'x.png')}
         resp = self.client.post(f'/api/v1/shipping-orders/records/{rid}/images',
                                 data=data, content_type='multipart/form-data')
         self.assertEqual(resp.status_code, 201)

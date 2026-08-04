@@ -7,6 +7,8 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from tests import fake_png_bytes as _PNG  # noqa: E402,F401
+
 import models._db as _db
 
 
@@ -32,7 +34,7 @@ class AiMatchEndpointTests(unittest.TestCase):
         os.makedirs(self._upload_dir, exist_ok=True)
         self._img_abspath = os.path.join(self._upload_dir, 'a.png')
         with open(self._img_abspath, 'wb') as f:
-            f.write(b'\x89PNG\r\n\x1a\n' + b'0' * 64)
+            f.write(_PNG())
         ShippingImage.create(order_pk=self.oid, file_path='upload/2026-07/a.png', record_pk=self.rid)
         from app import create_app
         self.client = create_app().test_client()

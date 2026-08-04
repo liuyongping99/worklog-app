@@ -8,6 +8,8 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from tests import fake_png_bytes as _PNG  # noqa: E402,F401
+
 import models._db as _db
 
 
@@ -56,7 +58,7 @@ class AiMatchEventTriggerTests(_Base):
         os.makedirs(upload_dir, exist_ok=True)
         abspath = os.path.join(upload_dir, 'match.png')
         with open(abspath, 'wb') as f:
-            f.write(b'\x89PNG\r\n\x1a\n' + b'0' * 64)
+            f.write(_PNG())
         ShippingImage.create(order_pk=self.oid, file_path='upload/2026-07/match.png', record_pk=self.rid)
         ShippingImage.create(order_pk=self.oid, file_path='upload/2026-07/match.png', record_pk=rid2)
 
@@ -115,7 +117,7 @@ class RecordOcrTriggerTests(_Base):
 
         from models import OcrMatchEvent, ShippingImage
         from blueprints.shipping import BASE_DIR
-        data = {'image': (io.BytesIO(b'\x89PNG\r\n\x1a\n' + b'0' * 64), 'label.png')}
+        data = {'image': (io.BytesIO(_PNG()), 'label.png')}
         resp = self.client.post(
             f'/api/v1/shipping-orders/records/{self.rid}/images',
             data=data, content_type='multipart/form-data',
@@ -165,7 +167,7 @@ class RecordOcrTriggerTests(_Base):
 
         import base64
         from models import OcrMatchEvent
-        b64 = base64.b64encode(b'\x89PNG\r\n\x1a\n' + b'0' * 64).decode()
+        b64 = base64.b64encode(_PNG()).decode()
         data_url = f'data:image/png;base64,{b64}'
         resp = self.client.post(
             f'/api/v1/shipping-orders/records/{self.rid}/images',
@@ -199,7 +201,7 @@ class HumanVerifyEventTriggerTests(_Base):
         os.makedirs(upload_dir, exist_ok=True)
         abspath = os.path.join(upload_dir, 'v.png')
         with open(abspath, 'wb') as f:
-            f.write(b'\x89PNG\r\n\x1a\n' + b'0' * 64)
+            f.write(_PNG())
         iid = ShippingImage.create(order_pk=self.oid, file_path='upload/2026-07/v.png', record_pk=self.rid)
         ShippingImage.set_match(iid, 'red', 30.0, 'AI 觉得规格冲突')
 
@@ -238,7 +240,7 @@ class HumanVerifyEventTriggerTests(_Base):
         os.makedirs(upload_dir, exist_ok=True)
         abspath = os.path.join(upload_dir, 'u.png')
         with open(abspath, 'wb') as f:
-            f.write(b'\x89PNG\r\n\x1a\n' + b'0' * 64)
+            f.write(_PNG())
         iid = ShippingImage.create(order_pk=self.oid, file_path='upload/2026-07/u.png', record_pk=self.rid)
         sid = StaffDB.create('测试员', '调度')['id']
         with self.client.session_transaction() as s:
@@ -275,7 +277,7 @@ class WriteFailureResilienceTests(_Base):
         def boom(*a, **kw):
             raise RuntimeError('db connection lost')
         with mock.patch.object(OcrMatchEvent, 'create', side_effect=boom):
-            data = {'image': (io.BytesIO(b'\x89PNG\r\n\x1a\n' + b'0' * 64), 'x.png')}
+            data = {'image': (io.BytesIO(_PNG()), 'x.png')}
             resp = self.client.post(
                 f'/api/v1/shipping-orders/records/{self.rid}/images',
                 data=data, content_type='multipart/form-data',

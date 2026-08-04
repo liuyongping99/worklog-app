@@ -16,6 +16,8 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from tests import fake_png_stream as _fake_png  # noqa: E402,F401
+
 import models._db as _db
 
 
@@ -112,7 +114,7 @@ class ImageBtnHighlightTests(unittest.TestCase):
         fake_paddle.extract_text.return_value = ''
         mock_factory.side_effect = lambda name: fake_paddle if name == 'paddleocr' else mock.DEFAULT
 
-        data = {'image': (io.BytesIO(b'\x89PNG\r\n\x1a\n' + b'0' * 64), 'x.png')}
+        data = {'image': (_fake_png(), 'x.png')}
         resp = self.client.post(
             f'/api/v1/shipping-orders/records/{rid}/images',
             data=data, content_type='multipart/form-data',

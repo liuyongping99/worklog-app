@@ -19,13 +19,7 @@ from models.tasks_flow import StaffDB, TaskDB, TaskImageDB
 from models._db import get_db
 
 
-# 1x1 PNG(合法图片,符合 check_uploaded_image 的扩展名检查)
-_MINIMAL_PNG = (
-    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
-    b"\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4"
-    b"\x89\x00\x00\x00\rIDATx\x9cc\xfc\xff\xff?\x00\x05\xfe\x02\xfeA"
-    b"\xa4\xee\x9c\x00\x00\x00\x00IEND\xaeB`\x82"
-)
+from tests import fake_png_bytes as _MINIMAL_PNG  # 2026-08-04:用 Pillow 真生成,过 verify 校验
 
 
 class TaskImagesDeleteTest(unittest.TestCase):
@@ -76,7 +70,7 @@ class TaskImagesDeleteTest(unittest.TestCase):
         # 1) 上传图片(走 multipart)
         r = self.client.post(
             f"/api/v1/tasks/{self.tid}/images",
-            data={"stage": "装车照", "image": (io.BytesIO(_MINIMAL_PNG), "test.png")},
+            data={"stage": "装车照", "image": (io.BytesIO(_MINIMAL_PNG()), "test.png")},
             content_type="multipart/form-data",
         )
         self.assertEqual(r.status_code, 200, r.get_data(as_text=True))

@@ -394,15 +394,50 @@ def check_piece_mismatch(remark, quantity_str, conversion):
     return 'info' if parsed['pieces'] == 1 else 'warn'
 
 
-# ── 图片内容安全校验(M1 stub) ─────────────────────────
-# 完整实现(文件头魔数 + Pillow 解码 + 体积限制)留 P1;这里只做最小可启动 stub
+# ── 图片内容安全校验 ─────────────────────────────────
+# 三层防御:扩展名白名单 + 文件大小 + magic bytes + Pillow 真实解码
+# 拒绝伪装文件(如 .exe 改后缀 .png、PNG header 后跟随机字节)
+
+from PIL import Image, UnidentifiedImageError
 
 _ALLOWED_IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
 _MAX_IMAGE_BYTES = 10 * 1024 * 1024  # 10MB
+# 各扩展名对应的 magic bytes 头部(只读前 12 字节就够区分)
+_MAGIC_SIGNATURES = {
+    '.png':  [b'\x89PNG\r\n\x1a\n'],
+    '.jpg':  [b'\xff\xd8\xff'],
+    '.jpeg': [b'\xff\xd8\xff'],
+    '.gif':  [b'GIF87a', b'GIF89a'],
+    '.webp': [b'RIFF'],  # WebP 文件头 12 字节为 RIFF....WEBP
+    '.bmp':  [b'BM'],
+}
+
+
+def _check_magic(filepath, ext):
+    """读前 12 字节,验证 magic bytes 与扩展名匹配。"""
+    sigs = _MAGIC_SIGNATURES.get(ext)
+    if not sigs:
+        return  # 无 sig 时不拦(扩展名已白名单)
+    try:
+        with open(filepath, 'rb') as f:
+            head = f.read(12)
+    except OSError:
+        raise ValueError("无法读取文件")
+    if not any(head.startswith(s) for s in sigs):
+        raise ValueError(f"文件内容不是有效的 {ext} 图片(magic bytes 不匹配)")
+
+
+def _check_pillow(filepath):
+    """Pillow 真实解码 → 截断/损坏的图会抛 UnidentifiedImageError。"""
+    try:
+        with Image.open(filepath) as im:
+            im.verify()  # verify 不解码像素,只校验结构
+    except (UnidentifiedImageError, OSError, SyntaxError) as e:
+        raise ValueError(f"文件不是可识别的图片(Pillow 解码失败: {e})")
 
 
 def validate_image_content(filepath):
-    """校验已落盘文件是否为合法图片(M1 stub: 仅检查文件存在 + 扩展名 + 大小)。"""
+    """校验已落盘文件是否为合法图片(扩展名 + 大小 + magic + Pillow)。"""
     if not filepath or not os.path.exists(filepath):
         raise ValueError("文件不存在")
     ext = os.path.splitext(filepath)[1].lower()
@@ -413,22 +448,34 @@ def validate_image_content(filepath):
         raise ValueError("空文件")
     if size > _MAX_IMAGE_BYTES:
         raise ValueError(f"文件过大(>{_MAX_IMAGE_BYTES // 1024 // 1024}MB)")
+    _check_magic(filepath, ext)
+    _check_pillow(filepath)
     return True
 
 
 def check_uploaded_image(file_storage):
-    """校验上传的 FileStorage,返回扩展名(含 .)。M1 stub: 仅检查扩展名 + 大小。"""
+    """校验上传的 FileStorage,返回扩展名(含 .)。
+
+    三层防御:扩展名 + 大小 + magic bytes(读前 12 字节,不全量加载)。
+    Pillow 真实解码留到落盘后的 validate_image_content 里做。
+    """
     if not file_storage or not file_storage.filename:
         raise ValueError("未选择文件")
     ext = os.path.splitext(file_storage.filename)[1].lower()
     if ext not in _ALLOWED_IMAGE_EXTS:
         raise ValueError(f"不支持的图片格式: {ext}")
-    # 不读全文(避免内存峰值),靠 seek+length
+    # 大小(靠 seek+length,不读全文)
     file_storage.seek(0, os.SEEK_END)
     size = file_storage.tell()
     file_storage.seek(0)
     if size > _MAX_IMAGE_BYTES:
         raise ValueError(f"文件过大(>{_MAX_IMAGE_BYTES // 1024 // 1024}MB)")
+    # magic bytes(读前 12 字节)
+    head = file_storage.read(12)
+    file_storage.seek(0)
+    sigs = _MAGIC_SIGNATURES.get(ext, [])
+    if sigs and not any(head.startswith(s) for s in sigs):
+        raise ValueError(f"文件内容不是有效的 {ext} 图片(magic bytes 不匹配)")
     return ext
 
 

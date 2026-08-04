@@ -8,6 +8,8 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from tests import fake_png_stream as _fake_png  # noqa: E402,F401
+
 import models._db as _db
 
 
@@ -42,7 +44,7 @@ class RecordUploadMatchTests(unittest.TestCase):
         2026-07-31 改造:OCR+AI 比对改成后台线程异步跑,等待 _ASYNC_JOBS[iid]['state'] 完成。
         """
         mock_factory.return_value.extract_text.return_value = '硬加面 黑色 1.5m'
-        data = {'image': (io.BytesIO(b'\x89PNG\r\n\x1a\n' + b'0' * 64), 'label.png')}
+        data = {'image': (_fake_png(), 'label.png')}
         resp = self.client.post(
             f'/api/v1/shipping-orders/records/{self.rid}/images',
             data=data, content_type='multipart/form-data'
