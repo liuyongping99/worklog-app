@@ -50,3 +50,117 @@ class DailyFolderHandler(logging.FileHandler):
         except Exception:
             pass          # 切文件失败也要让这条日志尽力写出去
         super().emit(record)
+
+
+import random
+from contextvars import ContextVar
+
+# ═══════════════════════════════════════════════════════════════════
+# trace_id：串联一次请求内的多条 OCR 日志
+#
+# 用 ContextVar 而非 flask.g —— 行级图片 OCR 跑在 daemon 线程里
+# (blueprints/shipping.py 的 _spawn_record_image_processing)，那里没有
+# Flask 请求上下文。ContextVar 配合 contextvars.copy_context() 可跨线程传播。
+# ═══════════════════════════════════════════════════════════════════
+
+_TRACE_ID = ContextVar('worklog_trace_id', default=None)
+
+# 高 4 位由 PID 派生：Flask debug 模式 reloader 会起两个进程写同一文件，
+# 靠这个前缀区分是哪个进程写的。
+_PID_PREFIX = '%04x' % (os.getpid() & 0xFFFF)
+
+
+def new_trace_id():
+    """生成新 trace_id 并写入当前 context，返回之。"""
+    tid = _PID_PREFIX + '%04x' % random.getrandbits(16)
+    _TRACE_ID.set(tid)
+    return tid
+
+
+def get_trace_id():
+    """读当前 context 的 trace_id；未设置返回 '-'。"""
+    try:
+        return _TRACE_ID.get() or '-'
+    except Exception:
+        return '-'
+
+
+class TraceIdFilter(logging.Filter):
+    """给没有 trace_id 属性的 record 补上，否则 formatter 会 KeyError。"""
+
+    def filter(self, record):
+        if not hasattr(record, 'trace_id'):
+            record.trace_id = get_trace_id()
+        return True
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 日志系统初始化
+# ═══════════════════════════════════════════════════════════════════
+
+_FORMAT = '%(asctime)s %(levelname)-5s [%(trace_id)s] %(name)-14s %(message)s'
+_DATEFMT = '%Y-%m-%d %H:%M:%S'
+
+
+def _drop_our_handlers(logger):
+    """移除本模块之前装过的 handler —— 保证 init_logging 幂等。"""
+    for h in list(logger.handlers):
+        if isinstance(h, DailyFolderHandler) or getattr(h, '_worklog_console', False):
+            logger.removeHandler(h)
+            try:
+                h.close()
+            except Exception:
+                pass
+
+
+def init_logging(app=None, log_root=None):
+    """装好文件日志。幂等 —— 重复调用不会叠加 handler。
+
+    返回 'ocr' logger。
+    """
+    # 日志系统自身出错时不要往 stderr 喷、更不要抛给业务
+    logging.raiseExceptions = False
+
+    fmt = logging.Formatter(_FORMAT, datefmt=_DATEFMT)
+    trace_filter = TraceIdFilter()
+
+    # --- OCR/AI 专用日志 ---
+    level_name = os.environ.get('OCR_LOG_LEVEL', 'INFO').strip().upper()
+    ocr_level = getattr(logging, level_name, logging.INFO)
+    if not isinstance(ocr_level, int):
+        ocr_level = logging.INFO
+
+    ocr_logger = logging.getLogger('ocr')
+    _drop_our_handlers(ocr_logger)
+    ocr_logger.setLevel(ocr_level)
+    ocr_logger.propagate = False        # 不冒泡到 root，避免写进 app 日志重复一份
+
+    ocr_file = DailyFolderHandler('ocr', log_root)
+    ocr_file.setFormatter(fmt)
+    ocr_file.addFilter(trace_filter)
+    ocr_file.setLevel(logging.DEBUG)    # 级别由 logger 控制，handler 全放行
+    ocr_logger.addHandler(ocr_file)
+
+    console = logging.StreamHandler()
+    console._worklog_console = True
+    console.setFormatter(fmt)
+    console.addFilter(trace_filter)
+    ocr_logger.addHandler(console)      # 开发时终端仍然直接可见
+
+    # --- 应用总日志（Flask/蓝图的 current_app.logger.exception 等）---
+    root = logging.getLogger()
+    _drop_our_handlers(root)
+    root.setLevel(logging.WARNING)      # 挡掉 werkzeug 的 INFO 请求流水
+    app_file = DailyFolderHandler('app', log_root)
+    app_file.setFormatter(fmt)
+    app_file.addFilter(trace_filter)
+    app_file.setLevel(logging.WARNING)
+    root.addHandler(app_file)
+
+    # --- 每个请求开头生成 trace_id ---
+    if app is not None:
+        @app.before_request
+        def _assign_trace_id():
+            new_trace_id()
+
+    return ocr_logger
