@@ -224,7 +224,7 @@ class DailyFolderHandler(logging.FileHandler):
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `python -m pytest tests/test_ocr_logging.py -v`
-Expected: PASS（8 passed）
+Expected: PASS（7 passed；brief 里 "8 passed" 是笔误，列表里只有 7 个测试函数）
 
 - [ ] **Step 5: 提交**
 
