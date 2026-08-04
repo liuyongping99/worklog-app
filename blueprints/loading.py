@@ -24,6 +24,7 @@ from blueprints._helpers import (
 from blueprints.ocr_engine import PaddleOCREngine, get_ocr_engine, OCR_MATCH_PROMPT_VERSION
 from blueprints import _helpers
 from models._db import get_db
+from blueprints.ocr_log import set_log_context
 
 bp = Blueprint('loading', __name__)
 
@@ -450,6 +451,7 @@ def api_v1_loading_orders_move_record(record_id):
 @bp.route('/api/v1/loading-orders/ai-recognize', methods=['POST'])
 def loading_ai_recognize():
     """接收图片，调用 OCR 引擎识别商品表格，返回 JSON。"""
+    set_log_context(biz='loading', evt_src='ai_recognize')
     from blueprints.ocr_engine import get_ocr_engine
 
     engine_name = (
@@ -629,6 +631,7 @@ def _save_one_base64_image(data_url, upload_dir):
 @bp.route('/api/v1/loading-orders/records/<int:record_id>/images', methods=['POST'])
 def api_v1_loading_orders_record_upload_images(record_id):
     """上传装柜商品行图片(多文件),按上传顺序赋 sort_order → 201"""
+    set_log_context(biz='loading', record_id=record_id)
     record = LoadingOrderRecord.get_by_id(record_id)
     if not record:
         return jsonify({'success': False, 'error': '记录不存在'}), 404
@@ -804,9 +807,10 @@ def api_v1_loading_orders_fuzzy_match_image(image_id):
 @bp.route('/api/v1/loading-orders/images/<int:image_id>/ai-judge', methods=['POST'])
 def api_v1_loading_orders_ai_judge_image(image_id):
     """对已上传图片重新运行 DeepSeek AI 比对 → 返回新的判别结果。
-    
+
     流程: 取图→取关联商品行→取OCR文字→调用 DeepSeek compare_single_record→更新 loading_order_images→返回
     """
+    set_log_context(biz='loading', image_id=image_id)
     img = LoadingOrderImage.get_by_id(image_id)
     if not img:
         return jsonify({'success': False, 'error': '图片不存在'}), 404

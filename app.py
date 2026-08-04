@@ -22,6 +22,7 @@ import os
 from dotenv import load_dotenv
 from flask import Flask, redirect, request, session, url_for
 from models import init_db, Notice
+from logging_setup import init_logging
 
 # 在 create_app 外加载，import 阶段就读到，方便 models.py 也能用
 load_dotenv()
@@ -41,6 +42,10 @@ def create_app():
     # 实际写到项目根的 upload/YYYY-MM/ 下,通过 blueprints/upload.py 的
     # /upload/<path> 路由对外暴露——这里不再用 app.config['UPLOAD_FOLDER']。
     app.config['MAX_CONTENT_LENGTH'] = 20 * 1024 * 1024  # 20MB max（单次请求含图片）
+
+    # === 初始化日志（log/YYYYMM/ 下按天分文件）===
+    # 放在 init_db() 之前 —— 这样建表过程出错也能落盘,事后看 log/ 排查
+    init_logging(app)
 
     # === 初始化数据库 ===
     init_db()
@@ -115,6 +120,24 @@ def create_app():
             response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
             response.headers['Pragma'] = 'no-cache'
             response.headers['Expires'] = '0'
+        return response
+
+    # === 每次请求结束清空业务上下文 + 重置 trace_id ===
+    # 视图函数里调 set_log_context(...) 会写到主线程的 ContextVar;
+    # Flask 默认不做 contextvars 隔离,得在这里兜底 —— 否则下一次请求
+    # (或下一次测试)看到的业务上下文 / trace_id 就是上一次的值。
+    @app.after_request
+    def _reset_log_context(response):
+        try:
+            from blueprints.ocr_log import clear_log_context
+            clear_log_context()
+        except Exception:
+            pass
+        try:
+            from logging_setup import _TRACE_ID
+            _TRACE_ID.set(None)
+        except Exception:
+            pass
         return response
 
     # === 上传超限 413 友好返回 ===

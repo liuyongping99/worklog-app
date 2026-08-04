@@ -10,6 +10,7 @@ import base64
 import re
 import json
 import threading
+import contextvars
 import logging
 import time
 from datetime import date as date_cls, timedelta, datetime
@@ -29,6 +30,7 @@ from blueprints._helpers import (
 from blueprints.ocr_engine import PaddleOCREngine, get_ocr_engine, OCR_MATCH_PROMPT_VERSION
 from blueprints import _helpers
 from models._db import get_db
+from blueprints.ocr_log import set_log_context
 
 
 bp = Blueprint('shipping', __name__)
@@ -127,9 +129,12 @@ def _spawn_record_image_processing(image_id, filepath, record, order_id, record_
                                     rel_path, original_name, sort_order):
     """登记任务并启动后台线程，返回"处理中"图片字典(供上传端点立即返回)。"""
     _ASYNC_JOBS[image_id] = {'state': 'processing', 'started': time.time()}
+    # threading.Thread 不会自动传 contextvars —— 必须显式 copy_context().run(...)
+    # 把当前请求的 trace_id + 业务上下文带进后台线程,否则 OCR 日志全显示 '-'
+    ctx = contextvars.copy_context()
     t = threading.Thread(
-        target=_process_record_image_async,
-        args=(image_id, filepath, record, order_id, record_id),
+        target=ctx.run,
+        args=(_process_record_image_async, image_id, filepath, record, order_id, record_id),
         daemon=True,
     )
     t.start()
@@ -857,9 +862,10 @@ def api_v1_shipping_orders_fuzzy_match_image(image_id):
 @bp.route('/api/v1/shipping-orders/images/<int:image_id>/ai-judge', methods=['POST'])
 def api_v1_shipping_orders_ai_judge_image(image_id):
     """对已上传图片重新运行 DeepSeek AI 比对 → 返回新的判别结果。
-    
+
     流程: 取图→取关联商品行→取OCR文字→调用 DeepSeek compare_single_record→更新 shipping_images→返回
     """
+    set_log_context(biz='shipping', image_id=image_id)
     img = ShippingImage.get_by_id(image_id)
     if not img:
         return jsonify({'success': False, 'error': '图片不存在'}), 404
@@ -992,6 +998,7 @@ def _save_one_base64_image(data_url, upload_dir):
 @bp.route('/api/v1/shipping-orders/records/<int:record_id>/images', methods=['POST'])
 def api_v1_shipping_orders_record_upload_images(record_id):
     """上传商品行图片(多文件),按上传顺序赋 sort_order → 201"""
+    set_log_context(biz='shipping', record_id=record_id)
     record = ShippingRecord.get_by_id(record_id)
     if not record:
         return jsonify({'success': False, 'error': '记录不存在'}), 404
@@ -1139,6 +1146,7 @@ def shipping_records_ai_recognize():
 
     Query/Form 参数: engine=moonshot|paddleocr（默认: .env OCR_BACKEND 或 moonshot）
     """
+    set_log_context(biz='shipping', evt_src='ai_recognize')
     from blueprints.ocr_engine import get_ocr_engine
 
     # 确定引擎
@@ -1234,6 +1242,7 @@ def api_v1_shipping_orders_ai_match(order_id):
         200 - {'success': True, 'results': [...], 'summary': 'N 行已核对:G ✓ / Y ⚠ / R ✗'}
         500 - DeepSeek 调用失败
     """
+    set_log_context(biz='shipping', order_id=order_id)
     order = ShippingOrder.get_by_id(order_id)
     if not order:
         return jsonify({'success': False, 'error': '订单不存在'}), 404

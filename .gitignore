@@ -35,6 +35,9 @@ worklog.db.bak
 # 用户上传的图片（按月分组）
 upload/
 
+# 运行日志（log/YYYYMM/ 下按天分文件）
+log/
+
 # ===== Node.js =====
 node_modules/
 *.log

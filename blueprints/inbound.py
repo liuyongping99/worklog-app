@@ -23,6 +23,7 @@ from blueprints._helpers import (
     match_label_to_row, detect_bg_color,
 )
 from blueprints.ocr_engine import PaddleOCREngine, get_ocr_engine, OCR_MATCH_PROMPT_VERSION
+from blueprints.ocr_log import set_log_context
 
 bp = Blueprint('inbound', __name__)
 
@@ -515,6 +516,7 @@ def api_v1_inbound_orders_move_record(record_id):
 @bp.route('/api/v1/inbound-orders/ai-recognize', methods=['POST'])
 def inbound_ai_recognize():
     """接收图片，调用 OCR 引擎识别商品表格，返回 JSON。"""
+    set_log_context(biz='inbound', evt_src='ai_recognize')
     from blueprints.ocr_engine import get_ocr_engine
 
     engine_name = (
@@ -739,6 +741,7 @@ def api_v1_inbound_orders_ai_judge_image(image_id):
 
     流程: 取图→取关联商品行→取OCR文字→调用 DeepSeek compare_single_record→更新 inbound_images→返回
     """
+    set_log_context(biz='inbound', image_id=image_id)
     img = InboundImage.get_by_id(image_id)
     if not img:
         return jsonify({'success': False, 'error': '图片不存在'}), 404
@@ -944,6 +947,7 @@ def api_v1_inbound_orders_generate_prompt_suggestion(image_id):
 @bp.route('/api/v1/inbound-orders/records/<int:record_id>/images', methods=['POST'])
 def api_v1_inbound_orders_record_upload_images(record_id):
     """上传商品行图片(多文件),按上传顺序赋 sort_order → 201"""
+    set_log_context(biz='inbound', record_id=record_id)
     record = InboundRecord.get_by_id(record_id)
     if not record:
         return jsonify({'success': False, 'error': '记录不存在'}), 404

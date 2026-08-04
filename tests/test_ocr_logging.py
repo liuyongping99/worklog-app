@@ -473,3 +473,77 @@ def test_moonshot_unconfigured_key_logged_as_error(logdir, monkeypatch):
     assert 'ERROR' in text
     assert 'evt=recognize' in text
     assert 'AI 识别功能未配置' in text
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Task 6: 把日志接进 app — init_logging、线程传播、业务上下文
+# ═══════════════════════════════════════════════════════════════════
+
+
+def test_create_app_installs_file_logging(tmp_path, monkeypatch):
+    monkeypatch.setenv('OCR_LOG_LEVEL', 'INFO')
+    import logging_setup
+    monkeypatch.setattr(logging_setup, 'LOG_ROOT', str(tmp_path))
+    from app import create_app
+    create_app()
+    handlers = logging.getLogger('ocr').handlers
+    assert any(isinstance(h, DailyFolderHandler) for h in handlers)
+
+
+def test_request_gets_trace_id(tmp_path, monkeypatch):
+    monkeypatch.setenv('OCR_LOG_LEVEL', 'INFO')
+    import logging_setup
+    monkeypatch.setattr(logging_setup, 'LOG_ROOT', str(tmp_path))
+    from app import create_app
+    app = create_app()
+    seen = {}
+
+    # 用 /api/ 前缀绕开登录闸门(app.py 的 _require_login 把 /api/ 当公开)
+    @app.route('/api/__trace_probe')
+    def _probe():
+        seen['tid'] = get_trace_id()
+        return 'ok'
+
+    app.test_client().get('/api/__trace_probe')
+    assert seen['tid'] != '-'
+    assert len(seen['tid']) == 8
+
+
+def test_background_thread_spawn_propagates_context(monkeypatch):
+    """行级图片 OCR 跑在 daemon 线程，trace_id 与业务上下文必须带进去。
+
+    行为测试：真调一次 _spawn_record_image_processing，把它要起的目标函数
+    换成探针，断言后台线程里读到的 trace_id / 业务上下文与主线程一致。
+    不断言源码里有没有 'copy_context' 字样 —— 换等价写法不该让测试误报。
+    """
+    import blueprints.shipping as sh
+
+    done = threading.Event()
+    box = {}
+
+    def _probe(image_id, filepath, record, order_id, record_id):
+        box['trace'] = get_trace_id()
+        box['ctx'] = get_log_context()
+        done.set()
+
+    monkeypatch.setattr(sh, '_process_record_image_async', _probe)
+
+    def outer():
+        box['parent_trace'] = new_trace_id()
+        set_log_context(order_id=610, record_id=88)
+        sh._spawn_record_image_processing(
+            image_id=1, filepath='x.jpg', record={}, order_id=610,
+            record_id=88, rel_path='2026-08/x.jpg', original_name='x.jpg',
+            sort_order=0)
+
+    contextvars.copy_context().run(outer)
+    assert done.wait(timeout=5), '后台线程没跑起来'
+    assert box['trace'] == box['parent_trace'], \
+        'trace_id 没传进后台线程 —— 检查是否用了 contextvars.copy_context()'
+    assert box['ctx'] == {'order_id': 610, 'record_id': 88}, \
+        '业务上下文没传进后台线程'
+
+
+def test_gitignore_excludes_log_dir():
+    with open('.gitignore', encoding='utf-8') as f:
+        assert 'log/' in f.read()
