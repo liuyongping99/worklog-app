@@ -1089,7 +1089,7 @@ def _emit(log, evt, t0, in_sum, in_det, out_sum, out_det, failed=False, exc=None
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `python -m pytest tests/test_ocr_logging.py -v`
-Expected: PASS（39 passed）
+Expected: PASS（38 passed；brief 里 "39 passed" 是笔误；Tasks 1-3 共 25 个，Task 4 新增 13 个，总数 38）
 
 - [ ] **Step 5: 提交**
 
