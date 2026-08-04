@@ -434,3 +434,42 @@ def test_trace_id_shared_across_calls_in_one_context(logdir):
     assert len(lines) == 2
     trace_ids = {ln.split('[')[1].split(']')[0] for ln in lines}
     assert len(trace_ids) == 1 and '-' not in trace_ids
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Task 5: 5 个引擎收敛点接装饰器
+# ═══════════════════════════════════════════════════════════════════
+
+
+def test_all_five_engine_methods_are_decorated():
+    """5 个收敛点必须都挂上装饰器 —— 漏一个就有整条链路没日志。"""
+    from blueprints.ocr_engine import (DeepSeekEngine, MoonshotEngine,
+                                       PaddleOCREngine)
+    targets = [
+        (MoonshotEngine, 'recognize'),
+        (PaddleOCREngine, 'extract_text'),
+        (PaddleOCREngine, 'recognize'),
+        (DeepSeekEngine, '_call_api_with_prompt'),
+        (DeepSeekEngine, 'recognize'),
+    ]
+    for cls, name in targets:
+        fn = getattr(cls, name)
+        assert getattr(fn, '__wrapped__', None) is not None, \
+            '%s.%s 没有加 @log_ocr_call' % (cls.__name__, name)
+
+
+def test_engine_logger_lives_under_ocr_tree():
+    """ocr_engine 的模块 logger 必须在 'ocr.' 树下，否则日志跑去 app 文件。"""
+    from blueprints import ocr_engine
+    assert ocr_engine.logger.name.startswith('ocr')
+
+
+def test_moonshot_unconfigured_key_logged_as_error(logdir, monkeypatch):
+    """未配 key 时 recognize 返回 success=False —— 应记 ERROR。"""
+    from blueprints.ocr_engine import MoonshotEngine
+    monkeypatch.setattr(MoonshotEngine, 'API_KEY', '')
+    MoonshotEngine().recognize(b'\xff\xd8\xff', 'x.jpg')
+    text = logdir()
+    assert 'ERROR' in text
+    assert 'evt=recognize' in text
+    assert 'AI 识别功能未配置' in text
