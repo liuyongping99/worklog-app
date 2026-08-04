@@ -220,3 +220,21 @@ function _ensureMatchColumn(table, targetRow, badgeHtml) {
 - **测试 fixture 期望变化**：`tests/test_shipping_match_badge_refresh.py` 和 `tests/test_shipping_p1_fixes.py` 改断言可能引入新 bug——必须先红后绿。
 - **Smart-add 弹框一致性**：用户可能期望弹框也跟主表一致（也无 match-col），但弹框行**没有**图，删了会让弹框表格列宽乱。**保守保留占位**。
 - **多 table 隔离**：每个订单一个 `.record-table`。`_ensureMatchColumn` 必须在正确的 table 内操作——通过 `targetRow.closest('table')` 限定。
+
+---
+
+## Acceptance (2026-08-04)
+
+**执行报告**: 4 个 commit（145b405 / 1408810 / 24c9ae6 / d6dd4ad），详见 `.superpowers/sdd/2026-08-04-match-col-virtual/`。
+
+### 自动化验证
+
+- 324 tests PASS（含 4 个新增 `tests/test_match_column_dynamic.py`）
+- 0 regression on existing tests
+- DB 漂移: 0
+
+### 待跟进（非阻塞）
+
+- StaffDB 连接泄漏（models/tasks_flow.py:132/142）—— Task 4 reviewer 标 Minor M1，另开 task 修
+- `_extract_match_badges` no-op 占位 —— Task 4 reviewer 标 Minor M2
+- `_server_has_match_col_html` regex 对 `<script type="module">` self-closing 失效风险 —— Task 4 reviewer 标 Minor M3
