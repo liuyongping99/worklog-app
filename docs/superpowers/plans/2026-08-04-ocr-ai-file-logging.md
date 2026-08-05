@@ -1445,7 +1445,7 @@ log/
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `python -m pytest tests/test_ocr_logging.py -v`
-Expected: PASS（47 passed）
+Expected: PASS（45 passed；brief 里 "47 passed" 是笔误——Tasks 1-5 共 41 个，Task 6 新增 4 个，总数 45）
 
 - [ ] **Step 5: 跑全量测试**
 
