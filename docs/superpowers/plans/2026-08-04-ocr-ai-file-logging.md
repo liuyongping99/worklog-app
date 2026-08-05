@@ -224,7 +224,7 @@ class DailyFolderHandler(logging.FileHandler):
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `python -m pytest tests/test_ocr_logging.py -v`
-Expected: PASS（8 passed）
+Expected: PASS（7 passed；brief 里 "8 passed" 是笔误，列表里只有 7 个测试函数）
 
 - [ ] **Step 5: 提交**
 
@@ -487,7 +487,7 @@ def init_logging(app=None, log_root=None):
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `python -m pytest tests/test_ocr_logging.py -v`
-Expected: PASS（17 passed）
+Expected: PASS（16 passed；brief 里 "17 passed" 是笔误——Task 1 是 7 个，Task 2 新增 9 个，总数 16）
 
 - [ ] **Step 5: 提交**
 
@@ -666,7 +666,7 @@ def trunc(value, limit=200):
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `python -m pytest tests/test_ocr_logging.py -v`
-Expected: PASS（26 passed）
+Expected: PASS（25 passed；brief 里 "26 passed" 是笔误——Tasks 1-2 是 16 个，Task 3 新增 9 个，总数 25）
 
 - [ ] **Step 5: 提交**
 
@@ -1089,7 +1089,7 @@ def _emit(log, evt, t0, in_sum, in_det, out_sum, out_det, failed=False, exc=None
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `python -m pytest tests/test_ocr_logging.py -v`
-Expected: PASS（39 passed）
+Expected: PASS（38 passed；brief 里 "39 passed" 是笔误；Tasks 1-3 共 25 个，Task 4 新增 13 个，总数 38）
 
 - [ ] **Step 5: 提交**
 
@@ -1445,7 +1445,7 @@ log/
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `python -m pytest tests/test_ocr_logging.py -v`
-Expected: PASS（47 passed）
+Expected: PASS（45 passed；brief 里 "47 passed" 是笔误——Tasks 1-5 共 41 个，Task 6 新增 4 个，总数 45）
 
 - [ ] **Step 5: 跑全量测试**
 

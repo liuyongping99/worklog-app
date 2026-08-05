@@ -14,6 +14,9 @@ import logging
 from abc import ABC, abstractmethod
 import openai  # 提到顶层,避免 except 子句引用 _openai 模块时 UnboundLocalError
 
+from blueprints.ocr_log import (image_payload, items_outcome, log_ocr_call,
+                                parsed_outcome, prompt_payload, text_outcome)
+
 # Windows DLL fix: torch's shm.dll needs its lib directory on the DLL search path.
 # Must be called BEFORE any torch import (which happens transitively via PaddleOCR).
 if sys.platform == 'win32':
@@ -23,7 +26,7 @@ if sys.platform == 'win32':
         os.add_dll_directory(_torch_lib)
     os.add_dll_directory(os.path.dirname(sys.executable))
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('ocr.engine')
 
 # 提示词版本号 —— 改 COMPARE_PROMPT 时同时 bump,事件日志按此版本切分分析
 OCR_MATCH_PROMPT_VERSION = 'compare_rows_v2'
@@ -447,6 +450,9 @@ class MoonshotEngine(BaseOCREngine):
         raw_text = re.sub(r'\n?\s*```\s*$', '', raw_text)
         return raw_text.strip()
 
+    @log_ocr_call('ocr.moonshot', evt='recognize',
+                  failed_if=lambda r: not (r or {}).get('success'),
+                  payload=image_payload, outcome=items_outcome)
     def recognize(self, image_bytes, filename=''):
         if not self.API_KEY or self.API_KEY.startswith('sk-your-'):
             return {
@@ -601,6 +607,9 @@ class PaddleOCREngine(BaseOCREngine):
             # 缩放失败就直接用原图
             return image_bytes
 
+    @log_ocr_call('ocr.paddle', evt='extract_text',
+                  failed_if=lambda r: not r,          # 失败时吞异常返回空串
+                  payload=image_payload, outcome=text_outcome)
     def extract_text(self, image_bytes):
         """只做 OCR 提取纯文本（换行拼接），供行级/整单匹配复用。"""
         try:
@@ -620,6 +629,9 @@ class PaddleOCREngine(BaseOCREngine):
             logger.exception('PaddleOCR extract_text failed: %s', e)
             return ''
 
+    @log_ocr_call('ocr.paddle', evt='recognize',
+                  failed_if=lambda r: not (r or {}).get('success'),
+                  payload=image_payload, outcome=items_outcome)
     def recognize(self, image_bytes, filename=''):
         try:
             self._ensure_model()
@@ -1085,6 +1097,8 @@ class DeepSeekEngine(BaseOCREngine):
             'raw_response': raw,
         }
 
+    @log_ocr_call('ocr.deepseek', evt='call_api',
+                  payload=prompt_payload, outcome=parsed_outcome)
     def _call_api_with_prompt(self, prompt_text, multi: bool):
         """共用:对 prompt 调 DeepSeek,清洗 markdown,解析 JSON,统一返回格式。
 
@@ -1155,6 +1169,9 @@ class DeepSeekEngine(BaseOCREngine):
                     lines.append(text.strip())
         return '\n'.join(lines)
 
+    @log_ocr_call('ocr.deepseek', evt='recognize',
+                  failed_if=lambda r: not (r or {}).get('success'),
+                  payload=image_payload, outcome=items_outcome)
     def recognize(self, image_bytes, filename=''):
         if not self.API_KEY or self.API_KEY.startswith('sk-your-'):
             return {
