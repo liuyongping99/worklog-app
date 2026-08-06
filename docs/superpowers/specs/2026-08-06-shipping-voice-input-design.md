@@ -154,7 +154,10 @@ def lookup_phrase(phrase):
          {phrase_part: "白中磅", spec_part: "1.2", quantity: 20, unit: "支"},
          {phrase_part: "环保杂胶", spec_part: null, quantity: 50, unit: "个"}
        ]
-     - 失败降级:用规则切句(顿号/逗号/空白/`和`/`与` 分隔)
+     - 失败降级:用规则切句
+       - 分隔符:`、` `,` `。` `;` 空白 `和` `与` `加` `还有`
+       - 数量/单位提取:正则匹配 `数字+单位`,数字支持阿拉伯和中文(二十/五十)
+       - 规则切出的 item 自动填 quantity 和 unit,phrase_part = 剩余片段,spec_part = null
 
 7. 后端验证 phrase_part:
      - 在 level=4 类目名 fuzzy 验证(score > 60)
@@ -264,6 +267,16 @@ RA弹力胶
 
 `needs_disambiguation`:至少一个 item 有 ≥2 候选 → 前端必须弹框。false 时前端可一键直接插入。
 
+**score 字段语义**:
+- `mapping` source:`score=100`(口语映射表直接命中,无需相似度)
+- `fuzzy` source:0-100,RapidFuzz 综合分(品名 + 规格)
+- `llm_fallback` source:`score=95`(LLM 完全确定)或 `score=0`(LLM 返回 null)
+
+**spec_hint 用途**(弹框规格下拉):
+- 弹框选完 product_id 后,该商品的 specification 下拉里,`spec_hint` 命中的规格置顶
+- 用于:用户多次确认同一短语时,默认推荐该规格(简化选择)
+- 例:`白中磅` → product_id=169(白磅布三文治),spec_hint="中性" → 弹框规格下拉里"1.2中性"置顶
+
 ### 4.5 `/api/v1/voice/confirm` 流程
 
 ```
@@ -337,7 +350,8 @@ RA弹力胶
 
 **无数量兼容**:
 - 数量输入框为空 → 行标红 + 显示「⚠️ 请补充数量」
-- 「确认全部」按钮在该行未填数量前禁用(防止漏填)
+- 「确认全部」按钮在该行未填数量前禁用(防止漏填入库)
+- 用户可点击「❌ 删除该行」跳过该行,无需填数量
 
 ### 5.3 弹框状态机
 
