@@ -67,21 +67,24 @@ def _convert_to_baidu_format(audio_bytes: bytes, filename: str) -> tuple[bytes |
     """浏览器录音 webm → 百度 ASR 要求的 pcm raw (16k 16bit 单声道)。
     返回 (pcm_bytes, format)。失败返回 (None, '')。
     PCM raw 比 WAV 稳:WAV header 可能被百度解析挑剔。
+    若 env VOICE_DEBUG_SAVE=1,保留 webm + pcm 到 upload/voice-debug/<时间戳>/
     """
     import os
     import subprocess
     import tempfile
+    from datetime import datetime
 
     ffmpeg_path = os.environ.get('FFMPEG_PATH', 'ffmpeg')
     fmt = 'pcm'
+    debug_save = os.environ.get('VOICE_DEBUG_SAVE', '').strip() in ('1', 'true', 'yes')
 
+    # 临时文件始终用 temp dir(转码完删除,除非 debug mode)
     with tempfile.NamedTemporaryFile(suffix='.webm', delete=False) as src:
         src.write(audio_bytes)
         src_path = src.name
     dst_path = src_path + '.pcm'
 
     try:
-        # s16le = signed 16-bit little-endian raw PCM
         proc = subprocess.run(
             [ffmpeg_path, '-y', '-i', src_path,
              '-ar', '16000', '-ac', '1',
@@ -94,13 +97,29 @@ def _convert_to_baidu_format(audio_bytes: bytes, filename: str) -> tuple[bytes |
             return None, ''
         with open(dst_path, 'rb') as f:
             pcm_bytes = f.read()
-        # 百度短语音要求最少 1 秒,16k 16bit mono = 32000 字节/秒
-        # < 0.5 秒(< 16000 字节)直接拒,大概率是误触或录音没启
         if len(pcm_bytes) < 16000:
             logger.warning('音频过短: %d 字节(< 0.5 秒),百度可能拒', len(pcm_bytes))
             return None, ''
         logger.info('音频转码 OK: webm %d 字节 → pcm %d 字节 (~%.1f 秒)',
                     len(audio_bytes), len(pcm_bytes), len(pcm_bytes) / 32000)
+
+        # Debug:保留原始录音 + 转码结果
+        if debug_save:
+            try:
+                save_dir = os.path.join(
+                    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                    'upload', 'voice-debug',
+                    datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
+                )
+                os.makedirs(save_dir, exist_ok=True)
+                with open(os.path.join(save_dir, 'recording.webm'), 'wb') as f:
+                    f.write(audio_bytes)
+                with open(os.path.join(save_dir, 'recording.pcm'), 'wb') as f:
+                    f.write(pcm_bytes)
+                logger.info('Debug 录音已保存: %s', save_dir)
+            except Exception as e:
+                logger.warning('Debug 保存失败: %s', e)
+
         return pcm_bytes, fmt
     except FileNotFoundError:
         logger.error('ffmpeg 未找到: %s(请检查 FFMPEG_PATH)', ffmpeg_path)
@@ -109,6 +128,7 @@ def _convert_to_baidu_format(audio_bytes: bytes, filename: str) -> tuple[bytes |
         logger.error('ffmpeg 超时(>30s)')
         return None, ''
     finally:
+        # 清理 temp dir(debug mode 已复制走)
         for p in (src_path, dst_path):
             try:
                 os.unlink(p)
