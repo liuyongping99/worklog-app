@@ -1,0 +1,129 @@
+{# 语音录入弹框 - 共享模板
+   调用: {% include '_voice_input_modal.html' %}
+#}
+<style>
+.voice-modal {
+  display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5); z-index: 1000;
+  align-items: center; justify-content: center;
+}
+.voice-modal.show { display: flex; }
+.voice-modal .voice-dialog {
+  background: white; border-radius: 12px;
+  width: 600px; max-width: 92vw; max-height: 90vh; overflow: auto;
+  padding: 1.5rem;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+}
+.voice-modal .voice-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 1rem;
+}
+.voice-modal .voice-header h3 {
+  margin: 0; color: #2d3436; font-size: 1.15rem;
+}
+.voice-modal .voice-close {
+  background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #999;
+}
+.voice-modal .record-area {
+  text-align: center; padding: 2rem 0;
+}
+.voice-modal .record-btn {
+  width: 100px; height: 100px; border-radius: 50%;
+  background: #6c5ce7; color: white; border: none;
+  font-size: 2.5rem; cursor: pointer;
+  transition: transform 0.15s, background 0.15s;
+}
+.voice-modal .record-btn.recording {
+  background: #d63031; transform: scale(1.1);
+}
+.voice-modal .record-status {
+  margin-top: 1rem; color: #636e72; font-size: 0.9rem;
+}
+.voice-modal .recognized-text {
+  background: #f8f9fa; border: 1px solid #e9ecef;
+  padding: 0.5rem; border-radius: 6px; font-size: 0.85rem;
+  color: #495057; margin-bottom: 1rem; white-space: pre-wrap;
+}
+.voice-modal .candidate-row {
+  display: grid; grid-template-columns: 1.2fr 2fr 1.5fr 80px 80px auto;
+  gap: 0.5rem; align-items: center; padding: 0.5rem;
+  border-bottom: 1px solid #f1f3f5;
+}
+.voice-modal .candidate-row.invalid { background: #ffe5e5; }
+.voice-modal .candidate-row .phrase { color: #868e96; font-size: 0.85rem; }
+.voice-modal .candidate-row select, .voice-modal .candidate-row input {
+  padding: 0.3rem; border: 1px solid #dfe6e9;
+  border-radius: 4px; font-size: 0.85rem;
+}
+.voice-modal .candidate-row .del-btn {
+  background: #d63031; color: white; border: none;
+  padding: 0.25rem 0.5rem; border-radius: 4px; cursor: pointer; font-size: 0.8rem;
+}
+.voice-modal .candidate-row .invalid-mark {
+  color: #d63031; font-size: 0.75rem; margin-top: 0.25rem;
+}
+.voice-modal .actions {
+  display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem;
+}
+.voice-modal .actions button {
+  padding: 0.5rem 1rem; border: none; border-radius: 6px;
+  font-size: 0.9rem; cursor: pointer;
+}
+.voice-modal .actions .btn-cancel {
+  background: #f1f3f5; color: #333;
+}
+.voice-modal .actions .btn-confirm {
+  background: #00b894; color: white; font-weight: 600;
+}
+.voice-modal .actions .btn-confirm:disabled {
+  background: #b2bec3; cursor: not-allowed;
+}
+.voice-modal .add-row {
+  background: #74b9ff; color: white; border: none;
+  padding: 0.4rem 0.8rem; border-radius: 4px;
+  font-size: 0.85rem; cursor: pointer; margin-top: 0.5rem;
+}
+.voice-modal .loading {
+  text-align: center; padding: 2rem; color: #636e72;
+}
+.voice-modal .loading .spinner {
+  border: 3px solid #e9ecef; border-top-color: #6c5ce7;
+  border-radius: 50%; width: 36px; height: 36px;
+  animation: spin 0.8s linear infinite; margin: 0 auto 0.5rem;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+
+<div id="voiceModal" class="voice-modal">
+  <div class="voice-dialog">
+    <div class="voice-header">
+      <h3 id="voiceTitle">🎙️ 语音录入</h3>
+      <button type="button" class="voice-close" data-action="close">×</button>
+    </div>
+
+    <!-- 录音视图 -->
+    <div id="voiceRecordView" class="record-area">
+      <button type="button" id="voiceRecordBtn" class="record-btn">🎙️</button>
+      <div id="voiceRecordStatus" class="record-status">点击开始录音</div>
+    </div>
+
+    <!-- 识别中视图 -->
+    <div id="voiceLoadingView" class="loading" style="display:none;">
+      <div class="spinner"></div>
+      <div>识别中,请稍候...</div>
+    </div>
+
+    <!-- 候选确认视图 -->
+    <div id="voiceConfirmView" style="display:none;">
+      <div class="recognized-text" id="voiceRecognizedText"></div>
+      <div id="voiceCandidates"></div>
+      <button type="button" class="add-row" id="voiceAddRowBtn">➕ 手动添加行</button>
+      <div class="actions">
+        <button type="button" class="btn-cancel" data-action="close">取消</button>
+        <button type="button" class="btn-confirm" id="voiceConfirmBtn">✅ 确认全部</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/voice_input.js') }}"></script>
