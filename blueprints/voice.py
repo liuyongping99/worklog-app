@@ -13,7 +13,9 @@ bp = Blueprint('voice', __name__)
 
 @bp.route('/api/v1/voice/recognize', methods=['POST'])
 def voice_recognize():
-    """接收音频 → 返回候选 JSON"""
+    """接收音频 → 返回候选 JSON
+    浏览器送 webm → 服务端 ffmpeg 转 wav → 百度 ASR
+    """
     if 'audio' not in request.files:
         return jsonify({
             'success': False,
@@ -33,11 +35,17 @@ def voice_recognize():
             'hint': '请压缩到 10MB 以内',
         }), 400
 
-    audio_format = 'wav'  # 上游约定:浏览器走 ffmpeg 转 wav(JS 端做)
-    # TODO: V1.1 让前端传 audio_format 字段
+    # ffmpeg 转码: webm → wav(pcm 16k 16bit 单声道,百度要求)
+    wav_bytes, audio_format = _convert_to_baidu_format(audio_bytes, file.filename)
+    if wav_bytes is None:
+        return jsonify({
+            'success': False,
+            'error': '音频转码失败',
+            'hint': '检查 FFMPEG_PATH 是否配置正确',
+        }), 500
 
     try:
-        result = voice_pipeline.recognize(audio_bytes, audio_format=audio_format)
+        result = voice_pipeline.recognize(wav_bytes, audio_format=audio_format)
         return jsonify(result)
     except RuntimeError as e:
         logger.exception('语音识别失败: %s', e)
@@ -53,6 +61,52 @@ def voice_recognize():
             'error': f'识别异常:{type(e).__name__}',
             'hint': '请稍后重试',
         }), 500
+
+
+def _convert_to_baidu_format(audio_bytes: bytes, filename: str) -> tuple[bytes | None, str]:
+    """浏览器录音 webm → 百度 ASR 要求的 wav/pcm。
+    返回 (wav_bytes, format)。失败返回 (None, '')。
+    """
+    import os
+    import subprocess
+    import tempfile
+
+    ffmpeg_path = os.environ.get('FFMPEG_PATH', 'ffmpeg')
+    fmt = 'wav'  # 百度标准
+
+    # 写临时文件,ffmpeg 处理
+    with tempfile.NamedTemporaryFile(suffix='.webm', delete=False) as src:
+        src.write(audio_bytes)
+        src_path = src.name
+    dst_path = src_path + '.wav'
+
+    try:
+        # -ar 16000 -ac 1 -sample_fmt s16 → 16k 单声道 16bit(百度短语音要求)
+        proc = subprocess.run(
+            [ffmpeg_path, '-y', '-i', src_path,
+             '-ar', '16000', '-ac', '1', '-sample_fmt', 's16',
+             '-f', 'wav', dst_path],
+            capture_output=True, timeout=30,
+        )
+        if proc.returncode != 0:
+            logger.error('ffmpeg 失败: %s', proc.stderr.decode('utf-8', 'ignore')[:500])
+            return None, ''
+        with open(dst_path, 'rb') as f:
+            wav_bytes = f.read()
+        return wav_bytes, fmt
+    except FileNotFoundError:
+        logger.error('ffmpeg 未找到: %s(请检查 FFMPEG_PATH)', ffmpeg_path)
+        return None, ''
+    except subprocess.TimeoutExpired:
+        logger.error('ffmpeg 超时(>30s)')
+        return None, ''
+    finally:
+        # 清理临时文件
+        for p in (src_path, dst_path):
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
 
 
 @bp.route('/api/v1/voice/confirm', methods=['POST'])

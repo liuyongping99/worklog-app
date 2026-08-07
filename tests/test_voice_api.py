@@ -30,6 +30,12 @@ def _clear_voice_mapping_table():
 
 def test_recognize_endpoint_returns_json(client, monkeypatch):
     from blueprints import voice_pipeline
+    import blueprints.voice as voice_module
+    # 跳过 ffmpeg 转码(fake audio 不能转),直接返回原 bytes
+    monkeypatch.setattr(
+        voice_module, '_convert_to_baidu_format',
+        lambda audio_bytes, filename: (audio_bytes, 'wav')
+    )
     monkeypatch.setattr(
         voice_pipeline, 'recognize',
         lambda audio_bytes, audio_format='wav': {
