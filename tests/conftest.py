@@ -80,3 +80,14 @@ def _clear_paddle_ocr_cache(request):
         _engine_cache.pop('paddleocr', None)
     except Exception:
         pass
+
+
+@pytest.fixture
+def client():
+    """Flask test_client fixture。复用 conftest 已建好的 worklog_test.db。
+
+    命名约定参考 Flask 官方 pytest 文档;提供后,所有需要
+    `def test_xxx(client):` 的测试都能直接拿到 client。
+    """
+    from app import create_app
+    return create_app().test_client()
