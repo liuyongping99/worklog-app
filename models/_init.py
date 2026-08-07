@@ -751,6 +751,24 @@ def init_db():
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_task_items_task_id ON task_items(task_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_task_images_task_id ON task_images(task_id)')
 
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS voice_phrase_mapping (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            phrase TEXT NOT NULL,
+            product_id INTEGER NOT NULL,
+            spec_hint TEXT,
+            source TEXT NOT NULL DEFAULT 'user_confirmed',
+            use_count INTEGER NOT NULL DEFAULT 1,
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT NOT NULL,
+            last_used_at TEXT NOT NULL,
+            UNIQUE(phrase, product_id),
+            FOREIGN KEY (product_id) REFERENCES product(product_id) ON DELETE CASCADE
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_voice_phrase ON voice_phrase_mapping(phrase)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_voice_status ON voice_phrase_mapping(status)')
+
     conn.commit()
     conn.close()
 
