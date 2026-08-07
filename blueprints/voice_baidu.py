@@ -80,7 +80,8 @@ class BaiduASR:
         if data.get('err_no', 0) != 0:
             raise RuntimeError(
                 f'百度识别失败: err_no={data.get("err_no")}, '
-                f'err_msg={data.get("err_msg", "")}'
+                f'err_msg={data.get("err_msg", "")}, '
+                f'sn={data.get("sn", "")}'
             )
         result = data.get('result', [])
         if not result:

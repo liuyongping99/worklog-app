@@ -64,26 +64,24 @@ def voice_recognize():
 
 
 def _convert_to_baidu_format(audio_bytes: bytes, filename: str) -> tuple[bytes | None, str]:
-    """浏览器录音 webm → 百度 ASR 要求的 pcm (16k 16bit 单声道 raw)。
+    """浏览器录音 webm → 百度 ASR 要求的 pcm raw (16k 16bit 单声道)。
     返回 (pcm_bytes, format)。失败返回 (None, '')。
-    用 PCM raw 而非 WAV(避开 WAV header 兼容性陷阱)
+    PCM raw 比 WAV 稳:WAV header 可能被百度解析挑剔。
     """
     import os
     import subprocess
     import tempfile
 
     ffmpeg_path = os.environ.get('FFMPEG_PATH', 'ffmpeg')
-    fmt = 'pcm'  # 用 raw PCM,百度更稳
+    fmt = 'pcm'
 
-    # 写临时文件,ffmpeg 处理
     with tempfile.NamedTemporaryFile(suffix='.webm', delete=False) as src:
         src.write(audio_bytes)
         src_path = src.name
     dst_path = src_path + '.pcm'
 
     try:
-        # -ar 16000 -ac 1 -f s16le -acodec pcm_s16le
-        # s16le = signed 16-bit little-endian raw PCM(百度短语音要求,无 header)
+        # s16le = signed 16-bit little-endian raw PCM
         proc = subprocess.run(
             [ffmpeg_path, '-y', '-i', src_path,
              '-ar', '16000', '-ac', '1',
@@ -97,7 +95,7 @@ def _convert_to_baidu_format(audio_bytes: bytes, filename: str) -> tuple[bytes |
         with open(dst_path, 'rb') as f:
             pcm_bytes = f.read()
         # 百度短语音要求最少 1 秒,16k 16bit mono = 32000 字节/秒
-        # < 16000 字节(< 0.5 秒)直接拒,避免无效请求
+        # < 0.5 秒(< 16000 字节)直接拒,大概率是误触或录音没启
         if len(pcm_bytes) < 16000:
             logger.warning('音频过短: %d 字节(< 0.5 秒),百度可能拒', len(pcm_bytes))
             return None, ''
