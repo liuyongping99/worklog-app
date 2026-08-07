@@ -237,6 +237,74 @@ document.querySelectorAll('.btn-delete').forEach(btn => {
 
 ---
 
+## 语音录入（出货订单）
+
+### 功能概述
+出货订单页新增 🎙️ 按钮，用户用自然口语说出"客户+商品明细"，系统自动：
+1. 浏览器录音（MediaRecorder API）→ webm 音频
+2. 上传到后端 → 百度 ASR 转文字
+3. DeepSeek 按 108 个叶子类目切句 → `{customer, items[]}`
+4. 每个口语短语 3 路径匹配：
+   - **口语映射表**（快路径，自动积累）
+   - **RapidFuzzy product 表**（中路径，1145 SKU）
+   - **DeepSeek 兜底**（慢路径）
+5. 用户在弹框确认候选 → 写映射表 + 插入出货明细行
+
+### 前置依赖
+1. **ffmpeg**：https://ffmpeg.org/download.html
+   - Windows：下载 zip 解压，在 `.env` 配置 `FFMPEG_PATH`
+   - Linux：`sudo apt install ffmpeg`
+   - macOS：`brew install ffmpeg`
+2. **百度短语音识别 API key**：
+   - 访问 https://console.bce.baidu.com/ 创建应用
+   - 开通「短语音识别」服务
+   - 拿到 API Key + Secret Key
+3. **DeepSeek API key**（用于切句 + 兜底）：https://platform.deepseek.com/
+4. **Chrome / Edge 桌面版**（支持 MediaRecorder API）
+
+### 配置 `.env`
+```bash
+BAIDU_API_KEY=your_api_key
+BAIDU_SECRET_KEY=your_secret_key
+FFMPEG_PATH=/path/to/ffmpeg
+DEEPSEEK_API_KEY=sk-your-deepseek-key
+```
+
+### 使用
+1. 访问 `/shipping-records`
+2. 填日期 + 客户
+3. 点击「🎙️ 语音录入」 → 系统自动创建订单 + 打开弹框
+4. 点 🎙️ 按钮开始录音（按住或点停）→ 等待识别
+5. 弹框显示候选行（数量为空时标红 + 禁用确认）
+6. 点击「✅ 确认全部」 → 自动写映射表 + 插入明细行
+
+### 口语短语映射管理
+访问 `/products` → 「🎙️ 口语短语映射」 tab：
+- 查看所有自动积累的映射（use_count + status + source）
+- 手工启用/停用某条映射
+- 删除误识别的映射
+- 手动新增（选商品 + 填短语）
+
+### 工作原理（快/中/慢 3 路径）
+```
+录音 → 百度 ASR → 文字
+  ↓
+DeepSeek 切句（按类目树基准） → {customer, items[]}
+  ↓
+每个 item 3 路径匹配:
+  1. voice_phrase_mapping 表（命中 → score=100）
+  2. RapidFuzzy product 表（fuzzy → score=0-100）
+  3. DeepSeek 兜底（仅 fuzzy 空时 → score=95）
+  ↓
+前端弹框显示候选 → 用户确认
+  ↓
+确认时 upsert 映射表（use_count 门控：>= 2 自动 active）
+  ↓
+批量插入 ShippingRecord
+```
+
+---
+
 ## 启动方式
 
 ```bash
