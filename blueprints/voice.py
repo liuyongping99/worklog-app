@@ -76,3 +76,61 @@ def voice_confirm():
             'success': False,
             'error': f'确认失败:{type(e).__name__}',
         }), 500
+
+
+# ────────────────────────────────────────────────────────────
+# 口语短语映射管理(CRUD)— 给产品页 tab 用
+# ────────────────────────────────────────────────────────────
+from models import VoiceMapping  # 避免循环:放最后
+
+
+@bp.route('/api/v1/voice/mappings', methods=['GET'])
+def voice_mappings_list():
+    """管理页用:列出口语映射"""
+    search = request.args.get('search')
+    mappings = VoiceMapping.list_all(search=search)
+    return jsonify({'success': True, 'mappings': mappings})
+
+
+@bp.route('/api/v1/voice/mappings', methods=['POST'])
+def voice_mappings_create():
+    """新增口语映射"""
+    body = request.get_json(silent=True) or {}
+    phrase = body.get('phrase', '').strip()
+    product_id = body.get('product_id')
+    spec_hint = body.get('spec_hint')
+    if not phrase or not product_id:
+        return jsonify({'success': False, 'error': '缺少 phrase 或 product_id'}), 400
+    try:
+        mapping = VoiceMapping.upsert(
+            phrase=phrase,
+            product_id=product_id,
+            spec_hint=spec_hint,
+            source='user_confirmed',
+        )
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    return jsonify({'success': True, 'mapping': mapping})
+
+
+@bp.route('/api/v1/voice/mappings/<int:mapping_id>', methods=['PATCH'])
+def voice_mappings_patch(mapping_id):
+    """编辑/启用/停用"""
+    body = request.get_json(silent=True) or {}
+    status = body.get('status')
+    if status:
+        try:
+            mapping = VoiceMapping.set_status(mapping_id, status)
+        except ValueError as e:
+            return jsonify({'success': False, 'error': str(e)}), 400
+        if not mapping:
+            return jsonify({'success': False, 'error': '映射不存在'}), 404
+        return jsonify({'success': True, 'mapping': mapping})
+    return jsonify({'success': False, 'error': '暂未实现编辑接口'}), 400
+
+
+@bp.route('/api/v1/voice/mappings/<int:mapping_id>', methods=['DELETE'])
+def voice_mappings_delete(mapping_id):
+    """删除口语映射"""
+    VoiceMapping.delete(mapping_id)
+    return jsonify({'success': True})
