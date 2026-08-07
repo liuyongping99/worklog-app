@@ -93,10 +93,27 @@
   }
 
   function renderConfirmView(data) {
-    recognizedTextEl.textContent = '已识别:' + (data.recognized_text || '');
+    // 顶部:识别原文 + 匹配路径统计
+    var procText = '已识别:' + (data.recognized_text || '');
+    var items = data.items || [];
+    var procStats = { mapping: 0, fuzzy: 0, llm_fallback: 0, none: 0 };
+    items.forEach(function (it) {
+      var srcs = (it.candidates || []).map(function (c) { return c.source; });
+      if (srcs.indexOf('mapping') >= 0) procStats.mapping++;
+      else if (srcs.indexOf('fuzzy') >= 0) procStats.fuzzy++;
+      else if (srcs.indexOf('llm_fallback') >= 0) procStats.llm_fallback++;
+      else procStats.none++;
+    });
+    var procSummary = ' | 匹配:映射表 ' + procStats.mapping +
+                      ' / 模糊 ' + procStats.fuzzy +
+                      ' / LLM兜底 ' + procStats.llm_fallback +
+                      ' / 未命中 ' + procStats.none;
+    recognizedTextEl.textContent = procText + procSummary;
+    recognizedTextEl.style.fontSize = '0.8rem';
+
     candidatesEl.innerHTML = '';
     rowCounter = 0;
-    (data.items || []).forEach(function (item) {
+    items.forEach(function (item) {
       addRow(item);
     });
     showView('confirm');
@@ -122,7 +139,13 @@
       var opt = document.createElement('option');
       opt.value = c.product_id;
       opt.dataset.spec = c.specification || '';
-      opt.textContent = c.product_name ? (c.product_name + ' - ' + (c.specification || '无规格')) : ('商品#' + c.product_id);
+      // source 中文映射 + score
+      var srcLabel = { mapping: '🎯映射', fuzzy: '🔍模糊', llm_fallback: '🤖LLM' }[c.source] || c.source;
+      var scoreTxt = (c.score != null) ? (' ' + Math.round(c.score)) : '';
+      var nameTxt = c.product_name
+        ? (c.product_name + ' - ' + (c.specification || '无规格'))
+        : ('商品#' + c.product_id);
+      opt.textContent = nameTxt + '  [' + srcLabel + scoreTxt + ']';
       productSelect.appendChild(opt);
     });
     var manualOpt = document.createElement('option');
