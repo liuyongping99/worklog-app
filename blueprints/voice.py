@@ -64,36 +64,46 @@ def voice_recognize():
 
 
 def _convert_to_baidu_format(audio_bytes: bytes, filename: str) -> tuple[bytes | None, str]:
-    """浏览器录音 webm → 百度 ASR 要求的 wav/pcm。
-    返回 (wav_bytes, format)。失败返回 (None, '')。
+    """浏览器录音 webm → 百度 ASR 要求的 pcm (16k 16bit 单声道 raw)。
+    返回 (pcm_bytes, format)。失败返回 (None, '')。
+    用 PCM raw 而非 WAV(避开 WAV header 兼容性陷阱)
     """
     import os
     import subprocess
     import tempfile
 
     ffmpeg_path = os.environ.get('FFMPEG_PATH', 'ffmpeg')
-    fmt = 'wav'  # 百度标准
+    fmt = 'pcm'  # 用 raw PCM,百度更稳
 
     # 写临时文件,ffmpeg 处理
     with tempfile.NamedTemporaryFile(suffix='.webm', delete=False) as src:
         src.write(audio_bytes)
         src_path = src.name
-    dst_path = src_path + '.wav'
+    dst_path = src_path + '.pcm'
 
     try:
-        # -ar 16000 -ac 1 -sample_fmt s16 → 16k 单声道 16bit(百度短语音要求)
+        # -ar 16000 -ac 1 -f s16le -acodec pcm_s16le
+        # s16le = signed 16-bit little-endian raw PCM(百度短语音要求,无 header)
         proc = subprocess.run(
             [ffmpeg_path, '-y', '-i', src_path,
-             '-ar', '16000', '-ac', '1', '-sample_fmt', 's16',
-             '-f', 'wav', dst_path],
+             '-ar', '16000', '-ac', '1',
+             '-acodec', 'pcm_s16le',
+             '-f', 's16le', dst_path],
             capture_output=True, timeout=30,
         )
         if proc.returncode != 0:
             logger.error('ffmpeg 失败: %s', proc.stderr.decode('utf-8', 'ignore')[:500])
             return None, ''
         with open(dst_path, 'rb') as f:
-            wav_bytes = f.read()
-        return wav_bytes, fmt
+            pcm_bytes = f.read()
+        # 百度短语音要求最少 1 秒,16k 16bit mono = 32000 字节/秒
+        # < 16000 字节(< 0.5 秒)直接拒,避免无效请求
+        if len(pcm_bytes) < 16000:
+            logger.warning('音频过短: %d 字节(< 0.5 秒),百度可能拒', len(pcm_bytes))
+            return None, ''
+        logger.info('音频转码 OK: webm %d 字节 → pcm %d 字节 (~%.1f 秒)',
+                    len(audio_bytes), len(pcm_bytes), len(pcm_bytes) / 32000)
+        return pcm_bytes, fmt
     except FileNotFoundError:
         logger.error('ffmpeg 未找到: %s(请检查 FFMPEG_PATH)', ffmpeg_path)
         return None, ''
@@ -101,7 +111,6 @@ def _convert_to_baidu_format(audio_bytes: bytes, filename: str) -> tuple[bytes |
         logger.error('ffmpeg 超时(>30s)')
         return None, ''
     finally:
-        # 清理临时文件
         for p in (src_path, dst_path):
             try:
                 os.unlink(p)
