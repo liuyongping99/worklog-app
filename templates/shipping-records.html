@@ -233,7 +233,7 @@
 <!-- 新建出货单（日期+客户） -->
 <div class="card shipping-page">
     <h2 class="card-title">🚚 新建出货单</h2>
-    <form id="createOrderForm">
+    <form id="createOrderForm" action="/api/v1/shipping-orders" method="post">
         <div class="form-grid">
             <div>
                 <label for="date">日期</label>
@@ -265,10 +265,10 @@ document.getElementById('voiceInputBtn').addEventListener('click', function () {
         alert('请先填日期和客户,再点击「创建出货单」创建订单,然后才能语音录入明细。');
         return;
     }
-    // 提交表单,创建订单
+    // 提交表单,创建订单(form 的 action 现在显式是 /api/v1/shipping-orders)
     var form = document.getElementById('createOrderForm');
     var formData = new FormData(form);
-    fetch(form.action || '/api/v1/shipping-orders', {
+    fetch(form.action, {
         method: 'POST',
         body: formData,
     }).then(function (r) { return r.json(); }).then(function (data) {
