@@ -246,8 +246,48 @@
         </div>
         <p style="color:#868e96; font-size:0.85rem; margin-top:0.75rem;">创建后可在下方添加多条商品记录</p>
         <button type="submit" class="btn btn-primary" style="margin-top:0.75rem;">➕ 创建出货单</button>
+        <button type="button" id="voiceInputBtn" class="btn"
+                style="margin-top:0.75rem; margin-left:0.5rem; background:#6c5ce7; color:white;">
+            🎙️ 语音录入
+        </button>
     </form>
 </div>
+
+{% include '_voice_input_modal.html' %}
+
+<script>
+// 弹框需要先建订单才能 confirm —— 这里把 createOrderForm 的隐藏 input 提供给 voice_input.js
+document.getElementById('voiceInputBtn').addEventListener('click', function () {
+    // 检查日期+客户是否已填
+    var date = document.getElementById('date').value;
+    var customer = document.getElementById('customer').value;
+    if (!date || !customer) {
+        alert('请先填日期和客户,再点击「创建出货单」创建订单,然后才能语音录入明细。');
+        return;
+    }
+    // 提交表单,创建订单
+    var form = document.getElementById('createOrderForm');
+    var formData = new FormData(form);
+    fetch(form.action || '/api/v1/shipping-orders', {
+        method: 'POST',
+        body: formData,
+    }).then(function (r) { return r.json(); }).then(function (data) {
+        if (data.success && data.order && data.order.id) {
+            // 注入隐藏 input 给 voice_input.js 读
+            var hidden = document.createElement('input');
+            hidden.type = 'hidden';
+            hidden.id = 'orderIdInput';
+            hidden.value = data.order.id;
+            document.body.appendChild(hidden);
+            window.openVoiceModal();
+        } else {
+            alert('创建订单失败');
+        }
+    }).catch(function (e) {
+        alert('网络错误:' + e.message);
+    });
+});
+</script>
 
 <!-- 出货记录列表（按日期+客户分组） -->
 <div class="card shipping-page">
@@ -1534,6 +1574,8 @@ bindAiJudgeButtons();
     if (typeof bindGenPromptButtons === 'function') bindGenPromptButtons();
 })();
 applyAllRecordImageOverlays();
+// 2026-08-05:页面刷新时,服务端不渲染 match-col,需 JS 主动为有图片的 record 补建列
+if (typeof initAllMatchColumns === 'function') initAllMatchColumns();
 // 「详情」按钮绑定放在 IIFE 外面,避免大段 JS 中 hoisting 异常时 typeof 误判 undefined
 if (typeof bindOcrDetailButtons === 'function') bindOcrDetailButtons();
 if (typeof bindFuzzyMatchButtons === 'function') bindFuzzyMatchButtons();
