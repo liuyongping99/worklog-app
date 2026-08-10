@@ -26,6 +26,7 @@ from blueprints._helpers import (
     get_piece_conversion, calc_piece_quantity, check_piece_mismatch,
     validate_image_content, check_uploaded_image,
     match_label_to_row, detect_bg_color,
+    apply_user_rotation,
 )
 from blueprints.ocr_engine import PaddleOCREngine, get_ocr_engine, OCR_MATCH_PROMPT_VERSION
 from blueprints import _helpers
@@ -725,6 +726,13 @@ def api_v1_shipping_orders_upload_image(order_id):
     else:
         return jsonify({'success': False, 'error': '未提供图片'}), 400
 
+    # 移动端拍照方向修正：按 rotate_deg 旋转已落盘图片，非法值 400
+    rotate_deg = request.form.get('rotate_deg') or (data.get('rotate_deg') if request.is_json else None)
+    try:
+        filepath = apply_user_rotation(filepath, rotate_deg)
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
     source = request.form.get('source', 'upload')
     if request.is_json:
         source = data.get('source', 'upload')
@@ -1019,6 +1027,12 @@ def api_v1_shipping_orders_record_upload_images(record_id):
                 filepath, original_name = _save_one_uploaded_file(f, upload_dir)
             except ValueError as e:
                 return jsonify({'success': False, 'error': str(e)}), 400
+            # 移动端拍照方向修正：按 rotate_deg 旋转已落盘图片，非法值 400
+            rotate_deg = request.form.get('rotate_deg') or (data.get('rotate_deg') if request.is_json else None)
+            try:
+                filepath = apply_user_rotation(filepath, rotate_deg)
+            except ValueError as e:
+                return jsonify({'success': False, 'error': str(e)}), 400
             image_id = ShippingImage.create(
                 order_pk=record['order_pk'],
                 file_path=filepath,
@@ -1044,6 +1058,12 @@ def api_v1_shipping_orders_record_upload_images(record_id):
         data = request.get_json() or {}
         try:
             filepath, original_name = _save_one_base64_image(data.get('image', ''), upload_dir)
+        except ValueError as e:
+            return jsonify({'success': False, 'error': str(e)}), 400
+        # 移动端拍照方向修正：按 rotate_deg 旋转已落盘图片，非法值 400
+        rotate_deg = request.form.get('rotate_deg') or data.get('rotate_deg')
+        try:
+            filepath = apply_user_rotation(filepath, rotate_deg)
         except ValueError as e:
             return jsonify({'success': False, 'error': str(e)}), 400
         source = data.get('source', 'upload')

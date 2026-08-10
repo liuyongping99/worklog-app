@@ -597,3 +597,37 @@ def match_label_to_row(ocr_text, product_name, specification=''):
     reason = f'本地模糊匹配 {score_str}分 ({", ".join(parts)})'
 
     return (status, score, reason)
+
+
+# =====================================================================
+#  用户上传时的旋转（移动端拍照方向修正）
+# =====================================================================
+from io import BytesIO
+from PIL import Image
+
+_VALID_ROTATIONS = (0, 90, 180, 270)
+
+
+def apply_user_rotation(filepath: str, rotate_deg) -> str:
+    """按 rotate_deg 旋转已落盘图片；deg=0/None 时原样返回 filepath。非法值抛 ValueError。
+
+    - 移动端拍照上传时常常方向不对（横屏拍竖屏单据），前端拿 EXIF 算出 rotate_deg 一起 POST。
+    - 校验合法值集合 {0, 90, 180, 270}；非法值抛 ValueError，由调用方转 400。
+    - 直接覆盖原文件，不改路径（保持 ShippingImage.file_path 不变）。
+    - PIL 的 rotate 顺时针为正，这里取负号使用户视角的"右旋 90°"对应 PIL 顺时针 90°，
+      这样前端传 90 表示"把图往右转 90°"，与常见 UX 一致。
+    """
+    try:
+        deg = int(rotate_deg) if rotate_deg is not None else 0
+    except (TypeError, ValueError):
+        raise ValueError("方向参数非法")
+    if deg not in _VALID_ROTATIONS:
+        raise ValueError("方向参数非法")
+    if deg == 0:
+        return filepath
+    img = Image.open(filepath)
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+    rotated = img.rotate(-deg, expand=True)
+    rotated.save(filepath)
+    return filepath
