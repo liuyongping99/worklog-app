@@ -78,3 +78,26 @@ def test_shipping_today_aggregates_status(client):
     resp = client.get("/m/shipping-today")
     assert resp.status_code == 200
     assert "1".encode() in resp.data  # total
+
+
+def test_shipping_order_overall_section(client):
+    from models.orders import ShippingOrder, ShippingRecord
+    oid = ShippingOrder.create("2026-08-09", "宏昌贸易")
+    ShippingRecord.create("2026-08-09", "宏昌贸易", "日本纸", "A4 120g", 5, "件", "", order_pk=oid)
+    resp = client.get(f"/m/shipping-today/order/{oid}")
+    assert resp.status_code == 200
+    assert "整体图".encode() in resp.data
+    assert "整体照".encode() in resp.data
+    assert "堆放".encode() in resp.data
+    assert "装车".encode() in resp.data
+
+
+def test_shipping_order_record_cards(client):
+    from models.orders import ShippingOrder, ShippingRecord
+    oid = ShippingOrder.create("2026-08-09", "宏昌贸易")
+    rid = ShippingRecord.create("2026-08-09", "宏昌贸易", "日本纸", "A4 120g", 5, "件", "2支", order_pk=oid)
+    resp = client.get(f"/m/shipping-today/order/{oid}")
+    assert resp.status_code == 200
+    assert "拍照识别".encode() in resp.data
+    assert "相册".encode() in resp.data
+    assert "5件".encode() in resp.data

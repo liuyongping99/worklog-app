@@ -14,3 +14,46 @@
 .mobile-today .line i { display:block; height:100%; background:#1f9a70; }
 .mobile-today .metrics { display:flex; justify-content:space-between; font-size:11px; color:#64748b; }
 .mobile-today .enter { width:100%; border:0; color:#17664f; background:#e7f6ef; border-radius:10px; padding:9px; margin-top:9px; font-weight:750; }
+.mobile-order { max-width: 480px; margin: 0 auto; padding: 12px; }
+.mobile-order .app-head { background: linear-gradient(140deg,#14664d,#21956c); color:#fff; padding:14px; border-radius:12px; }
+.mobile-order .app-head .back { color:#fff; text-decoration:none; background:rgba(255,255,255,.16); padding:6px 9px; border-radius:9px; }
+.mobile-order h2 { margin:6px 0 0; }
+.mobile-order .subtitle { margin:2px 0 0; opacity:.85; font-size:12px; }
+
+.mobile-order .overall { background:#f1f8f4; border:1px dashed #8ec8b1; border-radius:12px; padding:11px; margin:11px 0; }
+.mobile-order .overall-title { display:flex; justify-content:space-between; align-items:center; font-size:13px; font-weight:800; color:#155f49; }
+.mobile-order .overall-pill { background:#fff; border:1px solid #b9ddcf; border-radius:99px; padding:3px 8px; font-size:10px; }
+.mobile-order .overall-buttons { display:flex; gap:6px; margin-top:8px; }
+.mobile-order .overall-buttons button { flex:1; border-radius:10px; padding:9px 6px; color:#fff; font-weight:800; font-size:12px; border:0; }
+.mobile-order .overall-buttons button:nth-child(1) { background:#14664d; }
+.mobile-order .overall-buttons button:nth-child(2) { background:#7c4dba; }
+.mobile-order .overall-buttons button:nth-child(3) { background:#a4561b; }
+.mobile-order .overall-thumbs { display:flex; gap:6px; margin-top:7px; }
+.mobile-order .overall-thumb { background:#fff; border-radius:8px; height:54px; flex:1; display:grid; place-items:center; color:#4a5a55; font-size:10px; border:1px solid #d6e4dd; }
+.mobile-order .overall-thumb.filled { background:#d8f1e2; color:#17664f; border:0; }
+
+.mobile-order .product-card { background:#fff; border-radius:12px; padding:12px; margin:10px 0; box-shadow:0 2px 6px rgba(15,23,42,.08); }
+.mobile-order .row { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
+.mobile-order .product-name { font-weight:800; font-size:15px; }
+.mobile-order .spec { margin-top:3px; font-size:12px; color:#475569; }
+.mobile-order .badge { font-size:10px; font-weight:700; border-radius:99px; padding:4px 7px; white-space:nowrap; }
+.mobile-order .badge.todo { background:#fff1c2; color:#805700; }
+.mobile-order .badge.done { background:#dbf6e6; color:#146745; }
+.mobile-order .badge.warn { background:#fde6e6; color:#a8201a; }
+
+.mobile-order .photo-row { display:flex; gap:7px; margin-top:9px; }
+.mobile-order .photo-row button { flex:1; border-radius:11px; padding:11px 5px; font-weight:800; font-size:13px; }
+.mobile-order .photo-row .primary { background:#16835f; color:#fff; border:0; }
+.mobile-order .photo-row .secondary { background:#eef8f4; color:#17664f; border:1px solid #b9ddcf; }
+
+.mobile-order .status-line { display:flex; align-items:center; gap:7px; margin-top:8px; padding:7px 9px; border-radius:9px; font-size:11px; line-height:1.4; background:#e3f8ec; color:#146745; }
+.mobile-order .status-line.warn { background:#fde6e6; color:#a8201a; }
+.mobile-order .status-line .dot { width:8px; height:8px; border-radius:99px; background:#16835f; }
+.mobile-order .status-line.warn .dot { background:#c5342c; }
+.mobile-order .status-line a { color:inherit; text-decoration:underline; margin-left:auto; font-weight:700; }
+
+.mobile-order .confirm { width:100%; border:0; border-radius:11px; background:#17664f; color:#fff; padding:9px; margin-top:7px; font-weight:800; }
+.mobile-order .confirm[hidden] { display:none; }
+
+.mobile-order .recognition-log { background:#fff; border:1px solid #d6e4dd; border-radius:12px; padding:10px; margin-top:11px; }
+.mobile-order .recognition-log h3 { margin:0 0 8px; font-size:12px; color:#155f49; }
