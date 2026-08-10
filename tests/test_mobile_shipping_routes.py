@@ -1,5 +1,6 @@
 import os
 import tempfile
+from datetime import date as _today_date
 import pytest
 
 from app import create_app
@@ -50,3 +51,30 @@ def test_shipping_today_empty_today(client):
     resp = client.get("/m/shipping-today")
     assert resp.status_code == 200
     assert "没有出货订单".encode() in resp.data
+
+
+def test_shipping_today_shows_order_card(client):
+    from models.orders import ShippingOrder, ShippingRecord, ShippingImage
+    today = _today_date.today().isoformat()
+    oid = ShippingOrder.create(today, "广隆纸业")
+    rid = ShippingRecord.create(today, "广隆纸业", "杂胶海绵", "黑色 5mm", 100, "y", "", order_pk=oid)
+    iid = ShippingImage.create(oid, r"upload\2026-08\x.jpg", "x.jpg", "upload", rid, 1)
+    ShippingImage.set_match(iid, "green", 0.95, "一致", "local_fuzzy")
+    resp = client.get("/m/shipping-today")
+    assert resp.status_code == 200
+    assert "广隆纸业".encode() in resp.data
+    assert "进入商品详情".encode() in resp.data
+    assert "1/1".encode() in resp.data  # total/has_image
+
+
+def test_shipping_today_aggregates_status(client):
+    from models.orders import ShippingOrder, ShippingRecord, ShippingImage
+    today = _today_date.today().isoformat()
+    oid = ShippingOrder.create(today, "兴达包装")
+    rid1 = ShippingRecord.create(today, "兴达包装", "白磅布", "60寸", 2, "件", "", order_pk=oid)
+    rid2 = ShippingRecord.create(today, "兴达包装", "日本纸", "A4", 5, "件", "", order_pk=oid)
+    iid = ShippingImage.create(oid, "upload\\2026-08\\x.jpg", "x.jpg", "upload", rid1, 1)
+    ShippingImage.set_match(iid, "green", 0.95, "一致", "local_fuzzy")
+    resp = client.get("/m/shipping-today")
+    assert resp.status_code == 200
+    assert "1".encode() in resp.data  # total

@@ -5,10 +5,32 @@
 {% endblock %}
 {% block content %}
 <div class="mobile-today">
-  <h2>今日出货</h2>
-  <p class="subtitle">{{ today }}</p>
+  <header class="app-head">
+    <h2>今日出货</h2>
+    <p class="subtitle">{{ today }}</p>
+  </header>
   {% if not groups %}
     <p class="empty">今天没有出货订单</p>
+  {% else %}
+    {% for g in groups %}
+      <a class="order-card" href="{{ url_for('mobile_shipping.shipping_order_detail', oid=g['id']) }}">
+        <div class="row">
+          <div>
+            <div class="customer">{{ g['customer'] }}</div>
+            <div class="number">第{{ g['order_num'] }}单</div>
+          </div>
+          <span class="badge {% if g.has_image == g.total %}done{% else %}todo{% endif %}">
+            {{ g.has_image }}/{{ g.total }} 已拍
+          </span>
+        </div>
+        <div class="line"><i style="width: {{ (g.has_image * 100 // g.total) if g.total else 0 }}%"></i></div>
+        <div class="metrics">
+          <span><b>{{ g.total }}</b> 项商品</span>
+          <span>✓ {{ g.stats.green }}　⚠ {{ g.stats.yellow }}　✕ {{ g.stats.red }}</span>
+        </div>
+        <button class="enter">进入商品详情 ›</button>
+      </a>
+    {% endfor %}
   {% endif %}
 </div>
 {% endblock %}

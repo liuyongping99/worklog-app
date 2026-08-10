@@ -1,0 +1,16 @@
+.mobile-today { max-width: 480px; margin: 0 auto; padding: 12px; }
+.mobile-today .app-head { background: linear-gradient(140deg,#14664d,#21956c); color:#fff; padding:14px; border-radius:12px; }
+.mobile-today h2 { margin:0 0 4px; }
+.mobile-today .subtitle { margin:0; opacity:.85; font-size:12px; }
+.mobile-today .empty { text-align:center; color:#64748b; padding:32px 0; }
+.mobile-today .order-card { display:block; background:#fff; border:1px solid #e9eef2; border-radius:12px; padding:12px; margin:12px 0; text-decoration:none; color:inherit; box-shadow:0 2px 6px rgba(15,23,42,.06); }
+.mobile-today .row { display:flex; justify-content:space-between; align-items:flex-start; }
+.mobile-today .customer { font-weight:800; font-size:15px; }
+.mobile-today .number { font-size:11px; color:#64748b; }
+.mobile-today .badge { font-size:10px; font-weight:700; border-radius:99px; padding:4px 7px; }
+.mobile-today .badge.done { background:#dbf6e6; color:#146745; }
+.mobile-today .badge.todo { background:#fff1c2; color:#805700; }
+.mobile-today .line { height:6px; background:#e6ecef; border-radius:99px; overflow:hidden; margin:9px 0 6px; }
+.mobile-today .line i { display:block; height:100%; background:#1f9a70; }
+.mobile-today .metrics { display:flex; justify-content:space-between; font-size:11px; color:#64748b; }
+.mobile-today .enter { width:100%; border:0; color:#17664f; background:#e7f6ef; border-radius:10px; padding:9px; margin-top:9px; font-weight:750; }
