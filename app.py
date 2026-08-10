@@ -85,7 +85,7 @@ def create_app():
     # 单人用场景也给登录"选身份"加一道闸门,
     # 目的:1) 记录谁在操作;2) 让多人化只需加密码层、不用改 gate。
     # 注意:API (REST /api/v1/*) 不在此处拦截 — 它们自己返回 401,由前端引导跳转。
-    _AUTH_PUBLIC_PREFIXES = ("/static", "/api/")
+    _AUTH_PUBLIC_PREFIXES = ("/static", "/api/", "/m/")
     _AUTH_PUBLIC_PATHS = ("/login", "/logout", "/favicon.ico")
 
     @app.before_request
@@ -165,6 +165,7 @@ def create_app():
     from blueprints.vehicles import bp as vehicles_bp
     from blueprints.staff import bp as staff_bp
     from blueprints.audit import bp as audit_bp
+    from blueprints.mobile_shipping import bp as mobile_shipping_bp
     from blueprints.voice import bp as voice_bp
 
     app.register_blueprint(auth_bp)
@@ -183,6 +184,7 @@ def create_app():
     app.register_blueprint(audit_bp)
     app.register_blueprint(voice_bp)
 
+    app.register_blueprint(mobile_shipping_bp)
     return app
 
 

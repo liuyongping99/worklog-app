@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}{{ order['customer'] }} 第{{ order['order_num'] }}单{% endblock %}
+{% block head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/mobile.css') }}">
+{% endblock %}
+{% block content %}
+<div class="mobile-order" data-order-id="{{ order['id'] }}">
+  <a href="{{ url_for('mobile_shipping.shipping_today') }}">‹ 今日订单</a>
+  <h2>{{ order['customer'] }} · 第{{ order['order_num'] }}单</h2>
+  {% for rec in records %}
+    <div class="mobile-record" data-record-id="{{ rec['id'] }}">
+      <div class="name">{{ rec['product_name'] }}</div>
+      <div class="spec">{{ rec['specification'] }} · {{ rec['quantity'] }}{{ rec['unit'] }}</div>
+    </div>
+  {% endfor %}
+</div>
+{% endblock %}

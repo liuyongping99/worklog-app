@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}今日出货{% endblock %}
+{% block head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/mobile.css') }}">
+{% endblock %}
+{% block content %}
+<div class="mobile-today">
+  <h2>今日出货</h2>
+  <p class="subtitle">{{ today }}</p>
+  {% if not groups %}
+    <p class="empty">今天没有出货订单</p>
+  {% endif %}
+</div>
+{% endblock %}
