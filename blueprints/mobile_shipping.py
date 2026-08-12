@@ -5,6 +5,7 @@ from datetime import date as _date
 from flask import Blueprint, render_template
 
 from models.orders import ShippingOrder, ShippingRecord, ShippingImage
+from blueprints.ocr_log import set_log_context
 
 bp = Blueprint("mobile_shipping", __name__)
 
@@ -45,6 +46,7 @@ def shipping_today():
 
 @bp.route("/m/shipping-today/order/<int:oid>")
 def shipping_order_detail(oid: int):
+    set_log_context(biz="mobile_shipping", order_id=oid)
     order = ShippingOrder.get_by_id(oid)
     if order is None:
         from flask import abort
