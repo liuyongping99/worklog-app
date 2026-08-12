@@ -247,6 +247,7 @@
 </head>
 <body>
 
+{% block navbar %}
 <nav class="navbar">
     <a href="/" class="navbar-brand">📋 丰源工作台</a>
     <span id="validationStatusIndicator" class="nav-warn-indicator" style="display:none;" title="本页无明细需核查">
@@ -273,6 +274,7 @@
                     <a href="/product-categories" class="{% if request.endpoint == 'product_categories' %}active{% endif %}">📂 商品类型</a>
                     <a href="/products" class="{% if request.endpoint == 'products' %}active{% endif %}">📦 产品管理</a>
                     <a href="/piece-conversions" class="{% if request.endpoint == 'products.piece_conversions' %}active{% endif %}">🧮 件数换算</a>
+                    <a href="{{ url_for('manage_category_prompts.manage_page') }}" class="{% if request.endpoint == 'manage_category_prompts.manage_page' %}active{% endif %}">📚 分类提示词</a>
                 </div>
             </li>
             <li><a href="/priceboard" class="{% if request.endpoint == 'priceboard' %}active{% endif %}">🧰 码数报价</a></li>
@@ -346,6 +348,7 @@
     }
     </script>
 </nav>
+{% endblock %}
 
 {% if all_notices %}
 
