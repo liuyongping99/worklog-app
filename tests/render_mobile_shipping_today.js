@@ -59,12 +59,13 @@ if (viewportMeta) {
     `viewport content 应包含 width=device-width,实际="${content}"`);
 }
 
-// 2) 移动端样式 — mobile.css link 或 inline 移动端样式存在
-// 注意:base.html 当前未定义 {% block head %},mobile 模板里的 mobile.css
-// link 会被 Jinja 静默丢弃(本测试不修这个模板 bug,只是文档化)。
-// 我们降级为断言 app.css(基础样式)一定存在,移动端样式缺失不影响 DOM 结构测试。
-const appCss = Array.from(document.querySelectorAll('link[rel="stylesheet"]'))
-  .find(l => (l.getAttribute('href') || '').includes('app.css'));
+// 2) 移动端样式 — base.html 已加 {% block head %},mobile 模板里 mobile.css
+// link 必须能注入 <head>。同时基线 app.css 也存在(基础样式契约)。
+const stylesheetLinks = Array.from(document.querySelectorAll('link[rel="stylesheet"]'))
+  .map(l => l.getAttribute('href') || '');
+check(stylesheetLinks.some(href => href.includes('mobile.css')),
+  'mobile.css link 必须存在(说明 base.html 声明了 {% block head %} 且 mobile 模板正确注入)');
+const appCss = stylesheetLinks.find(href => href.includes('app.css'));
 check(appCss !== undefined, '缺少 app.css 基础样式表 link');
 
 // 3) viewport 数值 — jsdom 的窗口(被我们手动覆盖为 iPhone 12 尺寸)

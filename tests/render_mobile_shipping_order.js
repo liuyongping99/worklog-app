@@ -54,10 +54,13 @@ if (viewportMeta) {
     `viewport content 应包含 width=device-width,实际="${content}"`);
 }
 
-// 2) 移动端样式 — base app.css 必须存在(mobile.css 因模板 block 问题可能被丢弃,
-// 不在本 Task 10 范围内修)
-const appCss = Array.from(document.querySelectorAll('link[rel="stylesheet"]'))
-  .find(l => (l.getAttribute('href') || '').includes('app.css'));
+// 2) 移动端样式 — base.html 已加 {% block head %},mobile.css link 必须注入 <head>
+// 同时基线 app.css 也存在(基础样式契约)。
+const stylesheetLinks = Array.from(document.querySelectorAll('link[rel="stylesheet"]'))
+  .map(l => l.getAttribute('href') || '');
+check(stylesheetLinks.some(href => href.includes('mobile.css')),
+  'mobile.css link 必须存在(说明 base.html 声明了 {% block head %} 且 mobile 模板正确注入)');
+const appCss = stylesheetLinks.find(href => href.includes('app.css'));
 check(appCss !== undefined, '缺少 app.css 基础样式表 link');
 
 // 3) viewport 数值
