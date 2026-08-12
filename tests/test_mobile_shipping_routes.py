@@ -101,3 +101,14 @@ def test_shipping_order_record_cards(client):
     assert "拍照识别".encode() in resp.data
     assert "相册".encode() in resp.data
     assert "5件".encode() in resp.data
+
+
+def test_detail_includes_mobile_detail_js(client):
+    from models.orders import ShippingOrder, ShippingRecord
+    today = _today_date.today().isoformat()
+    oid = ShippingOrder.create(today, "客户")
+    rid = ShippingRecord.create(today, "客户", "商品", "规格", 1, "件", "", order_pk=oid)
+    resp = client.get(f"/m/shipping-today/order/{oid}")
+    assert resp.status_code == 200
+    assert "mobile_detail.js" in resp.get_data(as_text=True)
+    assert "mobile_blur.js" in resp.get_data(as_text=True)
