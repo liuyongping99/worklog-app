@@ -76,6 +76,7 @@
     }
     const body = await resp.json();
     const imageId = body.images[0].image_id;
+    card.dataset.lastImageId = imageId;
     await poll(imageId, card, recordName);
   }
 
@@ -123,7 +124,12 @@
     input.addEventListener("change", async () => {
       const file = input.files[0];
       if (!file) return;
-      const check = await window.mobileBlurCheck(file);
+      let check;
+      if (typeof window.mobileBlurCheck === "function") {
+        check = await window.mobileBlurCheck(file);
+      } else {
+        check = { ok: true, variance: -1, dataURL: null, skipped: true };
+      }
       if (!check.ok) { alert("图太糊，请重拍"); input.value = ""; return; }
       const orderPk = $(".mobile-order").dataset.orderId;
       const dataURL = check.dataURL;
@@ -150,7 +156,12 @@
     input.addEventListener("change", async () => {
       const file = input.files[0];
       if (!file) return;
-      const check = await window.mobileBlurCheck(file);
+      let check;
+      if (typeof window.mobileBlurCheck === "function") {
+        check = await window.mobileBlurCheck(file);
+      } else {
+        check = { ok: true, variance: -1, dataURL: null, skipped: true };
+      }
       if (!check.ok) { alert("图太糊，请重拍"); input.value = ""; return; }
       const thumbEl = $(`[data-thumb-source="${pendingSource}"]`, section);
       const dataURL = check.dataURL;

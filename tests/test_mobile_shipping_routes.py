@@ -112,3 +112,24 @@ def test_detail_includes_mobile_detail_js(client):
     assert resp.status_code == 200
     assert "mobile_detail.js" in resp.get_data(as_text=True)
     assert "mobile_blur.js" in resp.get_data(as_text=True)
+
+
+def test_detail_uses_data_last_image_id(client):
+    """回归保险：mobile_detail.js 在 uploadRecordImage 拿到 imageId 后应写入 card.dataset.lastImageId，
+    以便 confirm 按钮 handler 可读取——确保模板渲染出可被 dataset 写入的 product-card 占位。"""
+    from models.orders import ShippingOrder, ShippingRecord
+    today = _today_date.today().isoformat()
+    oid = ShippingOrder.create(today, "客户")
+    ShippingRecord.create(today, "客户", "商品", "规格", 1, "件", "", order_pk=oid)
+    resp = client.get(f"/m/shipping-today/order/{oid}")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    # 模板含 product-card 占位；JS 通过 dataset.lastImageId 写入
+    assert 'data-record-id' in body
+    assert 'product-card' in body
+    # JS 静态文件中应包含关键写入语句
+    js_path = os.path.join(os.path.dirname(__file__), "..", "static", "js", "mobile_detail.js")
+    with open(js_path, encoding="utf-8") as f:
+        js = f.read()
+    assert "card.dataset.lastImageId = imageId" in js
+    assert 'typeof window.mobileBlurCheck === "function"' in js
