@@ -268,6 +268,7 @@ def init_db():
             human_verified INTEGER DEFAULT 0,
             match_source TEXT DEFAULT NULL,        -- 'local_fuzzy' | 'deepseek' | NULL(老记录)
             bg_color TEXT DEFAULT NULL,             -- 自动识别的背景色 'black'|'white'|NULL
+            source_tag TEXT DEFAULT NULL,           -- 整体图分类标签: '备货照'|'装车照'|'归仓照'|NULL
             FOREIGN KEY (order_pk) REFERENCES shipping_orders(id)
         )
     ''')
@@ -283,6 +284,11 @@ def init_db():
             cursor.execute(f"ALTER TABLE {tbl} ADD COLUMN bg_color TEXT DEFAULT NULL")
         except Exception:
             pass
+    # 2026-08-12: 增量加 source_tag 列(整体图分类:备货照/装车照/归仓照)
+    try:
+        cursor.execute("ALTER TABLE shipping_images ADD COLUMN source_tag TEXT DEFAULT NULL")
+    except Exception:
+        pass
 
     # ── 2026-08-02: 入库图片补齐 record-level 匹配能力 ──
     # 补齐之前遗漏的 source 列(InboundImage.create 已经写了 source,但建表未声明)
@@ -768,6 +774,23 @@ def init_db():
     ''')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_voice_phrase ON voice_phrase_mapping(phrase)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_voice_status ON voice_phrase_mapping(status)')
+
+    # ── 启动 seed:为管理页要列出的分类节点占位空白提示词 ─────────
+    # 2026-08-08 新增:不再依赖 classify_record 自动分类精度,
+    # 而是让所有 Level 3 品类先 seed 占位空白行,前端管理页手动微调。
+    # 2026-08-09 调整:覆盖范围扩展到 (L3 全部 ∪ L4 无商品纯分类)。
+    # 幂等(seed_management_categories 内部 SELECT 后 INSERT),失败 log 不 raise。
+    try:
+        from models.category_prompt import CategoryPrompt
+        inserted = CategoryPrompt.seed_management_categories()
+        if inserted:
+            import logging as _logging
+            _logging.getLogger('worklog.init_db').info(
+                f'seeded {inserted} blank category prompts for management categories')
+    except Exception:
+        import logging as _logging
+        _logging.getLogger('worklog.init_db').exception(
+            'seed blank category prompts failed (non-fatal)')
 
     conn.commit()
     conn.close()

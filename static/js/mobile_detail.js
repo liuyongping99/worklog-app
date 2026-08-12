@@ -49,34 +49,94 @@
     }
   }
 
+  function setProgress(card, text) {
+    const el = $('[data-role="upload-progress"]', card);
+    if (!el) return;
+    if (text) { el.textContent = text; el.hidden = false; }
+    else { el.hidden = true; }
+  }
+
+  function appendImageToOrderGrid(relPath, alt, sourceTag) {
+    let grid = $('[data-role="order-images-grid"]');
+    if (!grid) {
+      const section = document.createElement("section");
+      section.className = "order-images";
+      section.innerHTML = `<h3 data-role="order-images-title">📷 本单图片（<span data-role="order-images-count">1</span>）</h3><div class="record-images" data-role="order-images-grid"></div>`;
+      const root = $(".mobile-order");
+      if (root) root.appendChild(section);
+      grid = $('[data-role="order-images-grid"]');
+    }
+    if (!grid) return;
+    const cell = document.createElement("div");
+    cell.className = "record-image-cell";
+    const img = document.createElement("img");
+    img.src = `/upload/${relPath}`;
+    img.alt = alt || "";
+    img.loading = "lazy";
+    img.onclick = () => showImgPreview(img.src);
+    cell.appendChild(img);
+    if (sourceTag) {
+      const tag = document.createElement("span");
+      tag.className = "img-source-tag";
+      tag.textContent = sourceTag;
+      cell.appendChild(tag);
+    }
+    grid.appendChild(cell);
+    const countEl = $('[data-role="order-images-count"]');
+    const titleEl = $('[data-role="order-images-title"]');
+    if (countEl) countEl.textContent = String(grid.children.length);
+    if (titleEl && !countEl) titleEl.innerHTML = `📷 本单图片（${grid.children.length}）`;
+  }
+
   async function uploadRecordImage(recordPk, orderPk, file, card, recordName) {
     const fd = new FormData();
     fd.append("image", file);
     fd.append("source", "upload");
+    setProgress(card, "⏳ 上传中…");
     const resp = await fetch(`${API}/records/${recordPk}/images`, { method: "POST", body: fd });
     if (!resp.ok) {
       const t = await resp.text();
+      setProgress(card, null);
       alert("上传失败：" + t);
       return;
     }
+    setProgress(card, "🔄 识别中…");
     const body = await resp.json();
     const imageId = body.images[0].image_id;
+    const relPath = body.images[0].image;
     card.dataset.lastImageId = imageId;
+    // 立刻把新图追加到底部 grid(无需等 OCR 完成)
+    if (relPath) appendImageToOrderGrid(relPath, body.images[0].original_name);
     await poll(imageId, card, recordName);
+    setProgress(card, null);  // 识别完成,隐藏进度
   }
 
   async function uploadOverallImage(orderPk, file, sourceTag, thumbEl) {
     const fd = new FormData();
     fd.append("image", file);
     fd.append("source", "upload");
+    fd.append("source_tag", sourceTag);
     fd.append("original_name", `${sourceTag}-${Date.now()}.jpg`);
+    const overallSection = thumbEl && thumbEl.closest('.overall');
+    const progressEl = overallSection && $('[data-role="overall-progress"]', overallSection);
+    if (progressEl) { progressEl.textContent = `⏳ 上传${sourceTag}中…`; progressEl.hidden = false; }
     const resp = await fetch(`${API}/${orderPk}/images`, { method: "POST", body: fd });
-    if (!resp.ok) { alert("整体图上传失败"); return; }
-    if (thumbEl) { thumbEl.classList.add("filled"); thumbEl.textContent = `${sourceTag} ✓`; }
+    if (!resp.ok) { if (progressEl) progressEl.hidden = true; alert("整体图上传失败"); return; }
+    const body = await resp.json();
+    const relPath = body.image;
+    if (relPath) appendImageToOrderGrid(relPath, sourceTag, body.source_tag);
+    if (thumbEl) {
+      thumbEl.classList.add("filled");
+      const now = new Date();
+      const hh = String(now.getHours()).padStart(2, "0");
+      const mm = String(now.getMinutes()).padStart(2, "0");
+      thumbEl.textContent = `${sourceTag} ✓ ${hh}:${mm}`;
+    }
+    if (progressEl) progressEl.hidden = true;
     const countEl = $('[data-role="overall-count"]');
     if (countEl) {
       const current = parseInt(countEl.textContent, 10) || 0;
-      const next = Math.min(current + 1, 1);  // 整体图 0/1；后续按"成功后替换"扩展
+      const next = Math.min(current + 1, 1);
       countEl.textContent = `${next} / 1`;
     }
   }
@@ -85,9 +145,11 @@
     const recordPk = card.dataset.recordId;
     const recordName = $(".product-name", card)?.textContent || "";
     const input = $('[data-role="record-input"]', card);
+    if (!input) return;  // 板材类无拍照 input,跳过事件绑定
     $$('[data-action]', card).forEach(btn => {
       if (btn.dataset.action === "capture" || btn.dataset.action === "album") {
         btn.addEventListener("click", () => {
+          if (!input) return;
           if (btn.dataset.action === "album") input.removeAttribute("capture");
           else input.setAttribute("capture", "environment");
           input.click();

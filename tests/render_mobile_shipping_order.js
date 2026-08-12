@@ -73,11 +73,11 @@ check(overall !== null, '缺少 .overall 整体图区');
 
 const overallBtns = overall ? overall.querySelectorAll('[data-overall-source]') : [];
 check(overallBtns.length === 3,
-  `[data-overall-source] 应有 3 个按钮(整体照/堆放/装车),实际 ${overallBtns.length}`);
+  `[data-overall-source] 应有 3 个按钮(备货照/装车照/归仓照),实际 ${overallBtns.length}`);
 
 if (overall && overallBtns.length === 3) {
   const sources = Array.from(overallBtns).map(b => b.getAttribute('data-overall-source'));
-  const expected = ['整体照', '堆放', '装车'];
+  const expected = ['备货照', '装车照', '归仓照'];
   expected.forEach(e => {
     check(sources.includes(e), `[data-overall-source] 应含 "${e}",实际 [${sources.join(', ')}]`);
   });

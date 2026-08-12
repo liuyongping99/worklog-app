@@ -19,59 +19,75 @@
       <span class="overall-pill" data-role="overall-count">0 / 1</span>
     </div>
     <div class="overall-buttons">
-      <button data-overall-source="整体照">📷 整体照</button>
-      <button data-overall-source="堆放">📷 堆放</button>
-      <button data-overall-source="装车">📷 装车</button>
+      <button data-overall-source="备货照">📷 备货照</button>
+      <button data-overall-source="装车照">📷 装车照</button>
+      <button data-overall-source="归仓照">📷 归仓照</button>
     </div>
     <input type="file" accept="image/*" data-role="overall-input" hidden>
+    <div class="upload-progress" data-role="overall-progress" hidden></div>
     <div class="overall-thumbs">
-      <div class="overall-thumb" data-thumb-source="整体照">整体照　未拍</div>
-      <div class="overall-thumb" data-thumb-source="堆放">堆放　未拍</div>
-      <div class="overall-thumb" data-thumb-source="装车">装车　未拍</div>
+      <div class="overall-thumb" data-thumb-source="备货照">备货照　未拍</div>
+      <div class="overall-thumb" data-thumb-source="装车照">装车照　未拍</div>
+      <div class="overall-thumb" data-thumb-source="归仓照">归仓照　未拍</div>
     </div>
   </section>
 
   {% for rec in records %}
     {% set state = record_states.get(rec['id'], {'status': None, 'images': []}) %}
-    {% set badge_cls, badge_text = ('done', '✓ 通过') if state.status == 'green' else ('warn', '⚠ 待确认') if state.status == 'yellow' else ('warn', '✕ 不符') if state.status == 'red' else ('todo', '待拍') %}
-    {% if state.status == 'green' %}
+    {% if state.is_board %}
+      {% set badge_cls, badge_text = 'done', '无需拍照' %}
       {% set status_cls = '' %}
-      {% set status_text = '最近一次识别：标签与规格一致' %}
-    {% elif state.status == 'yellow' %}
-      {% set status_cls = 'warn' %}
-      {% set status_text = 'AI 判定与标签不一致' %}
-    {% elif state.status == 'red' %}
-      {% set status_cls = 'warn' %}
-      {% set status_text = 'OCR 失败 / AI 不符' %}
+      {% set status_text = '皮革/木板类，无需拍照' %}
+      {% set confirm_hidden = True %}
     {% else %}
-      {% set status_cls = '' %}
-      {% set status_text = '尚未拍照' %}
+      {% set badge_cls, badge_text = ('done', '✓ 通过') if state.status == 'green' else ('warn', '⚠ 待确认') if state.status == 'yellow' else ('warn', '✕ 不符') if state.status == 'red' else ('todo', '待拍') %}
+      {% if state.status == 'green' %}
+        {% set status_cls = '' %}
+        {% set status_text = '最近一次识别：标签与规格一致' %}
+      {% elif state.status == 'yellow' %}
+        {% set status_cls = 'warn' %}
+        {% set status_text = 'AI 判定与标签不一致' %}
+      {% elif state.status == 'red' %}
+        {% set status_cls = 'warn' %}
+        {% set status_text = 'OCR 失败 / AI 不符' %}
+      {% else %}
+        {% set status_cls = '' %}
+        {% set status_text = '尚未拍照' %}
+      {% endif %}
+      {% set confirm_hidden = state.status in (None, 'green') %}
     {% endif %}
-    {% set confirm_hidden = state.status in (None, 'green') %}
-    <div class="product-card" data-record-id="{{ rec['id'] }}">
+    <div class="product-card" data-record-id="{{ rec['id'] }}" {% if state.is_board %}data-role="board"{% endif %}>
       <div class="row">
         <div>
           <div class="product-name">{{ loop.index }}. {{ rec['product_name'] }}</div>
-          <div class="spec">{{ rec['specification'] }} · <b>{{ rec['quantity'] }}{{ rec['unit'] }}</b>{% if rec['remark'] %} · 备注：{{ rec['remark'] }}{% endif %}</div>
+          <div class="spec">{{ rec['specification'] }} · <b>{{ rec['quantity'] }}{% if state.is_board %}块{% else %}{{ rec['unit'] }}{% endif %}</b>{% if rec['remark'] %} · 备注：{{ rec['remark'] }}{% endif %}</div>
         </div>
         <span class="badge {{ badge_cls }}" data-role="badge">{{ badge_text }}</span>
       </div>
+      {% if not state.is_board %}
       <div class="photo-row">
         <button class="primary" data-action="capture">📷 拍照识别</button>
         <button class="secondary" data-action="album">🖼 相册</button>
       </div>
       <input type="file" accept="image/*" capture="environment" data-role="record-input" hidden>
-      <div class="status-line {{ status_cls }}" data-role="status" data-initial-status="{{ state.status or '' }}">{{ status_text }}</div>
+      {% endif %}
+      <div class="status-line {{ status_cls }}" data-role="status" data-initial-status="{{ state.status or '' }}">
+        {{ status_text }}{% if state.color_note %} <span class="color-note" data-role="color-note">· 标签背景:{{ state.color_note }}</span>{% endif %}
+      </div>
+      <div class="upload-progress" data-role="upload-progress" hidden></div>
       <button class="confirm" data-action="confirm" {% if confirm_hidden %}hidden{% endif %}>✓ 人工确认通过</button>
     </div>
   {% endfor %}
 
   {% if order_images %}
   <section class="order-images">
-    <h3>📷 本单图片（{{ order_images|length }}）</h3>
-    <div class="record-images">
+    <h3 data-role="order-images-title">📷 本单图片（{{ order_images|length }}）</h3>
+    <div class="record-images" data-role="order-images-grid">
       {% for img in order_images %}
-        <img src="/upload/{{ img.rel_path }}" alt="{{ img['original_name'] }}" onclick="showImgPreview(this.src)" loading="lazy">
+        <div class="record-image-cell">
+          <img src="/upload/{{ img.rel_path }}" alt="{{ img['original_name'] }}" onclick="showImgPreview(this.src)" loading="lazy">
+          {% if img.source_tag %}<span class="img-source-tag">{{ img.source_tag }}</span>{% endif %}
+        </div>
       {% endfor %}
     </div>
   </section>

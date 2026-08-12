@@ -778,10 +778,13 @@ def api_v1_shipping_orders_upload_image(order_id):
         source = data.get('source', 'upload')
     if source not in ('upload', 'ai'):
         source = 'upload'
-    image_id = ShippingImage.create(order_id, filepath, original_name, source)
+    source_tag = request.form.get('source_tag') or (data.get('source_tag') if request.is_json else None)
+    if source_tag not in ('备货照', '装车照', '归仓照'):
+        source_tag = None
+    image_id = ShippingImage.create(order_id, filepath, original_name, source, None, None, source_tag)
     rel_path = os.path.join(month_str, filename).replace('\\', '/')
     AuditLog.log('upload_image', 'shipping_order', order_id, detail={'filename': filename, 'source': source})
-    return jsonify({'success': True, 'image_id': image_id, 'image': rel_path, 'file_path': filepath, 'original_name': original_name}), 201
+    return jsonify({'success': True, 'image_id': image_id, 'image': rel_path, 'source_tag': source_tag, 'file_path': filepath, 'original_name': original_name}), 201
 
 
 @bp.route('/api/v1/shipping-orders/images/<int:image_id>', methods=['DELETE'])
@@ -956,12 +959,13 @@ def api_v1_shipping_orders_ai_judge_image(image_id):
     else:
         return jsonify({'success': False, 'error': 'OCR 无文字，无法判断'}), 400
 
-    # 2) 调用 DeepSeek
+    # 2) 调用 DeepSeek(注入同品类自定义提示词)
     try:
         ds = get_ocr_engine('deepseek')
         if not getattr(ds, 'API_KEY', ''):
             return jsonify({'success': False, 'error': 'DeepSeek API Key 未配置'}), 503
-        res = ds.compare_single_record(ocr_text, record)
+        supplement = _supplement_for_record(record)
+        res = ds.compare_single_record(ocr_text, record, supplement_prompt=supplement)
         ms = (res.get('match_status') or '').lower()
         if ms not in ('green', 'yellow', 'red'):
             return jsonify({'success': False, 'error': f'DeepSeek 返回异常: {ms}'}), 502

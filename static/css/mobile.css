@@ -1,5 +1,10 @@
 .mobile-today { max-width: 480px; margin: 0 auto; padding: 12px; }
 .mobile-today .app-head { background: linear-gradient(140deg,#14664d,#21956c); color:#fff; padding:14px; border-radius:12px; }
+.mobile-today .head-row { display:flex; justify-content:space-between; align-items:center; }
+.mobile-today .head-actions { display:flex; align-items:center; gap:7px; }
+.mobile-today .header-stat { background:rgba(255,255,255,.22); border-radius:99px; padding:4px 11px; font-size:13px; font-weight:700; }
+.mobile-today .refresh-btn { display:inline-grid; place-items:center; width:32px; height:32px; border-radius:50%; background:rgba(255,255,255,.22); color:#fff; font-size:18px; font-weight:700; text-decoration:none; }
+.mobile-today .refresh-btn:active { background:rgba(255,255,255,.4); }
 .mobile-today h2 { margin:0 0 4px; }
 .mobile-today .subtitle { margin:0; opacity:.85; font-size:12px; }
 .mobile-today .empty { text-align:center; color:#64748b; padding:32px 0; }
@@ -47,6 +52,7 @@
 .mobile-order .photo-row .secondary { background:#eef8f4; color:#17664f; border:1px solid #b9ddcf; }
 
 .mobile-order .status-line { display:flex; align-items:center; gap:7px; margin-top:8px; padding:7px 9px; border-radius:9px; font-size:11px; line-height:1.4; background:#e3f8ec; color:#146745; }
+.mobile-order .status-line .color-note { background:#d8e5df; color:#155f49; border-radius:6px; padding:2px 6px; font-size:10px; font-weight:600; }
 .mobile-order .status-line.warn { background:#fde6e6; color:#a8201a; }
 .mobile-order .status-line .dot { width:8px; height:8px; border-radius:99px; background:#16835f; }
 .mobile-order .status-line.warn .dot { background:#c5342c; }
@@ -55,5 +61,11 @@
 .mobile-order .confirm { width:100%; border:0; border-radius:11px; background:#17664f; color:#fff; padding:9px; margin-top:7px; font-weight:800; }
 .mobile-order .confirm[hidden] { display:none; }
 
+.mobile-order .upload-progress { margin-top:7px; padding:8px 10px; border-radius:9px; background:#fff8e1; color:#7a5800; font-size:12px; text-align:center; }
+.mobile-order .upload-progress[hidden] { display:none; }
+.mobile-order .overall .upload-progress { background:#f3f0ff; color:#4a3a7a; }
+
 .mobile-order .record-images { display:grid; grid-template-columns:repeat(3, 1fr); gap:4px; margin-top:9px; }
-.mobile-order .record-images img { width:100%; aspect-ratio:1; object-fit:cover; border-radius:6px; cursor:pointer; border:1px solid #e1e9e5; }
+.mobile-order .record-image-cell { position:relative; }
+.mobile-order .record-images img { width:100%; aspect-ratio:1; object-fit:cover; border-radius:6px; cursor:pointer; border:1px solid #e1e9e5; display:block; }
+.mobile-order .record-image-cell .img-source-tag { position:absolute; left:0; right:0; bottom:0; padding:3px 4px; background:linear-gradient(to top, rgba(0,0,0,.7), rgba(0,0,0,0)); color:#fff; font-size:10px; font-weight:700; text-align:center; border-radius:0 0 6px 6px; pointer-events:none; }

@@ -87,9 +87,9 @@ def test_shipping_order_overall_section(client):
     resp = client.get(f"/m/shipping-today/order/{oid}")
     assert resp.status_code == 200
     assert "整体图".encode() in resp.data
-    assert "整体照".encode() in resp.data
-    assert "堆放".encode() in resp.data
-    assert "装车".encode() in resp.data
+    assert "备货照".encode() in resp.data
+    assert "装车照".encode() in resp.data
+    assert "归仓照".encode() in resp.data
 
 
 def test_shipping_order_record_cards(client):
@@ -167,3 +167,243 @@ def test_detail_renders_order_images_grid(client):
     assert "本单图片" in body
     assert body.count('<img src="/upload/') == 3  # 2 record + 1 shared, 单 grid 内合计 3 张
     assert 'onclick="showImgPreview' in body
+
+
+def test_detail_renders_upload_progress_elements(client):
+    """回归：商品卡片含 data-role="upload-progress" 元素（默认 hidden），整体图区含 overall-progress 元素。"""
+    from models.orders import ShippingOrder, ShippingRecord
+    today = _today_date.today().isoformat()
+    oid = ShippingOrder.create(today, "客户")
+    ShippingRecord.create(today, "客户", "商品", "规格", 1, "件", "", order_pk=oid)
+    resp = client.get(f"/m/shipping-today/order/{oid}")
+    body = resp.get_data(as_text=True)
+    assert 'data-role="upload-progress"' in body
+    assert 'data-role="overall-progress"' in body
+    # 默认 hidden（不在视图中显示）
+    assert body.count('data-role="upload-progress" hidden') >= 1
+    assert body.count('data-role="overall-progress" hidden') >= 1
+
+
+def test_detail_uses_latest_image_status(client):
+    """回归：商品行多张图时，状态应取最新一张（按 sort_order 末尾），不是'最差'。
+    复现:先 yellow 存疑,再 green 通过,刷新后应显示 green。"""
+    from models.orders import ShippingOrder, ShippingRecord, ShippingImage
+    today = _today_date.today().isoformat()
+    oid = ShippingOrder.create(today, "客户")
+    rid = ShippingRecord.create(today, "客户", "白磅布", "60寸", 2, "件", "", order_pk=oid)
+    iid_old = ShippingImage.create(oid, r"upload\2026-08\a.jpg", "a.jpg", "upload", rid, 1)
+    ShippingImage.set_match(iid_old, "yellow", 0.6, "存疑", "local_fuzzy")
+    iid_new = ShippingImage.create(oid, r"upload\2026-08\b.jpg", "b.jpg", "upload", rid, 2)
+    ShippingImage.set_match(iid_new, "green", 0.95, "一致", "local_fuzzy")
+    resp = client.get(f"/m/shipping-today/order/{oid}")
+    body = resp.get_data(as_text=True)
+    assert "✓ 通过" in body
+    assert "AI 判定与标签不一致" not in body
+    assert "存疑" not in body
+
+
+def test_detail_renders_color_note_when_ocr_has_no_color(client):
+    """回归：OCR 文本无颜色词 + bg_color='black' → 详情页应展示"标签背景:黑色"标注。"""
+    from models.orders import ShippingOrder, ShippingRecord, ShippingImage, OcrMatchEvent
+    today = _today_date.today().isoformat()
+    oid = ShippingOrder.create(today, "客户")
+    rid = ShippingRecord.create(today, "客户", "黑磅布", "60寸", 2, "件", "", order_pk=oid)
+    iid = ShippingImage.create(oid, r"upload\2026-08\a.jpg", "a.jpg", "upload", rid, 1)
+    ShippingImage.set_match(iid, "green", 0.95, "一致", "local_fuzzy")
+    # 模拟后台线程写 bg_color + ocr_text(无颜色词)
+    from models._db import get_db
+    db = get_db()
+    db.execute("UPDATE shipping_images SET bg_color=? WHERE id=?", ("black", iid))
+    db.commit()
+    db.close()
+    OcrMatchEvent.create("record_ocr", record_id=rid, order_id=oid, image_id=iid, ocr_text="磅布三文治 60寸")
+    resp = client.get(f"/m/shipping-today/order/{oid}")
+    body = resp.get_data(as_text=True)
+    assert "标签背景:黑色" in body
+    assert 'data-role="color-note"' in body
+
+
+def test_detail_no_color_note_when_ocr_has_color_word(client):
+    """回归：OCR 含"白"等颜色词 → 不展示"标签背景"标注。"""
+    from models.orders import ShippingOrder, ShippingRecord, ShippingImage, OcrMatchEvent
+    today = _today_date.today().isoformat()
+    oid = ShippingOrder.create(today, "客户")
+    rid = ShippingRecord.create(today, "客户", "白磅布", "60寸", 2, "件", "", order_pk=oid)
+    iid = ShippingImage.create(oid, r"upload\2026-08\a.jpg", "a.jpg", "upload", rid, 1)
+    ShippingImage.set_match(iid, "green", 0.95, "一致", "local_fuzzy")
+    from models._db import get_db
+    db = get_db()
+    db.execute("UPDATE shipping_images SET bg_color=? WHERE id=?", ("white", iid))
+    db.commit()
+    db.close()
+    OcrMatchEvent.create("record_ocr", record_id=rid, order_id=oid, image_id=iid, ocr_text="白色磅布 三文治 60寸")
+    resp = client.get(f"/m/shipping-today/order/{oid}")
+    body = resp.get_data(as_text=True)
+    assert "标签背景" not in body
+
+
+def test_detail_skips_photo_ui_for_board_items(client):
+    """回归：皮革/木板类商品详情页不显示拍照按钮 + 徽标"无需拍照" + 单位显示"块"。"""
+    from models.orders import ShippingOrder, ShippingRecord
+    today = _today_date.today().isoformat()
+    oid = ShippingOrder.create(today, "客户")
+    ShippingRecord.create(today, "客户", "白海绵", "60寸", 2, "件", "", order_pk=oid)
+    ShippingRecord.create(today, "客户", "皮革", "5mm", 1, "件", "", order_pk=oid)
+    ShippingRecord.create(today, "客户", "木板", "60x40", 3, "件", "", order_pk=oid)
+    resp = client.get(f"/m/shipping-today/order/{oid}")
+    body = resp.get_data(as_text=True)
+    assert "无需拍照" in body
+    assert "皮革/木板类" in body
+    # 板材的 product-card 应有 data-role="board" 标记
+    assert body.count('data-role="board"') == 2
+    # 板材不渲染拍照按钮
+    import re
+    board_cards = re.findall(r'<div class="product-card"[^>]*data-role="board"[^>]*>(.*?)</div>\s*</div>\s*</div>', body, re.S)
+    for card in board_cards:
+        assert "拍照识别" not in card
+
+
+def test_list_page_excludes_boards_from_total(client):
+    """回归：列表页 total 不算皮革/木板,单独显示 board_total。"""
+    from models.orders import ShippingOrder, ShippingRecord, ShippingImage
+    today = _today_date.today().isoformat()
+    oid = ShippingOrder.create(today, "客户")
+    rid1 = ShippingRecord.create(today, "客户", "白海绵", "60寸", 2, "件", "", order_pk=oid)
+    rid2 = ShippingRecord.create(today, "客户", "皮革", "5mm", 1, "件", "", order_pk=oid)
+    rid3 = ShippingRecord.create(today, "客户", "木板", "60x40", 3, "件", "", order_pk=oid)
+    iid = ShippingImage.create(oid, r"upload\2026-08\a.jpg", "a.jpg", "upload", rid1, 1)
+    ShippingImage.set_match(iid, "green", 0.95, "一致", "local_fuzzy")
+    resp = client.get("/m/shipping-today")
+    body = resp.get_data(as_text=True)
+    # 2 块板（皮革 + 木板）单独显示
+    assert "板 2 块" in body
+    # regular total = 1 (白海绵),不是 3
+    assert "<b>1</b> 项商品" in body
+    # 已拍比例 1/1(只算白海绵,板不算)
+    assert "1/1 已拍" in body
+
+
+def test_list_header_shows_today_order_count(client):
+    """回归：列表页 header 右侧显示今日订单总数。"""
+    from models.orders import ShippingOrder
+    today = _today_date.today().isoformat()
+    ShippingOrder.create(today, "客户A")
+    ShippingOrder.create(today, "客户B")
+    resp = client.get("/m/shipping-today")
+    body = resp.get_data(as_text=True)
+    assert "header-stat" in body
+    assert "2 单" in body
+
+
+def test_list_header_has_refresh_button(client):
+    """回归：列表页 header 有整体刷新按钮（链接回自己）。"""
+    from models.orders import ShippingOrder
+    today = _today_date.today().isoformat()
+    ShippingOrder.create(today, "客户")
+    resp = client.get("/m/shipping-today")
+    body = resp.get_data(as_text=True)
+    assert "refresh-btn" in body
+    assert "整体刷新" in body
+
+
+def test_detail_template_has_order_images_grid_data_role(client):
+    """回归：详情页整单 grid 容器含 data-role=order-images-grid,方便 JS 局部追加新上传图。"""
+    from models.orders import ShippingOrder, ShippingRecord, ShippingImage
+    today = _today_date.today().isoformat()
+    oid = ShippingOrder.create(today, "客户")
+    rid = ShippingRecord.create(today, "客户", "商品", "60寸", 1, "件", "", order_pk=oid)
+    iid = ShippingImage.create(oid, r"upload\2026-08\a.jpg", "a.jpg", "upload", rid, 1)
+    ShippingImage.set_match(iid, "green", 0.95, "一致", "local_fuzzy")
+    resp = client.get(f"/m/shipping-today/order/{oid}")
+    body = resp.get_data(as_text=True)
+    assert 'data-role="order-images-grid"' in body
+    # JS 含 appendImageToOrderGrid helper
+    js_path = os.path.join(os.path.dirname(__file__), "..", "static", "js", "mobile_detail.js")
+    with open(js_path, encoding="utf-8") as f:
+        js = f.read()
+    assert "appendImageToOrderGrid" in js
+
+
+def test_mobile_detail_js_skips_board_cards_in_bindRecord(client):
+    """回归：mobile_detail.js 对板材商品（无 record-input）不能 throw null addEventListener 错误。"""
+    from models.orders import ShippingOrder, ShippingRecord
+    today = _today_date.today().isoformat()
+    oid = ShippingOrder.create(today, "客户")
+    ShippingRecord.create(today, "客户", "皮革", "5mm", 1, "件", "", order_pk=oid)
+    resp = client.get(f"/m/shipping-today/order/{oid}")
+    assert resp.status_code == 200
+    js_path = os.path.join(os.path.dirname(__file__), "..", "static", "js", "mobile_detail.js")
+    with open(js_path, encoding="utf-8") as f:
+        js = f.read()
+    # bindRecord 开头必须有 null 守卫,避免板材商品触发 null.addEventListener
+    assert "if (!input) return" in js
+
+
+def test_overall_buttons_renamed(client):
+    """回归：整体图 3 按钮文案依次为'备货照/装车照/归仓照'。"""
+    from models.orders import ShippingOrder, ShippingRecord
+    today = _today_date.today().isoformat()
+    oid = ShippingOrder.create(today, "客户")
+    ShippingRecord.create(today, "客户", "商品", "规格", 1, "件", "", order_pk=oid)
+    resp = client.get(f"/m/shipping-today/order/{oid}")
+    body = resp.get_data(as_text=True)
+    assert "备货照" in body
+    assert "装车照" in body
+    assert "归仓照" in body
+
+
+def test_overall_image_source_tag_persists_and_renders(client):
+    """回归：整体图 source_tag（备货照/装车照/归仓照）持久化到 DB + 详情页叠加显示。"""
+    from models.orders import ShippingOrder, ShippingImage
+    today = _today_date.today().isoformat()
+    oid = ShippingOrder.create(today, "客户")
+    # 直接通过 model 插入,带 source_tag(模拟后端已接收 source_tag form field)
+    iid = ShippingImage.create(oid, r"upload\2026-08\a.jpg", "备货照.jpg", "upload", None, None, "备货照")
+    resp = client.get(f"/m/shipping-today/order/{oid}")
+    body = resp.get_data(as_text=True)
+    assert "img-source-tag" in body
+    assert "备货照" in body
+    # DB 字段确实写入
+    img = ShippingImage.get_by_id(iid)
+    assert img["source_tag"] == "备货照"
+
+
+def test_record_image_no_source_tag(client):
+    """回归：record 图片不显示 source_tag 叠加。"""
+    from models.orders import ShippingOrder, ShippingRecord, ShippingImage
+    today = _today_date.today().isoformat()
+    oid = ShippingOrder.create(today, "客户")
+    rid = ShippingRecord.create(today, "客户", "白海绵", "60寸", 2, "件", "", order_pk=oid)
+    iid = ShippingImage.create(oid, r"upload\2026-08\a.jpg", "a.jpg", "upload", rid, 1, None)
+    ShippingImage.set_match(iid, "green", 0.95, "一致", "local_fuzzy")
+    resp = client.get(f"/m/shipping-today/order/{oid}")
+    body = resp.get_data(as_text=True)
+    # record 图没 source_tag,不应有 img-source-tag 节点
+    assert "img-source-tag" not in body
+
+
+def test_overall_button_data_attributes_match_source_tag_whitelist(client):
+    """回归：3 个整体图按钮的 data-overall-source 必须与后端白名单一致（备货照/装车照/归仓照），否则被过滤后无叠加。"""
+    from models.orders import ShippingOrder, ShippingRecord
+    today = _today_date.today().isoformat()
+    oid = ShippingOrder.create(today, "客户")
+    ShippingRecord.create(today, "客户", "商品", "规格", 1, "件", "", order_pk=oid)
+    resp = client.get(f"/m/shipping-today/order/{oid}")
+    body = resp.get_data(as_text=True)
+    import re
+    for tag in ("备货照", "装车照", "归仓照"):
+        assert f'data-overall-source="{tag}"' in body
+
+
+def test_overall_thumb_text_matches_buttons(client):
+    """回归：3 个缩略图占位文本与按钮文本一致（备货照/装车照/归仓照）。"""
+    from models.orders import ShippingOrder, ShippingRecord
+    today = _today_date.today().isoformat()
+    oid = ShippingOrder.create(today, "客户")
+    ShippingRecord.create(today, "客户", "商品", "规格", 1, "件", "", order_pk=oid)
+    resp = client.get(f"/m/shipping-today/order/{oid}")
+    body = resp.get_data(as_text=True)
+    assert "备货照\u3000未拍" in body
+    assert "装车照\u3000未拍" in body
+    assert "归仓照\u3000未拍" in body
+    assert "整体照\u3000未拍" not in body  # 旧文案已无

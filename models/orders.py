@@ -1038,10 +1038,11 @@ class InboundImage:
 
 class ShippingImage:
     @staticmethod
-    def create(order_pk: int, file_path: str, original_name: str = '', source: str = 'upload', record_pk: int = None, sort_order: int = None):
+    def create(order_pk: int, file_path: str, original_name: str = '', source: str = 'upload', record_pk: int = None, sort_order: int = None, source_tag: str = None):
         """插入图片。
         - record_pk: None=订单级共享图, 非空=某条明细的专属图
         - sort_order: None 时由本方法在事务内计算 max+1(同事务累加); 显式传入则按用户值
+        - source_tag: 整体图分类标签 ('备货照'|'装车照'|'归仓照'|None)
         """
         conn = get_db()
         cursor = conn.cursor()
@@ -1052,9 +1053,9 @@ class ShippingImage:
             )
             sort_order = cursor.fetchone()['next']
         cursor.execute(
-            'INSERT INTO shipping_images (order_pk, file_path, original_name, source, record_pk, sort_order, created_at) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?)',
-            (order_pk, file_path, original_name, source, record_pk, sort_order,
+            'INSERT INTO shipping_images (order_pk, file_path, original_name, source, record_pk, sort_order, source_tag, created_at) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            (order_pk, file_path, original_name, source, record_pk, sort_order, source_tag,
              datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
         )
         conn.commit()
