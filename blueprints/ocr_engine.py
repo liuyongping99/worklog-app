@@ -629,6 +629,47 @@ class PaddleOCREngine(BaseOCREngine):
             logger.exception('PaddleOCR extract_text failed: %s', e)
             return ''
 
+    def extract_text_with_conf(self, image_bytes):
+        """与 extract_text 类似,但额外返回平均置信度 (0~1)。
+
+        用途:移动端 Task 6,ocr 置信度低时(模糊图)在 reason 上追加提示,
+        引导用户重拍。
+
+        Returns:
+            (text, avg_conf): text 为拼接后的 OCR 纯文本(与 extract_text 行为一致
+            —— 含「厚度」字补回);avg_conf 为所有非空文本行的平均置信度。
+            失败或无文字时 avg_conf=1.0(不触发模糊提示)。
+        """
+        try:
+            self._ensure_model()
+            resized = self._resize_if_needed(image_bytes)
+            result = self._ocr.ocr(resized, cls=True)
+            if not result or not result[0]:
+                return '', 1.0
+            lines = []
+            confs = []
+            for item in result[0]:
+                if item and len(item) >= 2:
+                    text = item[1][0]
+                    conf = item[1][1]
+                    if text and text.strip():
+                        lines.append(text.strip())
+                    try:
+                        confs.append(float(conf))
+                    except (TypeError, ValueError):
+                        pass
+            text = '\n'.join(lines)
+            # 2026-08-09 修复:小字「厚度：1.0mm」常被识别成「度：1.0mm」(缺"厚"),
+            # 这里补回"厚"字,与 extract_text 行为保持一致。
+            import re as _re
+            text = _re.sub(r'(?m)^\s*度\s*[:：]\s*(\d+\.?\d*)\s*mm?\s*$',
+                           r'厚度：\1mm', text)
+            avg_conf = sum(confs) / len(confs) if confs else 1.0
+            return text, avg_conf
+        except Exception as e:
+            logger.exception('PaddleOCR extract_text_with_conf failed: %s', e)
+            return '', 1.0
+
     @log_ocr_call('ocr.paddle', evt='recognize',
                   failed_if=lambda r: not (r or {}).get('success'),
                   payload=image_payload, outcome=items_outcome)

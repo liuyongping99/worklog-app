@@ -50,6 +50,38 @@ _ASYNC_JOBS = {}
 _OCR_LOCK = threading.Lock()
 
 
+def _append_blur_reason_if_low_conf(image_id: int, avg_conf: float, threshold: float = 0.5) -> None:
+    """行级图 OCR 平均置信度低于阈值时,在 ShippingImage.reason 末尾追加模糊提示。
+
+    移动端拍照易出现糊图(对焦失败/手抖),PaddleOCR 仍会跑出文字但置信度偏低。
+    把这条信息写到 reason 上,前端 hover 可提示用户重拍,减少误识。
+
+    - 幂等:marker 已存在则不再追加
+    - 失败/行不存在则静默 return,不阻断主流程
+    """
+    if avg_conf >= threshold:
+        return
+    try:
+        from models.orders import ShippingImage
+        row = ShippingImage.get_by_id(image_id)
+        if not row:
+            return
+        old = row.get('reason') or ''
+        marker = '[图像可能模糊，建议重拍]'
+        if marker in old:
+            return
+        new_reason = f"{old} {marker}".strip()
+        ShippingImage.set_match(
+            image_id,
+            row.get('match_status') or 'yellow',
+            row.get('match_score') or 0,
+            new_reason,
+            row.get('match_source') or 'local_fuzzy',
+        )
+    except Exception:
+        logger.exception('append blur reason failed: image_id=%s', image_id)
+
+
 def _process_record_image_async(image_id, filepath, record, order_id, record_id):
     """后台线程：对单张行级图跑 OCR + 背景色 + AI 比对，并把结果写库。
 
@@ -60,11 +92,13 @@ def _process_record_image_async(image_id, filepath, record, order_id, record_id)
     try:
         # 仅"抽字→比对"受锁保护；DB 写库在锁外执行，缩短临界区。
         with _OCR_LOCK:
-            # 1) PaddleOCR 抽字(单次)
+            # 1) PaddleOCR 抽字(单次),同时拿到平均置信度用于糊图检测
             ocr_text = ''
+            avg_conf = 1.0
             try:
                 with open(filepath, 'rb') as _f:
-                    ocr_text = get_ocr_engine('paddleocr').extract_text(_f.read()) or ''
+                    _ocr_text, avg_conf = get_ocr_engine('paddleocr').extract_text_with_conf(_f.read())
+                    ocr_text = _ocr_text or ''
             except Exception:
                 logger.exception('记录 OCR 文本失败(不阻断): %s', filepath)
             # 1.5) 图片背景色检测:对标签不写颜色的品类(如磅布三文治),从背景推断实物颜色
@@ -83,6 +117,12 @@ def _process_record_image_async(image_id, filepath, record, order_id, record_id)
         )
         if status:
             ShippingImage.set_match(image_id, status, score, reason, source=source_label)
+        # 1.6) 移动端糊图提示:avg_conf < 0.5 时在 reason 追加「图像可能模糊」,
+        # 引导用户重拍(失败不阻断)
+        try:
+            _append_blur_reason_if_low_conf(image_id, avg_conf)
+        except Exception:
+            logger.exception('append blur reason failed: image_id=%s', image_id)
         # 新增:append-only record_ocr 事件(写入失败不阻断主流程)
         try:
             OcrMatchEvent.create(
