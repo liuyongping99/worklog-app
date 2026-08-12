@@ -133,3 +133,37 @@ def test_detail_uses_data_last_image_id(client):
         js = f.read()
     assert "card.dataset.lastImageId = imageId" in js
     assert 'typeof window.mobileBlurCheck === "function"' in js
+
+
+def test_detail_renders_initial_image_state(client):
+    """回归：详情页渲染时如 record 已有 green 图，徽标与状态行应反映出来，不能硬编码'待拍/尚未拍照'。"""
+    from models.orders import ShippingOrder, ShippingRecord, ShippingImage
+    today = _today_date.today().isoformat()
+    oid = ShippingOrder.create(today, "回归客户")
+    rid = ShippingRecord.create(today, "回归客户", "白磅布", "60寸", 2, "件", "", order_pk=oid)
+    iid = ShippingImage.create(oid, r"upload\2026-08\a.jpg", "a.jpg", "upload", rid, 1)
+    ShippingImage.set_match(iid, "green", 0.95, "一致", "local_fuzzy")
+    resp = client.get(f"/m/shipping-today/order/{oid}")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "✓ 通过" in body
+    assert "标签与规格一致" in body
+    assert "尚未拍照" not in body
+
+
+def test_detail_renders_order_images_grid(client):
+    """回归：详情页底部展示整单图片缩略图（含 record 图 + 订单共享图），3 列 grid，点击调用 showImgPreview。"""
+    from models.orders import ShippingOrder, ShippingRecord, ShippingImage
+    today = _today_date.today().isoformat()
+    oid = ShippingOrder.create(today, "客户")
+    rid = ShippingRecord.create(today, "客户", "商品", "60寸", 1, "件", "", order_pk=oid)
+    iid1 = ShippingImage.create(oid, r"upload\2026-08\a.jpg", "a.jpg", "upload", rid, 1)
+    iid2 = ShippingImage.create(oid, r"upload\2026-08\b.jpg", "b.jpg", "upload", rid, 2)
+    iid_shared = ShippingImage.create(oid, r"upload\2026-08\c.jpg", "c.jpg", "upload", None, 1)
+    resp = client.get(f"/m/shipping-today/order/{oid}")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "order-images" in body  # 整单 grid section
+    assert "本单图片" in body
+    assert body.count('<img src="/upload/') == 3  # 2 record + 1 shared, 单 grid 内合计 3 张
+    assert 'onclick="showImgPreview' in body

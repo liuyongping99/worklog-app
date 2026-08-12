@@ -34,20 +34,6 @@
     }
   }
 
-  function appendRecognitionLog(img, recordName) {
-    const list = $('[data-role="recognition-list"]');
-    if (!list) return;
-    const row = document.createElement("div");
-    row.className = "echo-row";
-    const thumbBg = img.match_status === "red" ? "#c5342c" : "#16835f";
-    const tag = img.match_status === "green" ? "✓ 通过" : img.match_status === "yellow" ? "⚠ 待确认" : "✕ 不符";
-    row.innerHTML = `
-      <div class="echo-thumb" style="background:${thumbBg};color:#fff;width:44px;height:44px;border-radius:8px;display:grid;place-items:center;font-size:10px;">缩略图</div>
-      <div><div class="echo-name">${recordName}</div><div class="echo-tag">置信度 ${(img.match_score || 0).toFixed(2)}</div></div>
-      <span class="echo-status done">${tag}</span>`;
-    list.prepend(row);
-  }
-
   async function poll(imageId, card, recordName) {
     const started = Date.now();
     while (Date.now() - started < POLL_TIMEOUT_MS) {
@@ -59,7 +45,6 @@
       const img = body.image;
       if (!img) return;
       updateStatusLine(card, img);
-      appendRecognitionLog(img, recordName);
       return img;
     }
   }

@@ -4,6 +4,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/mobile.css') }}">
   <script src="https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0/dist/opencv.js" async></script>
 {% endblock %}
+{% block navbar %}{% endblock %}
 {% block content %}
 <div class="mobile-order" data-order-id="{{ order['id'] }}">
   <header class="app-head">
@@ -31,28 +32,50 @@
   </section>
 
   {% for rec in records %}
+    {% set state = record_states.get(rec['id'], {'status': None, 'images': []}) %}
+    {% set badge_cls, badge_text = ('done', '✓ 通过') if state.status == 'green' else ('warn', '⚠ 待确认') if state.status == 'yellow' else ('warn', '✕ 不符') if state.status == 'red' else ('todo', '待拍') %}
+    {% if state.status == 'green' %}
+      {% set status_cls = '' %}
+      {% set status_text = '最近一次识别：标签与规格一致' %}
+    {% elif state.status == 'yellow' %}
+      {% set status_cls = 'warn' %}
+      {% set status_text = 'AI 判定与标签不一致' %}
+    {% elif state.status == 'red' %}
+      {% set status_cls = 'warn' %}
+      {% set status_text = 'OCR 失败 / AI 不符' %}
+    {% else %}
+      {% set status_cls = '' %}
+      {% set status_text = '尚未拍照' %}
+    {% endif %}
+    {% set confirm_hidden = state.status in (None, 'green') %}
     <div class="product-card" data-record-id="{{ rec['id'] }}">
       <div class="row">
         <div>
           <div class="product-name">{{ loop.index }}. {{ rec['product_name'] }}</div>
           <div class="spec">{{ rec['specification'] }} · <b>{{ rec['quantity'] }}{{ rec['unit'] }}</b>{% if rec['remark'] %} · 备注：{{ rec['remark'] }}{% endif %}</div>
         </div>
-        <span class="badge todo" data-role="badge">待拍</span>
+        <span class="badge {{ badge_cls }}" data-role="badge">{{ badge_text }}</span>
       </div>
       <div class="photo-row">
         <button class="primary" data-action="capture">📷 拍照识别</button>
         <button class="secondary" data-action="album">🖼 相册</button>
       </div>
       <input type="file" accept="image/*" capture="environment" data-role="record-input" hidden>
-      <div class="status-line" data-role="status">尚未拍照</div>
-      <button class="confirm" data-action="confirm" hidden>✓ 人工确认通过</button>
+      <div class="status-line {{ status_cls }}" data-role="status" data-initial-status="{{ state.status or '' }}">{{ status_text }}</div>
+      <button class="confirm" data-action="confirm" {% if confirm_hidden %}hidden{% endif %}>✓ 人工确认通过</button>
     </div>
   {% endfor %}
 
-  <section class="recognition-log">
-    <h3>📷 识别记录（{{ records|length }}）</h3>
-    <div data-role="recognition-list"></div>
+  {% if order_images %}
+  <section class="order-images">
+    <h3>📷 本单图片（{{ order_images|length }}）</h3>
+    <div class="record-images">
+      {% for img in order_images %}
+        <img src="/upload/{{ img.rel_path }}" alt="{{ img['original_name'] }}" onclick="showImgPreview(this.src)" loading="lazy">
+      {% endfor %}
+    </div>
   </section>
+  {% endif %}
 </div>
 
 <script src="{{ url_for('static', filename='js/mobile_blur.js') }}"></script>

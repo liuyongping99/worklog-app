@@ -127,11 +127,7 @@ check(scriptSrcs.some(s => s.includes('mobile_blur.js')),
 check(scriptSrcs.some(s => s.includes('mobile_detail.js')),
   `应引用 mobile_detail.js,实际 scripts=[${scriptSrcs.join(', ')}]`);
 
-// 7) 识别记录区
-const recognitionLog = document.querySelector('[data-role="recognition-list"]');
-check(recognitionLog !== null, '缺少 [data-role="recognition-list"] 识别记录容器');
-
-// 8) 详情页整体包装
+// 7) 详情页整体包装（识别记录折叠区已删除，与商品行状态徽标重复）
 const wrap = document.querySelector('.mobile-order');
 check(wrap !== null, '页面应包含 .mobile-order 容器');
 
