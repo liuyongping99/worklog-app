@@ -613,6 +613,11 @@
                         {% if _overlay_rec.product_name %}<div class="img-overlay-name">{{ _overlay_rec.product_name }}</div>{% endif %}
                         {% if _overlay_rec.specification %}<div class="img-overlay-spec">{{ _overlay_rec.specification }}</div>{% endif %}
                     {% endif %}
+                    {% if img.source_tag %}
+                        <span class="source-tag-badge" style="background:#7c3aed;color:#fff;padding:2px 6px;border-radius:4px;font-size:0.7rem;">
+                            📷 {{ img.source_tag }}
+                        </span>
+                    {% endif %}
                 </div>
                 {% if img.record_pk %}
                 <div class="img-meta">
@@ -657,6 +662,18 @@
         <p>暂无入库记录</p>
     </div>
     {% endfor %}
+    </div>
+
+    <!-- AI 比对图例条(2026-08-13 Task 5:与出货对齐) -->
+    <div class="match-legend" style="margin: var(--space-md) 0; padding: var(--space-sm); background: #f8f9fa; border-radius: 6px; font-size: 0.85rem;">
+        <strong>AI 比对图例：</strong>
+        <span class="match-badge" style="color:#16a34a;">✓</span> 图文相符
+        <span class="match-badge" style="color:#d97706;">⚠</span> 存疑
+        <span class="match-badge" style="color:#dc2626;">✗</span> 可能不符
+        <span style="margin-left: 1rem;">
+            <span class="match-badge match-badge-deepseek" data-match-status="green" style="color:#0d9488;">⊛</span> 云端 DeepSeek
+        </span>
+        <span class="match-badge" style="color:#10b981;">👤</span> 人工已确认
     </div>
 
     <!-- 备注弹框 -->
