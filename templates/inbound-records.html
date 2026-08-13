@@ -299,6 +299,26 @@
 .inbound-page .img-col-btn:hover { background: #d0e8d0; border-color: #00b894; color: #00b894; }
 .inbound-page .img-col-btn.active { background: #00b894; color: white; border-color: #00b894; font-weight: 600; }
 .inbound-page .record-table .match-col { text-align: center; padding: 0.25rem; }
+/* 重点标识列(与出货对齐):整组无环保+无加面时整列隐藏 */
+.inbound-page .jia-mian-icon { display: inline-block; color: #868e96; vertical-align: middle; line-height: 0; }
+.inbound-page .eco-icon { color: #2d8c4a; margin-right: 0.25rem; font-size: 0.95rem; vertical-align: middle; }
+.inbound-page .eco-icon + .jia-mian-icon { margin-left: 0.15rem; }
+.inbound-page .record-table .eco-col { text-align: center; padding: 0.25rem; }
+.inbound-page .record-table.no-eco .eco-col { display: none; }
+/* 环保行底色(与出货对齐,优先级低于 row-out-of-stock / row-warn / row-info) */
+.inbound-page .record-table tr.row-eco:not(.row-out-of-stock):not(.row-warn):not(.row-info) td { background-color: #f0f9f3; }
+.inbound-page .record-table tr.row-eco:not(.row-out-of-stock):not(.row-warn):not(.row-info):hover td { background-color: #e3f5e8; }
+.inbound-page .record-table tr.row-eco td:first-child { border-left-color: #2d8c4a; }
+/* 缺货行底色(与出货对齐) */
+.inbound-page .record-table tr.row-out-of-stock td { background: var(--color-out-of-stock-bg); }
+.inbound-page .record-table tr.row-out-of-stock td:first-child { border-left-color: var(--color-out-of-stock); }
+.inbound-page .record-table tr.row-out-of-stock:hover td { background: #ffcccc; }
+.inbound-page .record-table tr.row-out-of-stock .stock-icon { color: var(--color-out-of-stock); font-size: var(--font-md); margin-right: 2px; vertical-align: middle; }
+.inbound-page .record-table tr.row-out-of-stock .qty-badge { background: #fab1a0; color: var(--color-out-of-stock); }
+/* 行级图片 has-image 红边框(与出货对齐) */
+.inbound-page .record-table .record-image-btn.has-image {
+    border: 2px solid #dc2626;
+}
 </style>
 
 <script>
@@ -494,9 +514,12 @@
         </div>
         {% endif %}
 
-        <table class="record-table">
+        {% set has_eco = group.has_eco|default(false) %}
+        {% set has_jia_mian = group.has_jia_mian|default(false) %}
+        <table class="record-table{% if not has_eco and not has_jia_mian %} no-eco{% endif %}">
             <thead>
                 <tr>
+                    <th class="eco-col" style="width:35px;">重点</th>
                     <th style="width: 18%;">商品名称</th>
                     <th style="width: 14%;">规格</th>
                     <th style="width: 10%;">数量</th>
@@ -508,11 +531,12 @@
             </thead>
             <tbody>
                 {% for record in group.records %}
-                <tr data-record-id="{{ record.id }}"
+                <tr class="{% if record.qty_invalid %}row-out-of-stock{% elif record.mismatch == 'warn' or record.piece_mismatch == 'warn' %}row-warn{% elif record.mismatch == 'info' or record.piece_mismatch == 'info' %}row-info{% endif %}{% if '环保' in record.product_name %} row-eco{% endif %}"
+                    data-record-id="{{ record.id }}"
                     data-verified="{{ '1' if record.verified else '0' }}"
-                    data-verified-warnings="{{ record.verified_warnings or '{}' }}"
-                    class="{% if record.mismatch == 'warn' or record.piece_mismatch == 'warn' %}row-warn{% elif record.mismatch == 'info' or record.piece_mismatch == 'info' %}row-info{% endif %}">
-                    <td class="product-name product-name-cell" style="max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ record.product_name }}">{% if record.mismatch == 'warn' or record.piece_mismatch == 'warn' %}❌ {% elif record.mismatch == 'info' or record.piece_mismatch == 'info' %}💡 {% endif %}{{ record.product_name }}</td>
+                    data-verified-warnings="{{ record.verified_warnings or '{}' }}">
+                    <td class="eco-col">{% if '环保' in record.product_name %}<span class="eco-icon" title="环保产品">🌿</span>{% endif %}{% if '杂胶' in record.product_name and '加面' in (record.specification or '') %}<svg class="jia-mian-icon" viewBox="0 0 16 16" width="14" height="14" title="加面工艺"><defs><pattern id="mesh-{{ record.id }}" width="3" height="3" patternUnits="userSpaceOnUse"><path d="M0,3 L3,0" stroke="currentColor" stroke-width="0.6"/><path d="M0,0 L3,3" stroke="currentColor" stroke-width="0.6"/></pattern></defs><rect width="16" height="16" fill="url(#mesh-{{ record.id }})"/></svg>{% endif %}</td>
+                    <td class="product-name product-name-cell" style="max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ record.product_name }}">{% if record.qty_invalid %}<span class="stock-icon" title="数量异常">❌</span>{% elif record.mismatch == 'warn' or record.piece_mismatch == 'warn' %}❌ {% elif record.mismatch == 'info' or record.piece_mismatch == 'info' %}💡 {% endif %}{{ record.product_name }}</td>
                     <td class="spec spec-cell">{{ record.specification }}</td>
                     <td><span class="qty-badge">{{ record.quantity }}</span></td>
                     <td><span class="unit-badge">{{ record.unit }}</span></td>
@@ -530,6 +554,7 @@
                 {% endfor %}
                 {% if group.summary_pieces > 0 or group.summary_loose_pieces > 0 or group.summary_unit_pieces > 0 %}
                 <tr class="summary-row" style="background:#f0fdf4; font-weight:600; border-top:2px solid #00b894;">
+                    <td class="eco-col" style="padding:0.6rem 0.75rem;"></td>
                     <td colspan="4" style="text-align:right; padding:0.6rem 0.75rem; color:#00b894; font-size:0.9rem;">📊 备注支数：</td>
                     <td style="padding:0.6rem 0.75rem; color:#2d3436; font-size:0.9rem;">
                         {{ group.summary_pieces }}支
@@ -540,7 +565,6 @@
                     <td style="padding:0.6rem 0.75rem; color:#00b894; font-size:0.9rem;">
                         📊 明细支数：{{ group.summary_unit_pieces }}支
                     </td>
-                    <td style="padding:0.6rem 0.75rem;"></td>
                     <td style="padding:0.6rem 0.75rem;"></td>
                 </tr>
                 {% endif %}
@@ -1675,6 +1699,8 @@ setTimeout(() => {
         bindFuzzyMatchButtons();
         bindAiJudgeButtons();
         applyAllRecordImageOverlays();
+        // 2026-08-05:页面刷新时,服务端不渲染 match-col,需 JS 主动为有图片的 record 补建列
+        if (typeof initAllMatchColumns === 'function') initAllMatchColumns();
         if (typeof bindOcrDetailButtons === 'function') bindOcrDetailButtons();
     });
 
