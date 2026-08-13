@@ -116,7 +116,17 @@ def _classify_and_match_image(filepath, record, ocr_text):
     try:
         ds = get_ocr_engine('deepseek')
         if getattr(ds, 'API_KEY', ''):
-            res = ds.compare_single_record(ocr_text, record)
+            # ── 2026-08-09:把分类后的补充提示词也喂给单 record 比对 ──
+            from models.category_prompt import classify_record, CategoryPrompt
+            _cls = classify_record(product_name=record.get('product_name', ''),
+                                   specification=record.get('specification', ''))
+            _cc = _cls['category_code'] if (_cls and _cls.get('category_code')) else None
+            _sup = (CategoryPrompt.compose_for_record(
+                category_code=_cc,
+                product_name=record.get('product_name', ''),
+                specification=record.get('specification', ''),
+            ) if _cc else '')
+            res = ds.compare_single_record(ocr_text, record, supplement_prompt=_sup)
             ms = (res.get('match_status') or '').lower()
             if ms in ('green', 'yellow', 'red'):
                 return {
@@ -212,7 +222,22 @@ def inbound_records():
             else:
                 item['piece_hint'] = ''
                 item['piece_mismatch'] = ''
+            # 数量异常标记:空 或 非数字
+            qty_raw = (item.get('quantity') or '').strip()
+            try:
+                float(qty_raw)
+                item['qty_invalid'] = False
+            except (TypeError, ValueError):
+                item['qty_invalid'] = True
+            # 已核查警告 (per-rule verified_warnings)
+            item['verified_warnings'] = InboundRecord.get_verified_warnings(item['id'])
         group.update(summarize_remarks(group['records']))
+        group['has_eco'] = any('环保' in r.get('product_name', '') for r in group['records'])
+        group['has_jia_mian'] = any(
+            '杂胶' in r.get('product_name', '')
+            and '加面' in r.get('specification', '')
+            for r in group['records']
+        )
 
     # 2026-08-04:match-col 服务端不再渲染,改由 JS `_ensureMatchColumn`
     # 在首次有匹配结果时动态插入。所以这里不再算 record_worst_*_map /
@@ -323,6 +348,16 @@ def api_v1_inbound_orders_update(order_id):
         InboundOrder.set_doc_number(order_id, doc_number)
         AuditLog.log('update_doc_number', 'inbound_order', order_id, detail={'doc_number': doc_number})
         return jsonify({'success': True, 'doc_number': doc_number})
+
+    if 'img_cols' in data:
+        try:
+            cols = int(data['img_cols'])
+        except (TypeError, ValueError):
+            return jsonify({'success': False, 'error': '列数必须是整数'}), 400
+        if cols < 1 or cols > 5:
+            return jsonify({'success': False, 'error': '列数范围为1-5'}), 400
+        InboundOrder.set_img_cols(order_id, cols)
+        return jsonify({'success': True, 'img_cols': cols})
 
     if 'supplier' in data:
         if order.get('is_locked'):
@@ -608,9 +643,13 @@ def api_v1_inbound_orders_upload_image(order_id):
     source = request.form.get('source', 'upload')
     if source not in ('upload', 'ai'):
         source = 'upload'
-    image_id = InboundImage.create(order_id, filepath, file.filename, source)
+    _VALID_SOURCE_TAGS = {'备货照', '装车照', '归仓照'}
+    source_tag = request.form.get('source_tag')
+    if source_tag not in _VALID_SOURCE_TAGS:
+        source_tag = None
+    image_id = InboundImage.create(order_id, filepath, file.filename, source, source_tag=source_tag)
     relative_path = f"{date_str}/{filename}"
-    AuditLog.log('upload_image', 'inbound_order', order_id, detail={'filename': filename, 'source': source})
+    AuditLog.log('upload_image', 'inbound_order', order_id, detail={'filename': filename, 'source': source, 'source_tag': source_tag})
     return jsonify({'success': True, 'image_id': image_id, 'image': relative_path}), 201
 
 
@@ -787,7 +826,17 @@ def api_v1_inbound_orders_ai_judge_image(image_id):
         ds = get_ocr_engine('deepseek')
         if not getattr(ds, 'API_KEY', ''):
             return jsonify({'success': False, 'error': 'DeepSeek API Key 未配置'}), 503
-        res = ds.compare_single_record(ocr_text, record)
+        # ── 2026-08-09:把分类后的补充提示词喂给 AI 判别 ──
+        from models.category_prompt import classify_record, CategoryPrompt
+        _cls = classify_record(product_name=record.get('product_name', ''),
+                               specification=record.get('specification', ''))
+        _cc = _cls['category_code'] if (_cls and _cls.get('category_code')) else None
+        _sup = (CategoryPrompt.compose_for_record(
+            category_code=_cc,
+            product_name=record.get('product_name', ''),
+            specification=record.get('specification', ''),
+        ) if _cc else '')
+        res = ds.compare_single_record(ocr_text, record, supplement_prompt=_sup)
         ms = (res.get('match_status') or '').lower()
         if ms not in ('green', 'yellow', 'red'):
             return jsonify({'success': False, 'error': f'DeepSeek 返回异常: {ms}'}), 502
@@ -959,6 +1008,11 @@ def api_v1_inbound_orders_record_upload_images(record_id):
     source = 'upload'
     saved = []
 
+    _VALID_SOURCE_TAGS = {'备货照', '装车照', '归仓照'}
+    source_tag = request.form.get('source_tag')
+    if source_tag not in _VALID_SOURCE_TAGS:
+        source_tag = None
+
     files = request.files.getlist('image')
     if files:
         for f in files:
@@ -972,6 +1026,7 @@ def api_v1_inbound_orders_record_upload_images(record_id):
                 original_name=original_name,
                 source=source,
                 record_pk=record_id,
+                source_tag=source_tag,
             )
             rel_path = os.path.join(month_str, os.path.basename(filepath)).replace('\\', '/')
             img = InboundImage.get_by_id(image_id)
@@ -1053,12 +1108,16 @@ def api_v1_inbound_orders_record_upload_images(record_id):
         except ValueError as e:
             return jsonify({'success': False, 'error': str(e)}), 400
         source = data.get('source', 'upload')
+        _json_source_tag = data.get('source_tag')
+        if _json_source_tag not in _VALID_SOURCE_TAGS:
+            _json_source_tag = None
         image_id = InboundImage.create(
             order_pk=record['order_pk'],
             file_path=filepath,
             original_name=original_name,
             source=source,
             record_pk=record_id,
+            source_tag=_json_source_tag,
         )
         rel_path = os.path.join(month_str, os.path.basename(filepath)).replace('\\', '/')
         img = InboundImage.get_by_id(image_id)
