@@ -64,24 +64,24 @@ class _TempDb(unittest.TestCase):
 class LoadingImgColsTests(_TempDb):
 
     def test_render_uses_db_img_cols(self):
-        """装柜渲染不应再有 cookie loadingImgCols 痕迹。
-        (img-area div 只在有图时才渲染,所以这里只断言不再用 cookie 版渲染;
-        DB → group.img_cols → Jinja 的链路在 test_patch_img_cols_roundtrip
-        配合前端列数按钮的 {% if group.img_cols == N %}active{% endif %} 验证。)
+        """装柜渲染不应再有 cookie loadingImgCols 痕迹,DB 值 2 应注入到 date-group。
+        精确断言:`data-img-cols="2"` 在 `.date-group` 上(Jinja 渲染时由 `group.img_cols` 注入);
+        `cols-2` 是空断言 — CSS/JS 内联常量始终在,与 DB 值无关,故不再用。
         """
         from models import LoadingOrder
         oid = LoadingOrder.create('2026-08-13', '客户X')
         LoadingOrder.set_img_cols(oid, 2)
         res = self.client.get('/loading-orders?start_date=2026-08-13&end_date=2026-08-13')
         html = res.get_data(as_text=True)
-        self.assertIn('cols-2', html, 'DB 值 2 应进入页面（setImgCols default 3 的按钮 active 判定联动）')
+        self.assertIn('data-img-cols="2"', html, 'DB 值 2 应注入到 date-group 的 data-img-cols 属性')
         self.assertNotIn('loadingImgCols', html,
             '渲染不应再有 cookie loadingImgCols 痕迹')
 
     def test_patch_img_cols_roundtrip(self):
         """PATCH /api/v1/loading-orders/<id> img_cols 后端分支 roundtrip:
         1) PATCH 200
-        2) 刷新页面 cols-N 跟随 DB(列按钮 class 含 active 联动)
+        2) 刷新页面 date-group 的 data-img-cols 跟随 DB
+        3) DB 列真写入 4
         装柜默认 3,用 4 让断言能区分 default vs DB。
         """
         from models import LoadingOrder
@@ -91,12 +91,10 @@ class LoadingImgColsTests(_TempDb):
             json={'img_cols': 4}
         )
         self.assertEqual(res.status_code, 200)
-        # 刷新页面看 DB 值生效 (cols-4 在 CSS 一直存在;主要看 active 不在默认 3 按钮上)
+        # 刷新页面看 DB 值生效 — 用 date-group 的 data-img-cols 精确断言(非 cols-4 空断言)
         res2 = self.client.get('/loading-orders?start_date=2026-08-13&end_date=2026-08-13')
         html2 = res2.get_data(as_text=True)
-        # 验证 DB 列被 SELECT 出来 —— active 按钮从 3 改到 4 由 Jinja 渲染决定
-        # （不能在没图的情况下测 img-area div;此处覆盖后端链路完整性的另一面）
-        self.assertEqual(res.status_code, 200, 'PATCH 应 200')
+        self.assertIn('data-img-cols="4"', html2, 'PATCH 后刷新页面,DB 值 4 应注入到 date-group')
         # 验证 DB 真写了 4(后端链路)
         import sqlite3
         with sqlite3.connect(_db.DB_PATH) as conn:
