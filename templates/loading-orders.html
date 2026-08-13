@@ -165,7 +165,7 @@
     </script>
     {% if groups %}
         {% for group in groups %}
-        <div class="date-group" data-order-pk="{{ group.order_pk }}" data-locked="{{ '1' if group.is_locked else '0' }}">
+        <div class="date-group" data-order-pk="{{ group.order_pk }}" data-locked="{{ '1' if group.is_locked else '0' }}" data-img-cols="{{ group.img_cols | default(3) }}">
             <div class="group-header" style="display:flex; align-items:center; justify-content:space-between; gap:0.5rem;">
                 <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
                     <span class="group-date">{{ group.date }}</span>
@@ -306,13 +306,13 @@
             <!-- 图片区域 -->
             {% set imgs = order_images.get(group.order_pk, []) %}
             {% if imgs %}
-            <div class="img-area cols-{{ current_img_cols | default('3') }}" id="imgArea{{ group.order_pk }}">
+            <div class="img-area cols-{{ group.img_cols | default(3) }}" id="imgArea{{ group.order_pk }}">
                 <div style="display: flex; gap: 0.25rem; margin-bottom: 0.5rem; grid-column: 1 / -1;">
-                    <button class="img-col-btn {% if current_img_cols == '1' %}active{% endif %}" onclick="setImgCols(this, 1)">1</button>
-                    <button class="img-col-btn {% if current_img_cols == '2' %}active{% endif %}" onclick="setImgCols(this, 2)">2</button>
-                    <button class="img-col-btn {% if current_img_cols == '3' %}active{% endif %}" onclick="setImgCols(this, 3)">3</button>
-                    <button class="img-col-btn {% if current_img_cols == '4' %}active{% endif %}" onclick="setImgCols(this, 4)">4</button>
-                    <button class="img-col-btn {% if current_img_cols == '5' %}active{% endif %}" onclick="setImgCols(this, 5)">5</button>
+                    <button class="img-col-btn {% if group.img_cols == 1 %}active{% endif %}" onclick="setImgCols(this, 1)">1</button>
+                    <button class="img-col-btn {% if group.img_cols == 2 %}active{% endif %}" onclick="setImgCols(this, 2)">2</button>
+                    <button class="img-col-btn {% if group.img_cols == 3 %}active{% endif %}" onclick="setImgCols(this, 3)">3</button>
+                    <button class="img-col-btn {% if group.img_cols == 4 %}active{% endif %}" onclick="setImgCols(this, 4)">4</button>
+                    <button class="img-col-btn {% if group.img_cols == 5 %}active{% endif %}" onclick="setImgCols(this, 5)">5</button>
                 </div>
                 {% for img in imgs %}
                 <div class="img-item{% if img.record_pk %} img-item-record{% else %} img-item-order{% endif %}"{% if img.record_pk %} data-record-pk="{{ img.record_pk }}"{% endif %} data-image-id="{{ img.id }}">
@@ -737,7 +737,8 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!dateGroup) { location.reload(); return; }
         var imgArea = dateGroup.querySelector('.img-area');
         if (!imgArea) {
-            var savedCols = localStorage.getItem('loading-img-cols') || '5';
+            // 优先读 date-group 的 data-img-cols（DB 值，由 Jinja 渲染时注入），再退到 localStorage
+            var savedCols = (dateGroup.getAttribute('data-img-cols')) || localStorage.getItem('loading-img-cols') || '5';
             imgArea = document.createElement('div');
             imgArea.className = 'img-area cols-' + savedCols;
             imgArea.id = 'imgArea' + orderPk;
@@ -1026,30 +1027,38 @@ document.addEventListener('DOMContentLoaded', function() {
             }).catch(function(err) { handleApiError(err, '移动记录'); });
     };
 
-    window.setImgCols = function(btn, n) {
-        // 只修改当前按钮所在的 .img-area 区域（按 order_pk 隔离）
+    // setImgCols — 装柜 wrapper。共享版本由 _record_image_script.html line 222 提供,
+// 但共享版本查找 .order-images-area + data-order-id;装柜仍用 .img-area + id="imgArea{{ order_pk }}",
+// 这里包一层:从最近 .date-group 抽出 orderPk,PATCH 到 loading_orders.img_cols。
+    window.setImgCols = function(btn, cols) {
         var area = btn.closest('.img-area');
         if (!area) return;
-        // 取消所有按钮的 active 状态
-        document.querySelectorAll('.img-area .img-col-btn').forEach(function(b) {
-            b.classList.remove('active');
-        });
-        btn.classList.add('active');
-        // 只更新当前区域
+        var orderId = null;
+        var dateGroup = area.closest('.date-group');
+        if (dateGroup) orderId = dateGroup.getAttribute('data-order-pk');
         area.classList.remove('cols-1','cols-2','cols-3','cols-4','cols-5');
-        area.classList.add('cols-' + n);
-        area.dataset.cols = n;
-        // 装柜无 img_cols 字段（旧 PATCH 后端无分支 + 表无列 = 静默 400）
-        // 改走 localStorage（页面级全局偏好），不写后端
-        try { localStorage.setItem('loading-img-cols', String(n)); } catch (e) {}
-        // 同步 cookie（后端当前请求会读取，刷新时保持）
-        try { document.cookie = 'loadingImgCols=' + n + '; path=/; max-age=31536000'; } catch (e) {}
+        area.classList.add('cols-' + cols);
+        area.dataset.cols = cols;
+        area.querySelectorAll('.img-col-btn').forEach(function(b) { b.classList.remove('active'); });
+        btn.classList.add('active');
+        // 持久化到数据库(PATCH 已有后端分支,见 blueprints/loading.py:269-277)
+        if (orderId) {
+            fetch('/api/v1/loading-orders/' + orderId, {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({img_cols: cols})
+            });
+        }
     };
 
     var savedCols = localStorage.getItem('loading-img-cols') || '5';
     document.querySelectorAll('.img-area').forEach(function(area) {
-        // 优先读取 data-cols（JS 修改后的值），否则从 class 提取
-        var cols = area.dataset.cols || (area.className.match(/cols-(\d)/) ? area.className.match(/cols-(\d)/)[1] : savedCols);
+        // 优先读 date-group 的 data-img-cols（DB 值，由 Jinja 注入），再读 JS 改过的 data-cols，最后 localStorage 兜底
+        var dateGroup = area.closest('.date-group');
+        var dbCols = dateGroup && dateGroup.getAttribute('data-img-cols');
+        var cols = area.dataset.cols
+            || dbCols
+            || (area.className.match(/cols-(\d)/) ? area.className.match(/cols-(\d)/)[1] : savedCols);
         area.classList.remove('cols-1','cols-2','cols-3','cols-4','cols-5');
         area.classList.add('cols-' + cols);
         area.dataset.cols = cols;
@@ -1266,7 +1275,8 @@ function appendOrderImageArea(orderPk, images, recordInfo) {
     if (!dateGroup) return;
     var imgArea = dateGroup.querySelector('.img-area');
     if (!imgArea) {
-        var savedCols = localStorage.getItem('loading-img-cols') || '3';
+        // 优先读 date-group 的 data-img-cols（DB 值，由 Jinja 渲染时注入），再退到 localStorage
+        var savedCols = (dateGroup.getAttribute('data-img-cols')) || localStorage.getItem('loading-img-cols') || '3';
         imgArea = document.createElement('div');
         imgArea.className = 'img-area cols-' + savedCols;
         imgArea.id = 'imgArea' + orderPk;

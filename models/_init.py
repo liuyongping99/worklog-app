@@ -158,6 +158,13 @@ def init_db():
     except Exception:
         pass
 
+    # 迁移：入库/装柜订单 doc_number 列（单据编号，例如出货单号）
+    for tbl in ('inbound_orders', 'loading_orders'):
+        try:
+            cursor.execute(f"ALTER TABLE {tbl} ADD COLUMN doc_number TEXT NOT NULL DEFAULT ''")
+        except Exception:
+            pass  # 列已存在
+
     # 迁移：三张订单表添加 user_id 字段（未来多用户用，nullable，单人用时全 NULL）
     for tbl in ('shipping_orders', 'inbound_orders', 'loading_orders'):
         try:

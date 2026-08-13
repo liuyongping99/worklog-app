@@ -157,13 +157,12 @@ def loading_orders():
         order_non_ai[oid].sort(key=lambda x: (x.get('sort_order', 0), x.get('id', 0)))
     for oid in ai_images:
         ai_images[oid].sort(key=lambda x: (x.get('sort_order', 0), x.get('id', 0)))
-    current_img_cols = request.cookies.get('loadingImgCols', '3')
+    # 不再用 cookie:img_cols 由 Task 1 加的 loading_orders.img_cols 列提供,渲染走 group.img_cols
     return render_template(
         'loading-orders.html',
         groups=groups,
         order_images=order_non_ai,
         ai_images=ai_images,
-        current_img_cols=current_img_cols,
         today=date.today().strftime('%Y-%m-%d'),
         start_date=start_date,
         end_date=end_date,

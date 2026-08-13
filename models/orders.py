@@ -1755,6 +1755,7 @@ class LoadingOrderRecord:
         if start_date and end_date:
             cursor.execute('''
                 SELECT o.id as order_pk, o.date, o.customer, o.order_num, o.is_locked, o.order_note, o.doc_number,
+                       o.img_cols as img_cols,
                        r.id as r_id, r.product_name, r.specification, r.quantity, r.unit, r.remark, r.created_at as r_created_at
                 FROM loading_orders o
                 LEFT JOIN loading_order_records r ON o.id = r.order_pk
@@ -1763,7 +1764,8 @@ class LoadingOrderRecord:
             ''', (start_date, end_date))
         else:
             cursor.execute('''
-                SELECT o.id as order_pk, o.date, o.customer, o.order_num, o.is_locked, o.order_note,
+                SELECT o.id as order_pk, o.date, o.customer, o.order_num, o.is_locked, o.order_note, o.doc_number,
+                       o.img_cols as img_cols,
                        r.id as r_id, r.product_name, r.specification, r.quantity, r.unit, r.remark, r.created_at as r_created_at
                 FROM loading_orders o
                 LEFT JOIN loading_order_records r ON o.id = r.order_pk
@@ -1785,6 +1787,7 @@ class LoadingOrderRecord:
                     'is_locked': row_dict['is_locked'],
                     'order_note': row_dict.get('order_note', ''),
                     'doc_number': row_dict.get('doc_number', ''),
+                    'img_cols': row_dict.get('img_cols') or 3,
                     'records': []
                 }
             # 只添加有明细的记录
