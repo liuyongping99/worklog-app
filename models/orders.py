@@ -615,6 +615,15 @@ class InboundOrder:
         conn.close()
 
     @staticmethod
+    def set_img_cols(order_id: int, cols: int):
+        """设置入库订单图片列数(每订单独立记忆,与出货/装柜对齐)"""
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('UPDATE inbound_orders SET img_cols = ? WHERE id = ?', (cols, order_id))
+        conn.commit()
+        conn.close()
+
+    @staticmethod
     def set_note(order_id: int, note: str):
         """设置入库订单级备注（显示在商品信息行上方）"""
         conn = get_db()
@@ -830,10 +839,11 @@ class InboundRecord:
 
 class InboundImage:
     @staticmethod
-    def create(order_pk: int, file_path: str, original_name: str = '', source: str = 'upload', record_pk: int = None, sort_order: int = None):
+    def create(order_pk: int, file_path: str, original_name: str = '', source: str = 'upload', record_pk: int = None, sort_order: int = None, source_tag: str = None):
         """插入图片。
         - record_pk: None=订单级共享图, 非空=某条明细的专属图
         - sort_order: None 时由本方法在事务内计算 max+1(同事务累加); 显式传入则按用户值
+        - source_tag: 整体图分类标签 ('备货照'|'装车照'|'归仓照'|None)
         """
         conn = get_db()
         cursor = conn.cursor()
@@ -844,9 +854,9 @@ class InboundImage:
             )
             sort_order = cursor.fetchone()['next']
         cursor.execute(
-            'INSERT INTO inbound_images (order_pk, file_path, original_name, source, record_pk, sort_order, created_at) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?)',
-            (order_pk, file_path, original_name, source, record_pk, sort_order,
+            'INSERT INTO inbound_images (order_pk, file_path, original_name, source, record_pk, sort_order, source_tag, created_at) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            (order_pk, file_path, original_name, source, record_pk, sort_order, source_tag,
              datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
         )
         conn.commit()
@@ -909,6 +919,43 @@ class InboundImage:
             item = dict(row)
             item['relative_path'] = InboundImage.get_relative_path(item['file_path'])
             result.append(item)
+        return result
+
+    @staticmethod
+    def get_all_by_orders(order_ids=None):
+        """获取图片,按 order_pk 分组返回字典。
+
+        Args:
+            order_ids: 可选的订单 ID 列表(过滤范围),None 表示取全部图片。
+                       页面通常只显示某个日期范围的订单,传入该范围的 order_id 列表
+                       避免无谓加载历史图片元数据。
+        返回的每张图都含 source_tag key(默认 None),与出货/装柜对齐。
+        """
+        conn = get_db()
+        cursor = conn.cursor()
+        if order_ids:
+            if not order_ids:  # 空列表 → 直接返回空
+                conn.close()
+                return {}
+            placeholders = ','.join('?' * len(order_ids))
+            cursor.execute(
+                f'SELECT * FROM inbound_images WHERE order_pk IN ({placeholders}) ORDER BY id ASC',
+                list(order_ids)
+            )
+        else:
+            cursor.execute('SELECT * FROM inbound_images ORDER BY id ASC')
+        rows = cursor.fetchall()
+        conn.close()
+        result = {}
+        for row in rows:
+            item = dict(row)
+            # 缺列补 None(老库迁移后 source_tag 默认 NULL,SELECT * 已含;但防御性兜底)
+            item.setdefault('source_tag', None)
+            item['relative_path'] = InboundImage.get_relative_path(item['file_path'])
+            order_pk = item['order_pk']
+            if order_pk not in result:
+                result[order_pk] = []
+            result[order_pk].append(item)
         return result
 
     @staticmethod

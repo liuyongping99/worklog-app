@@ -343,12 +343,26 @@ def init_db():
         pass
 
     # ── inbound_images（入库订单图片） ──
+    # 注意:下方 "2026-08-02: 入库图片补齐 record-level 匹配能力" 段落的 ALTER TABLE
+    # 对全新 db 不生效(在 CREATE 之前跑,表还不存在,异常被 except 吞了),所以这里把
+    # 所有需要的列都直接放进 CREATE TABLE —— 让 init_db() 在全新 db 上也能建出
+    # 完整的 schema(供测试用临时 db + monkey-patch DB_PATH)。
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS inbound_images (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             order_pk INTEGER NOT NULL,
             file_path TEXT NOT NULL,
             original_name TEXT DEFAULT '',
+            source TEXT DEFAULT 'upload',
+            record_pk INTEGER DEFAULT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            match_status TEXT DEFAULT NULL,
+            match_score REAL DEFAULT NULL,
+            reason TEXT DEFAULT NULL,
+            human_verified INTEGER DEFAULT 0,
+            match_source TEXT DEFAULT NULL,
+            bg_color TEXT DEFAULT NULL,
+            source_tag TEXT DEFAULT NULL,
             created_at TEXT NOT NULL,
             FOREIGN KEY (order_pk) REFERENCES inbound_orders(id)
         )
