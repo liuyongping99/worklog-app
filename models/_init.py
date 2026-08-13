@@ -102,6 +102,12 @@ def init_db():
         )
     ''')
 
+    # 迁移：为已存在的 inbound_orders 表添加 img_cols 列
+    try:
+        cursor.execute('ALTER TABLE inbound_orders ADD COLUMN img_cols INTEGER NOT NULL DEFAULT 5')
+    except Exception:
+        pass  # 列已存在
+
     # 装柜订单表（同上）
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS loading_orders (
@@ -115,6 +121,12 @@ def init_db():
             user_id INTEGER DEFAULT NULL
         )
     ''')
+
+    # 迁移：为已存在的 loading_orders 表添加 img_cols 列
+    try:
+        cursor.execute('ALTER TABLE loading_orders ADD COLUMN img_cols INTEGER NOT NULL DEFAULT 3')
+    except Exception:
+        pass  # 列已存在
 
     # 迁移：为已存在的表添加 is_locked 列
     try:
@@ -341,6 +353,12 @@ def init_db():
             FOREIGN KEY (order_pk) REFERENCES inbound_orders(id)
         )
     ''')
+
+    # 迁移：为已存在的 inbound_images 表添加 source_tag 列（移动端备货照/装车照/归仓照）
+    try:
+        cursor.execute('ALTER TABLE inbound_images ADD COLUMN source_tag TEXT')
+    except Exception:
+        pass  # 列已存在
 
     # ── inbound_records（入库订单明细） ──
     cursor.execute('''
