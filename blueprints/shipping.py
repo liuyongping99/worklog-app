@@ -215,6 +215,23 @@ def _run_label_match(image_abspath, record, ocr_text=''):
         return '', None, ''
 
 
+def _supplement_for_record(record: dict) -> str:
+    """取该商品行比对时要拼进 DeepSeek prompt 的自定义提示词(自适应)。
+
+    复用 classify_record + CategoryPrompt.compose_for_record:经祖先链继承 +
+    品名关键字命中,返回 '' 表示无补充提示词。
+    """
+    if not record:
+        return ''
+    cls = classify_record(product_name=record.get('product_name', ''),
+                          specification=record.get('specification', ''))
+    return CategoryPrompt.compose_for_record(
+        category_code=cls['category_code'] if cls else None,
+        product_name=record.get('product_name', ''),
+        specification=record.get('specification', ''),
+    )
+
+
 def _classify_and_match_image(filepath, record, ocr_text):
     """2026-07-30 改造:对一张图先 OCR → 优先调 DeepSeek 单 record 比对 → fallback 本地 RapidFuzz。
     2026-07-31:增加 prompt_text / raw_response 返回,供 upload 流程写入 ai_match 事件。
@@ -237,7 +254,8 @@ def _classify_and_match_image(filepath, record, ocr_text):
     try:
         ds = get_ocr_engine('deepseek')
         if getattr(ds, 'API_KEY', ''):  # 有 key 才联网
-            res = ds.compare_single_record(ocr_text, record)
+            supplement = _supplement_for_record(record)
+            res = ds.compare_single_record(ocr_text, record, supplement_prompt=supplement)
             ms = (res.get('match_status') or '').lower()
             if ms in ('green', 'yellow', 'red'):
                 return {'status': ms, 'score': res.get('score'),
@@ -287,10 +305,10 @@ def shipping_records():
     today = date_cls.today().isoformat()
     start_date = request.args.get('start_date', '').strip()
     end_date = request.args.get('end_date', '').strip()
-    # 默认最近3天
+    # 默认最近2天
     if not start_date or not end_date:
         end = date_cls.today()
-        start = end - timedelta(days=2)
+        start = end - timedelta(days=1)
         start_date = start.isoformat()
         end_date = end.isoformat()
     groups = ShippingRecord.get_groups(start_date, end_date)
@@ -1431,27 +1449,29 @@ def api_v1_shipping_orders_ai_match(order_id):
 # ────────────────────────────────────────────────────────────────────
 # 类别/规格自适应提示词 (CategoryPrompt) API — 2026-07-30 新增
 # 设计:在出货页对黄/红图点"✓ 确认通过"后,图下方按钮调 /generate-prompt-suggestion
-# 生成模板化提示词草稿,用户编辑后调 /category-prompts (POST) 保存。下次同 record 比对自动注入。
+# 加载用户已填的分类提示词(直接进编辑框,可微调),保存后调 /category-prompts 或
+# /manage/category-prompts/<id> PATCH 写回。下次同 record 比对自动注入。
 # ────────────────────────────────────────────────────────────────────
 
-def _build_suggestion_text(img: dict, record: dict | None) -> str:
-    """模板化生成:基于 OCR 原文 + AI/人裁决,产出可供用户编辑的"补充提示词"草稿。
+def _resolve_existing_prompt(existing: dict | None, product_name: str) -> dict | None:
+    """从 list_for_record 的结果里挑出要加载进编辑框的那条已有提示词。
 
-    不调 LLM(避免 API key 依赖),按行内变量渲染,用户可在前端编辑器再改。
-    模板自带 [yellow→green] / [red→green] 上下文 + 品名/规格/部分 OCR 关键词,作为"该案例的判决依据"。
+    优先级:品名关键字精确命中 > 任一 category 提示词 > spec 提示词。
+    返回该行(dict,含 id / prompt_text)或 None。
     """
-    ai = img.get('match_status') or '?'
-    ai_reason = img.get('reason') or ''
-    pn = (record or {}).get('product_name', '') or ''
-    sp = (record or {}).get('specification', '') or ''
-
-    # 截 OCR 原文前 200 字(避免提示词太长压垮上下文)
-    return (
-        f'[{ai}→人工确认] 商品「{pn}」规格「{sp}」OCR标签此前判 {ai},'
-        f'原因为「{ai_reason[:120]}」,但人工复核与录入明细一致。'
-        f'同类案例在后续比对中,即使 OCR 文本中只出现部分关键词(如 7P / 加面 / 厚度)'
-        f'也视为该规则命中,判 green。'
-    )
+    if not existing:
+        return None
+    cats = existing.get('category_prompts') or []
+    if cats:
+        if product_name:
+            for r in cats:
+                if r.get('product_name_keyword') and r['product_name_keyword'] == product_name:
+                    return r
+        return cats[0]
+    specs = existing.get('spec_prompts') or []
+    if specs:
+        return specs[0]
+    return None
 
 
 @bp.route('/api/v1/shipping-orders/images/<int:image_id>/generate-prompt-suggestion', methods=['POST'])
@@ -1485,12 +1505,15 @@ def api_v1_shipping_orders_generate_prompt_suggestion(image_id):
     # 自动分类
     cls = classify_record(product_name=(record or {}).get('product_name', ''),
                           specification=(record or {}).get('specification', ''))
-    suggestion_text = _build_suggestion_text(img, record)
-    # 查同品类/同规格已有的自定义提示词
+    # 查同品类/同规格已有的自定义提示词,直接加载用户已填内容进编辑框
+    # (2026-08-09 简化 + 本次修复:无则空,让用户从头填;弹框 placeholder 已说明)
     pn = (record or {}).get('product_name', '')
     spec = (record or {}).get('specification', '')
     cc = cls['category_code'] if cls else None
     existing = CategoryPrompt.list_for_record(category_code=cc, product_name=pn, specification=spec)
+    # 解析要加载进编辑框的提示词:优先品名精确命中,其次任一 category 提示词,再次 spec 提示词
+    existing_prompt = _resolve_existing_prompt(existing, pn)
+    prompt_text = existing_prompt['prompt_text'] if existing_prompt else ''
     # 溯源链:找这张图最近一条 human_verify 事件,把 id 透传给前端的 category-prompts 保存请求
     # 之前写 img.get('_source_event_id') 是误读 — shipping_images 没有该列,永远 None
     hv_event = OcrMatchEvent.get_latest_by_image(image_id, 'human_verify')
@@ -1498,7 +1521,8 @@ def api_v1_shipping_orders_generate_prompt_suggestion(image_id):
     return jsonify({
         'success': True,
         'suggestion': {
-            'prompt_text': suggestion_text,
+            'prompt_text': prompt_text,
+            'existing_prompt_id': existing_prompt['id'] if existing_prompt else None,
             'scope': 'category',
             'category_code': cc,
             'product_name_keyword': pn or None,
