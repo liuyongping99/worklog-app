@@ -400,6 +400,7 @@
 <script>
 {% include '_record_image_script.html' %}
 </script>
+<script>
 var LOADING_UNIT_LIST = {{ unit_list | default([]) | tojson }};
 
 var PIECE_CONVERSIONS = {{ piece_conversions | tojson }};
