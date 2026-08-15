@@ -519,6 +519,7 @@
         <table class="record-table{% if not has_eco and not has_jia_mian %} no-eco{% endif %}">
             <thead>
                 <tr>
+                    <th style="width:36px; text-align:center;">#</th>
                     <th class="eco-col" style="width:35px;">重点</th>
                     <th style="width: 18%;">商品名称</th>
                     <th style="width: 14%;">规格</th>
@@ -535,8 +536,9 @@
                     data-record-id="{{ record.id }}"
                     data-verified="{{ '1' if record.verified else '0' }}"
                     data-verified-warnings="{{ record.verified_warnings or '{}' }}">
+                    <td style="text-align:center; color:#868e96; font-size:0.85rem;">{% if record.qty_invalid %}<span class="stock-icon" title="数量异常">❌</span>{% elif record.mismatch == 'warn' or record.piece_mismatch == 'warn' %}❌ {% elif record.mismatch == 'info' or record.piece_mismatch == 'info' %}💡 {% endif %}{{ loop.index }}</td>
                     <td class="eco-col">{% if '环保' in record.product_name %}<span class="eco-icon" title="环保产品">🌿</span>{% endif %}{% if '杂胶' in record.product_name and '加面' in (record.specification or '') %}<svg class="jia-mian-icon" viewBox="0 0 16 16" width="14" height="14" title="加面工艺"><defs><pattern id="mesh-{{ record.id }}" width="3" height="3" patternUnits="userSpaceOnUse"><path d="M0,3 L3,0" stroke="currentColor" stroke-width="0.6"/><path d="M0,0 L3,3" stroke="currentColor" stroke-width="0.6"/></pattern></defs><rect width="16" height="16" fill="url(#mesh-{{ record.id }})"/></svg>{% endif %}</td>
-                    <td class="product-name product-name-cell" style="max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ record.product_name }}">{% if record.qty_invalid %}<span class="stock-icon" title="数量异常">❌</span>{% elif record.mismatch == 'warn' or record.piece_mismatch == 'warn' %}❌ {% elif record.mismatch == 'info' or record.piece_mismatch == 'info' %}💡 {% endif %}{{ record.product_name }}</td>
+                    <td class="product-name product-name-cell" style="max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ record.product_name }}">{{ record.product_name }}</td>
                     <td class="spec spec-cell">{{ record.specification }}</td>
                     <td><span class="qty-badge">{{ record.quantity }}</span></td>
                     <td><span class="unit-badge">{{ record.unit }}</span></td>
@@ -554,6 +556,7 @@
                 {% endfor %}
                 {% if group.summary_pieces > 0 or group.summary_loose_pieces > 0 or group.summary_unit_pieces > 0 %}
                 <tr class="summary-row" style="background:#f0fdf4; font-weight:600; border-top:2px solid #00b894;">
+                    <td style="padding:0.6rem 0.75rem;"></td>
                     <td class="eco-col" style="padding:0.6rem 0.75rem;"></td>
                     <td colspan="4" style="text-align:right; padding:0.6rem 0.75rem; color:#00b894; font-size:0.9rem;">📊 备注支数：</td>
                     <td style="padding:0.6rem 0.75rem; color:#2d3436; font-size:0.9rem;">
@@ -1214,15 +1217,16 @@ setTimeout(() => {
                     if (result.success) {
                         var r = result.record;
                         var newMismatch = checkInboundMismatch(r.remark || '', r.quantity, r.product_name, r.specification || '');
-                        var rowNum = tds[0].textContent.replace('❌ ', '').replace('💡 ', '');
-                        tds[0].textContent = mismatchIcon(newMismatch) + r.product_name;
-                        tds[1].textContent = r.specification;
-                        tds[2].innerHTML = '<span class="qty-badge">' + escHtml(r.quantity) + '</span>';
-                        tds[3].innerHTML = '<span class="unit-badge">' + escHtml(r.unit) + '</span>';
-                        tds[4].textContent = r.remark || '-';
-                        tds[4].className = 'remark-cell' + (r.remark ? ' has-content' : '');
+                        // tds[0] = 索引列: 保留行号, 只更新 mismatchIcon
+                        tds[0].textContent = mismatchIcon(newMismatch) + (tds[0].lastChild ? tds[0].lastChild.textContent : '');
+                        tds[2].textContent = r.product_name;
+                        tds[3].textContent = r.specification;
+                        tds[4].innerHTML = '<span class="qty-badge">' + escHtml(r.quantity) + '</span>';
+                        tds[5].innerHTML = '<span class="unit-badge">' + escHtml(r.unit) + '</span>';
+                        tds[6].textContent = r.remark || '-';
+                        tds[6].className = 'remark-cell' + (r.remark ? ' has-content' : '');
                         var newPieceHint = getPieceHint(r.product_name, r.specification || '');
-                        tds[5].innerHTML = (getInboundUnitHint(r.product_name, r.specification || '', r.quantity, r.unit, r.remark) || '—') + (newPieceHint ? '<br><span style="color:#0984e3;">' + escHtml(newPieceHint) + '</span>' : '');
+                        tds[7].innerHTML = (getInboundUnitHint(r.product_name, r.specification || '', r.quantity, r.unit, r.remark) || '—') + (newPieceHint ? '<br><span style="color:#0984e3;">' + escHtml(newPieceHint) + '</span>' : '');
                         var newPieceMismatch = checkPieceMismatch(r.remark || '', r.quantity, r.product_name, r.specification || '');
                         if (newMismatch === 'warn' || newPieceMismatch === 'warn') { applyInboundMismatch(tr, 'warn'); }
                         else if (newMismatch === 'info' || newPieceMismatch === 'info') { applyInboundMismatch(tr, 'info'); }
@@ -1255,19 +1259,20 @@ setTimeout(() => {
             }
 
             // 进入编辑状态：把 td 内容替换为 input
+            // 2026-08-15: tds[0]=索引,tds[1]=重点,跳过这两列;可编辑列从 tds[2] 起
             var vals = [
-                tds[0].textContent.replace('❌ ', '').replace('💡 ', '').trim(),  // product_name
-                tds[1].textContent.trim(),       // specification
-                tds[2].textContent.trim(),       // quantity
-                tds[3].textContent.trim(),       // unit
-                tds[4].textContent.trim() === '-' ? '' : tds[4].textContent.trim()  // remark
+                tds[2].textContent.trim(),       // product_name
+                tds[3].textContent.trim(),       // specification
+                tds[4].textContent.trim(),       // quantity
+                tds[5].textContent.trim(),       // unit
+                tds[6].textContent.trim() === '-' ? '' : tds[6].textContent.trim()  // remark
             ];
             // 商品名称
-            tds[0].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:80px;" value="' + vals[0].replace(/"/g, '&quot;') + '">';
+            tds[2].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:80px;" value="' + vals[0].replace(/"/g, '&quot;') + '">';
             // 规格
-            tds[1].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + vals[1].replace(/"/g, '&quot;') + '">';
+            tds[3].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + vals[1].replace(/"/g, '&quot;') + '">';
             // 数量
-            tds[2].innerHTML = '<input type="number" name="qty" class="form-control form-control-sm edit-input" style="width:100px;" value="' + vals[2] + '">';
+            tds[4].innerHTML = '<input type="number" name="qty" class="form-control form-control-sm edit-input" style="width:100px;" value="' + vals[2] + '">';
             // 单位（下拉框）
             var unitOpts = ['支','kg','y','桶','张','件','箱','卷','块','令','斤'];
             var unitHtml = '<select class="form-control form-control-sm edit-input" style="width:70px;">';
@@ -1275,9 +1280,9 @@ setTimeout(() => {
                 unitHtml += '<option value="' + u + '"' + (u === vals[3] ? ' selected' : '') + '>' + u + '</option>';
             });
             unitHtml += '</select>';
-            tds[3].innerHTML = unitHtml;
+            tds[5].innerHTML = unitHtml;
             // 备注
-            tds[4].innerHTML = '<input type="text" name="remark" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + vals[4].replace(/"/g, '&quot;') + '" oninput="autoFillQtyFromRemark(this)">';
+            tds[6].innerHTML = '<input type="text" name="remark" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + vals[4].replace(/"/g, '&quot;') + '" oninput="autoFillQtyFromRemark(this)">';
             // 按钮变为保存
             btn.textContent = '💾';
             btn.classList.remove('btn-primary');
@@ -1399,7 +1404,7 @@ setTimeout(() => {
                     var dateGroup = document.querySelector('.date-group[data-order-id="' + orderPk + '"]');
                     var tbody = dateGroup ? dateGroup.querySelector('.record-table tbody') : null;
                     if (!tbody) { location.reload(); return; }
-                    var newTr = buildInboundRecordRow(result.record, orderPk);
+                    var newTr = buildInboundRecordRow(result.record, orderPk, tbody);
                     tbody.appendChild(newTr);
                     bindRecordImageButtons();
                     recalcInboundSummary(dateGroup);
@@ -1418,7 +1423,7 @@ setTimeout(() => {
 
 
     // ── 构建入库明细行 ──
-    function buildInboundRecordRow(rec, orderPk) {
+    function buildInboundRecordRow(rec, orderPk, tbody) {
         var tr = document.createElement('tr');
         tr.setAttribute('data-record-id', rec.id);
         // 新行默认未核查;属性齐了共享模板的「✓ 全部已核查」才能正确渲染/切换
@@ -1431,8 +1436,20 @@ setTimeout(() => {
         if (mismatch === 'warn' || pieceMismatch === 'warn') { tr.classList.add('row-warn'); }
         else if (mismatch === 'info' || pieceMismatch === 'info') { tr.classList.add('row-info'); }
         var escapedName = escAttr(rec.product_name);
+        // 计算序号 + 重点列 (2026-08-15 行号列对齐出货)
+        var existingRows = tbody ? tbody.querySelectorAll("tr:not(.summary-row)").length : 0;
+        var ecoTd = '<td class="eco-col"></td>';
+        var _pn = rec.product_name || "";
+        var _sp = rec.specification || "";
+        if (_pn.indexOf("环保") !== -1) {
+            ecoTd = '<td class="eco-col"><span class="eco-icon" title="环保产品">🌿</span></td>';
+        } else if (_pn.indexOf("杂胶") !== -1 && _sp.indexOf("加面") !== -1) {
+            ecoTd = '<td class="eco-col"><svg class="jia-mian-icon" viewBox="0 0 16 16" width="14" height="14" title="加面工艺"></svg></td>';
+        }
         tr.innerHTML =
-            '<td class="product-name product-name-cell" style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapedName + '">' + mismatchIcon(mismatch) + escHtml(rec.product_name) + '</td>' +
+            '<td style="text-align:center; color:#868e96; font-size:0.85rem;">' + mismatchIcon(mismatch) + (existingRows + 1) + '</td>' +
+            ecoTd +
+            '<td class="product-name product-name-cell" style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapedName + '">' + escHtml(rec.product_name) + '</td>' +
             '<td class="spec spec-cell">' + escHtml(rec.specification || '') + '</td>' +
             '<td><span class="qty-badge">' + escHtml(rec.quantity) + '</span></td>' +
             '<td><span class="unit-badge">' + escHtml(rec.unit) + '</span></td>' +
@@ -1511,15 +1528,17 @@ setTimeout(() => {
                     if (result.success) {
                         var r = result.record;
                         var newMismatch = checkInboundMismatch(r.remark || '', r.quantity, r.product_name, r.specification || '');
-                        tds[0].textContent = mismatchIcon(newMismatch) + r.product_name;
-                        tds[0].title = r.product_name;
-                        tds[1].textContent = r.specification || '';
-                        tds[2].innerHTML = '<span class="qty-badge">' + escHtml(r.quantity) + '</span>';
-                        tds[3].innerHTML = '<span class="unit-badge">' + escHtml(r.unit) + '</span>';
-                        tds[4].textContent = r.remark || '-';
-                        tds[4].className = 'remark-cell' + (r.remark ? ' has-content' : '');
+                        // 2026-08-15: tds[0]=索引列,保留行号文本; 可编辑列从 tds[2] 起
+                        tds[0].textContent = mismatchIcon(newMismatch) + (tds[0].lastChild ? tds[0].lastChild.textContent : '');
+                        tds[2].textContent = r.product_name;
+                        tds[2].title = r.product_name;
+                        tds[3].textContent = r.specification || '';
+                        tds[4].innerHTML = '<span class="qty-badge">' + escHtml(r.quantity) + '</span>';
+                        tds[5].innerHTML = '<span class="unit-badge">' + escHtml(r.unit) + '</span>';
+                        tds[6].textContent = r.remark || '-';
+                        tds[6].className = 'remark-cell' + (r.remark ? ' has-content' : '');
                         var newPieceHint = getPieceHint(r.product_name, r.specification || '');
-                        tds[5].innerHTML = (getInboundUnitHint(r.product_name, r.specification || '', r.quantity, r.unit, r.remark) || '—') + (newPieceHint ? '<br><span style="color:#0984e3;">' + escHtml(newPieceHint) + '</span>' : '');
+                        tds[7].innerHTML = (getInboundUnitHint(r.product_name, r.specification || '', r.quantity, r.unit, r.remark) || '—') + (newPieceHint ? '<br><span style="color:#0984e3;">' + escHtml(newPieceHint) + '</span>' : '');
                         var newPieceMismatch = checkPieceMismatch(r.remark || '', r.quantity, r.product_name, r.specification || '');
                         if (newMismatch === 'warn' || newPieceMismatch === 'warn') { applyInboundMismatch(tr, 'warn'); }
                         else if (newMismatch === 'info' || newPieceMismatch === 'info') { applyInboundMismatch(tr, 'info'); }
@@ -1546,21 +1565,21 @@ setTimeout(() => {
             } else {
                 // 进入编辑模式
                 var vals = [
-                    tds[0].textContent.replace('❌ ', '').replace('💡 ', '').trim(),
-                    tds[1].textContent.trim(),
-                    tds[2].textContent.trim(),
+                    tds[2].textContent.trim(),       // product_name (2026-08-15: 跳过索引+重点列)
                     tds[3].textContent.trim(),
-                    tds[4].textContent.trim() === '-' ? '' : tds[4].textContent.trim()
+                    tds[4].textContent.trim(),
+                    tds[5].textContent.trim(),
+                    tds[6].textContent.trim() === '-' ? '' : tds[6].textContent.trim()
                 ];
-                tds[0].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:80px;" value="' + escAttr(vals[0]) + '">';
-                tds[1].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + escAttr(vals[1]) + '">';
-                tds[2].innerHTML = '<input type="number" name="qty" class="form-control form-control-sm edit-input" style="width:100px;" value="' + escAttr(vals[2]) + '">';
+                tds[2].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:80px;" value="' + escAttr(vals[0]) + '">';
+                tds[3].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + escAttr(vals[1]) + '">';
+                tds[4].innerHTML = '<input type="number" name="qty" class="form-control form-control-sm edit-input" style="width:100px;" value="' + escAttr(vals[2]) + '">';
                 var unitOpts = ['支','kg','y','桶','张','件','箱','卷','块','令','斤'];
                 var unitHtml = '<select class="form-control form-control-sm edit-input" style="width:70px;">';
                 unitOpts.forEach(function(u) { unitHtml += '<option value="' + u + '"' + (u === vals[3] ? ' selected' : '') + '>' + u + '</option>'; });
                 unitHtml += '</select>';
-                tds[3].innerHTML = unitHtml;
-                tds[4].innerHTML = '<input type="text" name="remark" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + escAttr(vals[4]) + '" oninput="autoFillQtyFromRemark(this)">';
+                tds[5].innerHTML = unitHtml;
+                tds[6].innerHTML = '<input type="text" name="remark" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + escAttr(vals[4]) + '" oninput="autoFillQtyFromRemark(this)">';
                 btn.textContent = '💾';
                 btn.classList.remove('btn-primary');
                 btn.classList.add('btn-success');
@@ -1677,7 +1696,7 @@ setTimeout(() => {
                         var tbody = dateGroup ? dateGroup.querySelector('.record-table tbody') : null;
                         if (tbody) {
                             data.records.forEach(function(item){
-                                var tr = buildInboundRecordRow(item, _smartFillOrderId);
+                                var tr = buildInboundRecordRow(item, _smartFillOrderId, tbody);
                                 tbody.appendChild(tr);
                             });
                             bindRecordImageButtons();
