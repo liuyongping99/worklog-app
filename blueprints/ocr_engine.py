@@ -12,6 +12,7 @@ import json
 import base64
 import logging
 from abc import ABC, abstractmethod
+import numpy as np
 import openai  # 提到顶层,避免 except 子句引用 _openai 模块时 UnboundLocalError
 
 from blueprints.ocr_log import (image_payload, items_outcome, log_ocr_call,
@@ -30,6 +31,76 @@ logger = logging.getLogger('ocr.engine')
 
 # 提示词版本号 —— 改 COMPARE_PROMPT 时同时 bump,事件日志按此版本切分分析
 OCR_MATCH_PROMPT_VERSION = 'compare_rows_v2'
+
+# ═══════════════════════════════════════════════════════════════════
+# CLAHE 局部对比度增强(褶皱标签专用)
+# ═══════════════════════════════════════════════════════════════════
+
+# CLAHE 常量(褶皱标签专用)
+_CLAHE_TILE_SIZE = 8
+_CLAHE_CLIP_LIMIT = 2.0
+_CLAHE_BINS = 256
+
+
+def _clahe_on_gray(gray: np.ndarray) -> np.ndarray:
+    """对灰度图做 CLAHE(局部对比度受限自适应直方图均衡)。
+
+    算法:8x8 网格,直方图裁剪系数 2.0,256 bin,双线性插值 tile 边界。
+    输入输出 dtype:uint8,shape: (H, W)。
+
+    任何异常由调用方 try/except 包住,本函数不抛。
+    """
+    h, w = gray.shape
+    tile_h = h // _CLAHE_TILE_SIZE
+    tile_w = w // _CLAHE_TILE_SIZE
+
+    # Pad 到 tile_size 整数倍
+    pad_h = _CLAHE_TILE_SIZE * tile_h - h
+    pad_w = _CLAHE_TILE_SIZE * tile_w - w
+    if pad_h < 0:
+        pad_h = 0
+    if pad_w < 0:
+        pad_w = 0
+    if pad_h > 0 or pad_w > 0:
+        gray_p = np.pad(gray, ((0, pad_h), (0, pad_w)), mode='reflect')
+    else:
+        gray_p = gray
+
+    # Reshape: (Ty, tile_h, Tx, tile_w) → (Ty, Tx, tile_h, tile_w)
+    tiles = gray_p.reshape(_CLAHE_TILE_SIZE, tile_h, _CLAHE_TILE_SIZE, tile_w)
+    tiles = tiles.transpose(0, 2, 1, 3)
+
+    # 计算每 tile 的直方图
+    hist = np.zeros((_CLAHE_TILE_SIZE, _CLAHE_TILE_SIZE, _CLAHE_BINS), dtype=np.int32)
+    flat_tiles = tiles.reshape(_CLAHE_TILE_SIZE, _CLAHE_TILE_SIZE, -1)  # (Ty, Tx, pixels)
+    for v in range(_CLAHE_BINS):
+        hist[:, :, v] = (flat_tiles == v).sum(axis=-1)
+
+    # 直方图裁剪 + 重分配
+    pixels_per_tile = flat_tiles.shape[-1]
+    clip_value = int(_CLAHE_CLIP_LIMIT * pixels_per_tile / _CLAHE_BINS)
+    excess = np.maximum(hist - clip_value, 0).sum(axis=-1, keepdims=True)
+    hist = np.minimum(hist, clip_value)
+    hist += (excess // _CLAHE_BINS).astype(np.int32)
+
+    # CDF
+    cdf = hist.cumsum(axis=-1)
+    cdf_max = cdf[:, :, -1:]
+    cdf_max = np.where(cdf_max == 0, 1, cdf_max)  # 避免除零(空 tile)
+    cdf = (cdf / cdf_max * (_CLAHE_BINS - 1)).astype(np.float32)
+
+    # 把每个像素映射到 CDF 值
+    # flat_tiles 当前 shape (Ty, Tx, pixels),值是 0..255
+    # 用 take_along_axis 在最后一维做 lookup
+    mapped = np.take_along_axis(cdf, flat_tiles.astype(np.int32), axis=-1)
+    mapped = mapped.reshape(_CLAHE_TILE_SIZE, _CLAHE_TILE_SIZE, tile_h, tile_w)
+    mapped = mapped.transpose(0, 2, 1, 3)  # (Ty, tile_h, Tx, tile_w)
+
+    # Reshape 回全图
+    result_p = mapped.reshape(_CLAHE_TILE_SIZE * tile_h, _CLAHE_TILE_SIZE * tile_w)
+
+    # 裁掉 padding
+    return result_p[:h, :w].astype(np.uint8)
 
 # ═══════════════════════════════════════════════════════════════════
 # 知识库：从数据库加载产品名（按长度降序，优先匹配长名）
@@ -606,6 +677,34 @@ class PaddleOCREngine(BaseOCREngine):
         except Exception:
             # 缩放失败就直接用原图
             return image_bytes
+
+    def _enhance_wrinkle_label(self, image_np: np.ndarray) -> np.ndarray:
+        """褶皱标签专用 CLAHE 预处理。numpy RGB (H,W,3) uint8 → RGB (H,W,3) uint8。
+
+        任何异常 return 原图,不抛(防御性回退,见 spec 「错误处理」)。
+        """
+        try:
+            if image_np is None or image_np.size == 0:
+                return image_np
+            if image_np.ndim != 3 or image_np.shape[-1] != 3:
+                return image_np
+            # 转 float32 算亮度,避免 uint8 下溢
+            img_f = image_np.astype(np.float32)
+            # 灰度化:ITU-R BT.601
+            gray = 0.299 * img_f[..., 0] + 0.587 * img_f[..., 1] + 0.114 * img_f[..., 2]
+            gray = np.clip(gray, 0, 255).astype(np.uint8)
+            # CLAHE
+            enhanced_gray = _clahe_on_gray(gray)
+            # 用原始 RGB 通道按灰度缩放比例同步增强
+            gray_f = gray.astype(np.float32)
+            enhanced_f = enhanced_gray.astype(np.float32)
+            # 比例:enhanced / gray(避开除零)
+            ratio = np.where(gray_f > 1.0, enhanced_f / np.maximum(gray_f, 1.0), 1.0)
+            result = np.clip(img_f * ratio[..., None], 0, 255).astype(np.uint8)
+            return result
+        except Exception as e:
+            logger.warning('CLAHE 预处理失败,使用原图: %s', e)
+            return image_np
 
     @log_ocr_call('ocr.paddle', evt='extract_text',
                   failed_if=lambda r: not r,          # 失败时吞异常返回空串
