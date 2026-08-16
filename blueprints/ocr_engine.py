@@ -699,6 +699,7 @@ class PaddleOCREngine(BaseOCREngine):
 
     def __init__(self):
         self._ocr = None
+        self._wrinkle_ocr = None
 
     def _ensure_model(self):
         if self._ocr is None:
@@ -711,6 +712,23 @@ class PaddleOCREngine(BaseOCREngine):
                 use_angle_cls=True,   # 自动纠正旋转/倒置图片
                 show_log=False,       # 抑制 PaddleOCR 调试输出
             )
+        # 褶皱标签专用 OCR 实例:更激进的检测阈值(det_db_thresh=0.15 / det_db_box_thresh=0.30)
+        # 默认实例的阈值适合清晰印刷体;褶皱标签经 CLAHE 增强后,文字边缘弱,
+        # 需降低阈值以避免漏检。use_dilation=True 让文字区域更"胖",便于粘连字符切分。
+        # _wrinkle_ocr 加载失败时,extract_text 仍可路由回 _ocr(_ensure_model 用 try/except 保护)。
+        if self._wrinkle_ocr is None:
+            try:
+                self._wrinkle_ocr = PaddleOCR(
+                    lang='ch',
+                    use_angle_cls=True,
+                    show_log=False,
+                    det_db_thresh=0.15,
+                    det_db_box_thresh=0.30,
+                    use_dilation=True,
+                )
+            except Exception as e:
+                logger.warning('褶皱 OCR 实例加载失败,回退到默认 _ocr: %s', e)
+                self._wrinkle_ocr = self._ocr
 
     def _resize_if_needed(self, image_bytes):
         """如果图片过大，等比缩放到长边 ≤ MAX_DIMENSION。"""
@@ -763,12 +781,27 @@ class PaddleOCREngine(BaseOCREngine):
     @log_ocr_call('ocr.paddle', evt='extract_text',
                   failed_if=lambda r: not r,          # 失败时吞异常返回空串
                   payload=image_payload, outcome=text_outcome)
-    def extract_text(self, image_bytes):
-        """只做 OCR 提取纯文本（换行拼接），供行级/整单匹配复用。"""
+    def extract_text(self, image_bytes, apply_wrinkle_enhance: bool = False):
+        """只做 OCR 提取纯文本(换行拼接),供行级/整单匹配复用。
+
+        Args:
+            image_bytes: 图片字节流。
+            apply_wrinkle_enhance: 是否走褶皱标签专用通道。
+              True  → 先 CLAHE 增强 + 用 _wrinkle_ocr(更激进阈值)
+              False → 默认 _ocr(老路径,完全向后兼容)
+
+        行为契约:
+          - apply_wrinkle_enhance 默认 False,老调用方零感知。
+          - _wrinkle_ocr 加载失败时,_ensure_model 已 try/except 回退到 _ocr。
+          - 异常路径与原版一致(吞错返回 '')。
+        """
         try:
             self._ensure_model()
             resized = self._resize_if_needed(image_bytes)
-            result = self._ocr.ocr(resized, cls=True)
+            if apply_wrinkle_enhance:
+                resized = self._enhance_wrinkle_label(resized)
+            ocr = self._wrinkle_ocr if apply_wrinkle_enhance else self._ocr
+            result = ocr.ocr(resized, cls=True)
             if not result or not result[0]:
                 return ''
             lines = []
@@ -782,11 +815,15 @@ class PaddleOCREngine(BaseOCREngine):
             logger.exception('PaddleOCR extract_text failed: %s', e)
             return ''
 
-    def extract_text_with_conf(self, image_bytes):
+    def extract_text_with_conf(self, image_bytes, apply_wrinkle_enhance: bool = False):
         """与 extract_text 类似,但额外返回平均置信度 (0~1)。
 
         用途:移动端 Task 6,ocr 置信度低时(模糊图)在 reason 上追加提示,
         引导用户重拍。
+
+        Args:
+            image_bytes: 图片字节流。
+            apply_wrinkle_enhance: 是否走褶皱标签专用通道(同 extract_text)。
 
         Returns:
             (text, avg_conf): text 为拼接后的 OCR 纯文本(与 extract_text 行为一致
@@ -796,7 +833,10 @@ class PaddleOCREngine(BaseOCREngine):
         try:
             self._ensure_model()
             resized = self._resize_if_needed(image_bytes)
-            result = self._ocr.ocr(resized, cls=True)
+            if apply_wrinkle_enhance:
+                resized = self._enhance_wrinkle_label(resized)
+            ocr = self._wrinkle_ocr if apply_wrinkle_enhance else self._ocr
+            result = ocr.ocr(resized, cls=True)
             if not result or not result[0]:
                 return '', 1.0
             lines = []
