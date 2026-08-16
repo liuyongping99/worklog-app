@@ -12,6 +12,7 @@ import json
 import base64
 import logging
 from abc import ABC, abstractmethod
+from typing import Optional
 import numpy as np
 import openai  # 提到顶层,避免 except 子句引用 _openai 模块时 UnboundLocalError
 
@@ -40,6 +41,59 @@ OCR_MATCH_PROMPT_VERSION = 'compare_rows_v2'
 _CLAHE_TILE_SIZE = 8
 _CLAHE_CLIP_LIMIT = 2.0
 _CLAHE_BINS = 256
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 褶皱标签类别门控(双轨:子串 + 品类 code)
+# ═══════════════════════════════════════════════════════════════════
+
+# 轨 1:子串白名单(品名中包含任一即命中)
+_WRINKLE_VARIANTS = frozenset({
+    '白磅布三文治', '黑磅布三文治', 'B级 磅布三文治',
+    '7P环保磅布三文治', '磅布三文治',
+})
+
+# 轨 2:品类 code 白名单(DeepSeekEngine._classify_product 返回值命中即算)
+_WRINKLE_CATEGORY_CODES = frozenset({
+    '0212', '021003', '021201', '021202', '021203',
+})
+
+
+def is_wrinkle_label_category(product_name: Optional[str]) -> bool:
+    """双轨判定:品名是否属于"褶皱标签"类别(决定是否走 CLAHE 预处理)。
+
+    轨 1:子串匹配 — 任一 _WRINKLE_VARIANTS 子串在 product_name 中出现。
+    轨 2:品类 code — DeepSeekEngine._classify_product(product_name) 返回值
+          在 _WRINKLE_CATEGORY_CODES 中。
+
+    行为:
+      - product_name 为空/None → False(不抛)
+      - 任一轨异常(DB 挂/解析失败)→ 该轨视为未命中, 继续下一轨
+      - 两轨都未命中 → False
+      - 命中任一轨 → True
+    """
+    if not product_name:
+        return False
+
+    # 轨 1:子串匹配
+    try:
+        for v in _WRINKLE_VARIANTS:
+            if v in product_name:
+                return True
+    except Exception:
+        # 子串匹配本身不该抛, 防御性 catch 避免污染调用方
+        pass
+
+    # 轨 2:DeepSeekEngine._classify_product 查品类 code
+    try:
+        code = DeepSeekEngine._classify_product(product_name)
+        if code is not None and code in _WRINKLE_CATEGORY_CODES:
+            return True
+    except Exception:
+        # DB 异常 / 任何解析错误 → 视为未命中, 不阻塞主流程
+        pass
+
+    return False
 
 
 def _clahe_on_gray(gray: np.ndarray) -> np.ndarray:
