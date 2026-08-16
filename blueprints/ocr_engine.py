@@ -15,6 +15,7 @@ from abc import ABC, abstractmethod
 from typing import Optional
 import numpy as np
 import openai  # 提到顶层,避免 except 子句引用 _openai 模块时 UnboundLocalError
+from PIL import Image
 
 from blueprints.ocr_log import (image_payload, items_outcome, log_ocr_call,
                                 parsed_outcome, prompt_payload, text_outcome)
@@ -702,11 +703,16 @@ class PaddleOCREngine(BaseOCREngine):
         self._wrinkle_ocr = None
 
     def _ensure_model(self):
+        # torch must be imported before paddleocr on Windows
+        # (albumentations → torch DLL loading needs the path warm)
+        # 提升到此处的两个 if 块之前 — 之前 `from paddleocr import PaddleOCR` 只在
+        # `if self._ocr is None:` 块内,如果某个调用路径下 _ocr 已存在但 _wrinkle_ocr
+        # 是 None(例如外部手动重置 _wrinkle_ocr 触发重加载),第二个块就会
+        # NameError: name 'PaddleOCR' is not defined,并被外层 try/except 吞掉,
+        # 静默退回到默认阈值。提升后两个分支都能拿到名字。
+        import torch  # noqa: F401
+        from paddleocr import PaddleOCR
         if self._ocr is None:
-            # torch must be imported before paddleocr on Windows
-            # (albumentations → torch DLL loading needs the path warm)
-            import torch  # noqa: F401
-            from paddleocr import PaddleOCR
             self._ocr = PaddleOCR(
                 lang='ch',
                 use_angle_cls=True,   # 自动纠正旋转/倒置图片
@@ -733,7 +739,6 @@ class PaddleOCREngine(BaseOCREngine):
     def _resize_if_needed(self, image_bytes):
         """如果图片过大，等比缩放到长边 ≤ MAX_DIMENSION。"""
         try:
-            from PIL import Image
             img = Image.open(io.BytesIO(image_bytes))
             w, h = img.size
             longest = max(w, h)
@@ -799,8 +804,17 @@ class PaddleOCREngine(BaseOCREngine):
             self._ensure_model()
             resized = self._resize_if_needed(image_bytes)
             if apply_wrinkle_enhance:
-                resized = self._enhance_wrinkle_label(resized)
-            ocr = self._wrinkle_ocr if apply_wrinkle_enhance else self._ocr
+                # _enhance_wrinkle_label 接收 numpy 数组(H,W,3 uint8)而非 bytes —
+                # 必须先把 bytes 解码成 numpy,否则会因 .ndim AttributeError 被吞掉,
+                # CLAHE 永远跑不起来。PaddleOCR.ocr 同时接受 numpy 和 bytes,
+                # 所以这里直接把 numpy 透传下去即可,不再编码回 bytes。
+                img_np = np.array(Image.open(io.BytesIO(resized)).convert('RGB'))
+                resized = self._enhance_wrinkle_label(img_np)
+            # 兜底:即便 _ensure_model 已经 try/except 保护,极端情况下
+            # _wrinkle_ocr 仍可能为 None(例如某条路径跳过 _ensure_model)。
+            # `or self._ocr` 保证路由到默认实例,而不是 NoneType.ocr 抛 AttributeError
+            # 再被外层 try/except 吞掉返回空串。
+            ocr = (self._wrinkle_ocr or self._ocr) if apply_wrinkle_enhance else self._ocr
             result = ocr.ocr(resized, cls=True)
             if not result or not result[0]:
                 return ''
@@ -834,8 +848,11 @@ class PaddleOCREngine(BaseOCREngine):
             self._ensure_model()
             resized = self._resize_if_needed(image_bytes)
             if apply_wrinkle_enhance:
-                resized = self._enhance_wrinkle_label(resized)
-            ocr = self._wrinkle_ocr if apply_wrinkle_enhance else self._ocr
+                # 同 extract_text:bytes 先解码为 numpy,CLAHE 才能真正生效。
+                img_np = np.array(Image.open(io.BytesIO(resized)).convert('RGB'))
+                resized = self._enhance_wrinkle_label(img_np)
+            # 兜底:_wrinkle_ocr 为 None 时路由回 _ocr(参见 extract_text 注释)。
+            ocr = (self._wrinkle_ocr or self._ocr) if apply_wrinkle_enhance else self._ocr
             result = ocr.ocr(resized, cls=True)
             if not result or not result[0]:
                 return '', 1.0
