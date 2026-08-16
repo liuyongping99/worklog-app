@@ -34,18 +34,20 @@ from unittest.mock import MagicMock, patch
 from blueprints.ocr_engine import PaddleOCREngine
 
 
-def _install_fake_paddleocr():
-    """Inject a fake `paddleocr` module into sys.modules so `_ensure_model`'s
-    `from paddleocr import PaddleOCR` doesn't trigger the real paddleocr import
-    chain (which loads torch → fatal Windows DLL error 0xc0000139 on some
-    worktree setups).
+def _make_fake_paddleocr_module():
+    """Create a fake `paddleocr` module object WITHOUT inserting it into sys.modules.
 
-    Returns the MagicMock that the patched `PaddleOCR(...)` call will use.
+    Usage with auto-cleanup:
+        with patch.dict(sys.modules, {'paddleocr': fake}):
+            # ... use fake ...
+        # sys.modules is restored on exit (no leak to other tests)
+
+    `patch.dict` is preferred over direct `sys.modules['paddleocr'] = ...` because
+    it auto-restores the original state on context exit (no leak to other tests).
     """
     fake_paddleocr = types.ModuleType('paddleocr')
     fake_paddleocr.PaddleOCR = MagicMock(name='PaddleOCR_class')
-    sys.modules['paddleocr'] = fake_paddleocr
-    return fake_paddleocr.PaddleOCR
+    return fake_paddleocr, fake_paddleocr.PaddleOCR
 
 
 class _ImagePipelinePatch:
@@ -115,19 +117,22 @@ class PaddleOCRWrinkleParamTests(unittest.TestCase):
         会 NameError → 被 except 吞 → self._wrinkle_ocr 仍是 None。
         修复后 import 提升,第二次调用能正常进入 except 分支并回退。
 
-        Patch 方式:用 `_install_fake_paddleocr()` 把 fake 模块塞到 sys.modules,
-        让 `from paddleocr import PaddleOCR` 走 fake,不触发真 paddleocr import chain
+        Patch 方式:用 `patch.dict(sys.modules, ...)` 把 fake 模块塞到 sys.modules,
+        上下文退出时自动还原 — 不会泄露给其他测试。fake 模块让
+        `from paddleocr import PaddleOCR` 走 fake,不触发真 paddleocr import chain
         (该 chain 会拉 torch DLL,在某些 Windows worktree 触发 0xc0000139)。
+
+        关键:engine 用 `PaddleOCREngine()` 创建(`__init__` 把 `_ocr` 设为 None),
+        所以两个 if 块都会被走到 — 验证 NameError 修复真的有效。
         """
-        mock_paddle_cls = _install_fake_paddleocr()
-        engine = PaddleOCREngine()
-        # 预填 _ocr,模拟"_ocr 已加载,只重新走 _wrinkle_ocr 路径"的极端情况。
-        # 这是提升 import 之前 NameError 的触发路径。
+        fake_paddleocr, mock_paddle_cls = _make_fake_paddleocr_module()
+        engine = PaddleOCREngine()  # _ocr = None, _wrinkle_ocr = None
         fake_ocr_instance = MagicMock(name='_ocr_instance')
-        # 第一次调用(已有 _ocr 不会触发,但保险起见)— 返回正常实例
+        # 第一次调用(_ocr 分支进入)— 返回正常实例
         # 第二次调用(_wrinkle_ocr 分支)— 抛异常,触发 except 回退
         mock_paddle_cls.side_effect = [fake_ocr_instance, RuntimeError('模拟加载失败')]
-        engine._ensure_model()
+        with patch.dict(sys.modules, {'paddleocr': fake_paddleocr}):
+            engine._ensure_model()
         # 关键断言:_wrinkle_ocr 必须回退到 _ocr(不能是 None,也不能是 MagicMock)
         self.assertIs(engine._wrinkle_ocr, engine._ocr,
             'PaddleOCR 第二次实例化失败时,'
