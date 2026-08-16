@@ -768,7 +768,7 @@ class ShippingWrinkleRoutingTests(unittest.TestCase):
         # Mock PaddleOCR 调用
         with patch('blueprints.shipping.ShippingRecord.get_by_id',
                    return_value=mock_record), \
-             patch('blueprints.shipping.get_ocr_engine') as mock_factory:
+             patch('blueprints.ocr_engine.get_ocr_engine') as mock_factory:
             mock_engine = MagicMock()
             mock_engine.extract_text_with_conf = MagicMock(return_value=('TEST', 0.9))
             mock_factory.return_value = mock_engine
@@ -790,7 +790,7 @@ class ShippingWrinkleRoutingTests(unittest.TestCase):
         mock_record = {'id': 1, 'product_name': '无纺布', 'specification': '2m'}
         with patch('blueprints.shipping.ShippingRecord.get_by_id',
                    return_value=mock_record), \
-             patch('blueprints.shipping.get_ocr_engine') as mock_factory:
+             patch('blueprints.ocr_engine.get_ocr_engine') as mock_factory:
             mock_engine = MagicMock()
             mock_engine.extract_text_with_conf = MagicMock(return_value=('TEST', 0.9))
             mock_factory.return_value = mock_engine
@@ -918,7 +918,7 @@ class InboundWrinkleRoutingTests(unittest.TestCase):
                        'specification': '2m'}
         with patch('blueprints.inbound.InboundRecord.get_by_id',
                    return_value=mock_record), \
-             patch('blueprints.inbound.get_ocr_engine') as mock_factory:
+             patch('blueprints.ocr_engine.get_ocr_engine') as mock_factory:
             mock_engine = MagicMock()
             mock_engine.extract_text_with_conf = MagicMock(return_value=('TEST', 0.9))
             mock_factory.return_value = mock_engine
@@ -1306,7 +1306,11 @@ git commit -m "test(ocr): 真实 fixture 集成测试
 
 **潜在冲突:**
 - Task 3 在 PaddleOCREngine 内部加了 `_wrinkle_ocr` 属性 — 这是私有,Task 4/5 不直接引用,只通过 `extract_text_with_conf(apply_wrinkle_enhance=True)` 间接触发,无耦合风险
-- Task 4/5 的 mock 测试 patch 的是 `blueprints.shipping.get_ocr_engine` — 假设该函数在 shipping 模块里被 import,需要 grep 确认;若是 `from blueprints.ocr_engine import get_ocr_engine`,应改为 `patch('blueprints.ocr_engine.get_ocr_engine')`
+- ~~Task 4/5 的 mock 测试 patch 路径~~ — 已 pre-flight 修复:shipping/inbound/loading 均 `from blueprints.ocr_engine import get_ocr_engine`,改用 `patch('blueprints.ocr_engine.get_ocr_engine')`
+
+**deferred minor(Pre-flight 发现,不阻塞):**
+- `shipping.py:1644` 整单 ai-match 重 OCR 路径 — 不带 CLAHE。当前 plan 只覆盖行级图上传路径。这是次要场景(整单比对不是用户主诉),留待后续 patch。
+- `shipping.py:967` / `shipping.py:1033` 的 fuzzy-match / ai-judge fallback — 优先读 `ocr_match_event` 存的 ocr_text(已带 CLAHE),只有 stored 缺失才重 OCR。生产几乎不触发 fallback。
 
 **回滚:**
 - 改任意 task 的 commit 即可 revert
