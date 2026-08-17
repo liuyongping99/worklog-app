@@ -1,0 +1,9 @@
+{
+  "id": 2954,
+  "image_path": "C:\\Users\\Administrator\\worklog-app\\upload\\2026-08\\2485e13def8f44c2961da107fba198c8.jpg",
+  "product_name": "白磅布三文治",
+  "specification": "0.6中性",
+  "match_status": "red",
+  "match_score": null,
+  "match_reason": "品名主体磅布三文治匹配，但商品为白色，标签背景为黑色，颜色冲突；且未识别到厚度0.6和中性信息"
+}

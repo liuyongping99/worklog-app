@@ -1,0 +1,9 @@
+{
+  "id": 2994,
+  "image_path": "C:\\Users\\Administrator\\worklog-app\\upload\\2026-08\\2609e6826b604bc99a7aec3b6beae6ea.jpg",
+  "product_name": "白磅布三文治",
+  "specification": "1.2硬性",
+  "match_status": "yellow",
+  "match_score": null,
+  "match_reason": "品名磅布三文治匹配，厚度1.2mm吻合，但规格中的手感硬性未在OCR中明确识别，需人工核对"
+}

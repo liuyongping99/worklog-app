@@ -1,0 +1,9 @@
+{
+  "id": 2123,
+  "image_path": "C:\\Users\\Administrator\\worklog-app\\upload\\2026-07\\b01aecab27c9406c9c56276b85e0d410..jpg",
+  "product_name": "黑磅布三文治",
+  "specification": "0.8中性",
+  "match_status": "red",
+  "match_score": 51.666666666666664,
+  "match_reason": "本地模糊匹配 52分 (品名未命中, 规格命中)"
+}

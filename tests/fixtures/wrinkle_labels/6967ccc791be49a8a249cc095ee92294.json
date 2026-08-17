@@ -1,0 +1,9 @@
+{
+  "id": 2953,
+  "image_path": "C:\\Users\\Administrator\\worklog-app\\upload\\2026-08\\6967ccc791be49a8a249cc095ee92294.jpg",
+  "product_name": "黑磅布三文治",
+  "specification": "0.8中性",
+  "match_status": "red",
+  "match_score": null,
+  "match_reason": "OCR文字中未找到磅布三文治或厚度等信息，无法匹配该商品"
+}
