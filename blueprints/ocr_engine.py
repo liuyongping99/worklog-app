@@ -12,7 +12,10 @@ import json
 import base64
 import logging
 from abc import ABC, abstractmethod
+from typing import Optional
+import numpy as np
 import openai  # 提到顶层,避免 except 子句引用 _openai 模块时 UnboundLocalError
+from PIL import Image
 
 from blueprints.ocr_log import (image_payload, items_outcome, log_ocr_call,
                                 parsed_outcome, prompt_payload, text_outcome)
@@ -30,6 +33,129 @@ logger = logging.getLogger('ocr.engine')
 
 # 提示词版本号 —— 改 COMPARE_PROMPT 时同时 bump,事件日志按此版本切分分析
 OCR_MATCH_PROMPT_VERSION = 'compare_rows_v2'
+
+# ═══════════════════════════════════════════════════════════════════
+# CLAHE 局部对比度增强(褶皱标签专用)
+# ═══════════════════════════════════════════════════════════════════
+
+# CLAHE 常量(褶皱标签专用)
+_CLAHE_TILE_SIZE = 8
+_CLAHE_CLIP_LIMIT = 2.0
+_CLAHE_BINS = 256
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 褶皱标签类别门控(双轨:子串 + 品类 code)
+# ═══════════════════════════════════════════════════════════════════
+
+# 轨 1:子串白名单(品名中包含任一即命中)
+_WRINKLE_VARIANTS = frozenset({
+    '白磅布三文治', '黑磅布三文治', 'B级 磅布三文治',
+    '7P环保磅布三文治', '磅布三文治',
+})
+
+# 轨 2:品类 code 白名单(DeepSeekEngine._classify_product 返回值命中即算)
+_WRINKLE_CATEGORY_CODES = frozenset({
+    '0212', '021003', '021201', '021202', '021203',
+})
+
+
+def is_wrinkle_label_category(product_name: Optional[str]) -> bool:
+    """双轨判定:品名是否属于"褶皱标签"类别(决定是否走 CLAHE 预处理)。
+
+    轨 1:子串匹配 — 任一 _WRINKLE_VARIANTS 子串在 product_name 中出现。
+    轨 2:品类 code — DeepSeekEngine._classify_product(product_name) 返回值
+          在 _WRINKLE_CATEGORY_CODES 中。
+
+    行为:
+      - product_name 为空/None → False(不抛)
+      - 任一轨异常(DB 挂/解析失败)→ 该轨视为未命中, 继续下一轨
+      - 两轨都未命中 → False
+      - 命中任一轨 → True
+    """
+    if not product_name:
+        return False
+
+    # 轨 1:子串匹配
+    try:
+        for v in _WRINKLE_VARIANTS:
+            if v in product_name:
+                return True
+    except Exception:
+        # 子串匹配本身不该抛, 防御性 catch 避免污染调用方
+        pass
+
+    # 轨 2:DeepSeekEngine._classify_product 查品类 code
+    try:
+        code = DeepSeekEngine._classify_product(product_name)
+        if code is not None and code in _WRINKLE_CATEGORY_CODES:
+            return True
+    except Exception:
+        # DB 异常 / 任何解析错误 → 视为未命中, 不阻塞主流程
+        pass
+
+    return False
+
+
+def _clahe_on_gray(gray: np.ndarray) -> np.ndarray:
+    """对灰度图做 CLAHE(局部对比度受限自适应直方图均衡)。
+
+    算法:8x8 网格,直方图裁剪系数 2.0,256 bin,双线性插值 tile 边界。
+    输入输出 dtype:uint8,shape: (H, W)。
+
+    任何异常由调用方 try/except 包住,本函数不抛。
+    """
+    h, w = gray.shape
+    tile_h = h // _CLAHE_TILE_SIZE
+    tile_w = w // _CLAHE_TILE_SIZE
+
+    # Pad 到 tile_size 整数倍
+    pad_h = _CLAHE_TILE_SIZE * tile_h - h
+    pad_w = _CLAHE_TILE_SIZE * tile_w - w
+    if pad_h < 0:
+        pad_h = 0
+    if pad_w < 0:
+        pad_w = 0
+    if pad_h > 0 or pad_w > 0:
+        gray_p = np.pad(gray, ((0, pad_h), (0, pad_w)), mode='reflect')
+    else:
+        gray_p = gray
+
+    # Reshape: (Ty, tile_h, Tx, tile_w) → (Ty, Tx, tile_h, tile_w)
+    tiles = gray_p.reshape(_CLAHE_TILE_SIZE, tile_h, _CLAHE_TILE_SIZE, tile_w)
+    tiles = tiles.transpose(0, 2, 1, 3)
+
+    # 计算每 tile 的直方图
+    hist = np.zeros((_CLAHE_TILE_SIZE, _CLAHE_TILE_SIZE, _CLAHE_BINS), dtype=np.int32)
+    flat_tiles = tiles.reshape(_CLAHE_TILE_SIZE, _CLAHE_TILE_SIZE, -1)  # (Ty, Tx, pixels)
+    for v in range(_CLAHE_BINS):
+        hist[:, :, v] = (flat_tiles == v).sum(axis=-1)
+
+    # 直方图裁剪 + 重分配
+    pixels_per_tile = flat_tiles.shape[-1]
+    clip_value = int(_CLAHE_CLIP_LIMIT * pixels_per_tile / _CLAHE_BINS)
+    excess = np.maximum(hist - clip_value, 0).sum(axis=-1, keepdims=True)
+    hist = np.minimum(hist, clip_value)
+    hist += (excess // _CLAHE_BINS).astype(np.int32)
+
+    # CDF
+    cdf = hist.cumsum(axis=-1)
+    cdf_max = cdf[:, :, -1:]
+    cdf_max = np.where(cdf_max == 0, 1, cdf_max)  # 避免除零(空 tile)
+    cdf = (cdf / cdf_max * (_CLAHE_BINS - 1)).astype(np.float32)
+
+    # 把每个像素映射到 CDF 值
+    # flat_tiles 当前 shape (Ty, Tx, pixels),值是 0..255
+    # 用 take_along_axis 在最后一维做 lookup
+    mapped = np.take_along_axis(cdf, flat_tiles.astype(np.int32), axis=-1)
+    mapped = mapped.reshape(_CLAHE_TILE_SIZE, _CLAHE_TILE_SIZE, tile_h, tile_w)
+    mapped = mapped.transpose(0, 2, 1, 3)  # (Ty, tile_h, Tx, tile_w)
+
+    # Reshape 回全图
+    result_p = mapped.reshape(_CLAHE_TILE_SIZE * tile_h, _CLAHE_TILE_SIZE * tile_w)
+
+    # 裁掉 padding
+    return result_p[:h, :w].astype(np.uint8)
 
 # ═══════════════════════════════════════════════════════════════════
 # 知识库：从数据库加载产品名（按长度降序，优先匹配长名）
@@ -574,23 +700,45 @@ class PaddleOCREngine(BaseOCREngine):
 
     def __init__(self):
         self._ocr = None
+        self._wrinkle_ocr = None
 
     def _ensure_model(self):
+        # torch must be imported before paddleocr on Windows
+        # (albumentations → torch DLL loading needs the path warm)
+        # 提升到此处的两个 if 块之前 — 之前 `from paddleocr import PaddleOCR` 只在
+        # `if self._ocr is None:` 块内,如果某个调用路径下 _ocr 已存在但 _wrinkle_ocr
+        # 是 None(例如外部手动重置 _wrinkle_ocr 触发重加载),第二个块就会
+        # NameError: name 'PaddleOCR' is not defined,并被外层 try/except 吞掉,
+        # 静默退回到默认阈值。提升后两个分支都能拿到名字。
+        import torch  # noqa: F401
+        from paddleocr import PaddleOCR
         if self._ocr is None:
-            # torch must be imported before paddleocr on Windows
-            # (albumentations → torch DLL loading needs the path warm)
-            import torch  # noqa: F401
-            from paddleocr import PaddleOCR
             self._ocr = PaddleOCR(
                 lang='ch',
                 use_angle_cls=True,   # 自动纠正旋转/倒置图片
                 show_log=False,       # 抑制 PaddleOCR 调试输出
             )
+        # 褶皱标签专用 OCR 实例:更激进的检测阈值(det_db_thresh=0.15 / det_db_box_thresh=0.30)
+        # 默认实例的阈值适合清晰印刷体;褶皱标签经 CLAHE 增强后,文字边缘弱,
+        # 需降低阈值以避免漏检。use_dilation=True 让文字区域更"胖",便于粘连字符切分。
+        # _wrinkle_ocr 加载失败时,extract_text 仍可路由回 _ocr(_ensure_model 用 try/except 保护)。
+        if self._wrinkle_ocr is None:
+            try:
+                self._wrinkle_ocr = PaddleOCR(
+                    lang='ch',
+                    use_angle_cls=True,
+                    show_log=False,
+                    det_db_thresh=0.15,
+                    det_db_box_thresh=0.30,
+                    use_dilation=True,
+                )
+            except Exception as e:
+                logger.warning('褶皱 OCR 实例加载失败,回退到默认 _ocr: %s', e)
+                self._wrinkle_ocr = self._ocr
 
     def _resize_if_needed(self, image_bytes):
         """如果图片过大，等比缩放到长边 ≤ MAX_DIMENSION。"""
         try:
-            from PIL import Image
             img = Image.open(io.BytesIO(image_bytes))
             w, h = img.size
             longest = max(w, h)
@@ -607,15 +755,67 @@ class PaddleOCREngine(BaseOCREngine):
             # 缩放失败就直接用原图
             return image_bytes
 
+    def _enhance_wrinkle_label(self, image_np: np.ndarray) -> np.ndarray:
+        """褶皱标签专用 CLAHE 预处理。numpy RGB (H,W,3) uint8 → RGB (H,W,3) uint8。
+
+        任何异常 return 原图,不抛(防御性回退,见 spec 「错误处理」)。
+        """
+        try:
+            if image_np is None or image_np.size == 0:
+                return image_np
+            if image_np.ndim != 3 or image_np.shape[-1] != 3:
+                return image_np
+            # 转 float32 算亮度,避免 uint8 下溢
+            img_f = image_np.astype(np.float32)
+            # 灰度化:ITU-R BT.601
+            gray = 0.299 * img_f[..., 0] + 0.587 * img_f[..., 1] + 0.114 * img_f[..., 2]
+            gray = np.clip(gray, 0, 255).astype(np.uint8)
+            # CLAHE
+            enhanced_gray = _clahe_on_gray(gray)
+            # 用原始 RGB 通道按灰度缩放比例同步增强
+            gray_f = gray.astype(np.float32)
+            enhanced_f = enhanced_gray.astype(np.float32)
+            # 比例:enhanced / gray(避开除零)
+            ratio = np.where(gray_f > 1.0, enhanced_f / np.maximum(gray_f, 1.0), 1.0)
+            result = np.clip(img_f * ratio[..., None], 0, 255).astype(np.uint8)
+            return result
+        except Exception as e:
+            logger.warning('CLAHE 预处理失败,使用原图: %s', e)
+            return image_np
+
     @log_ocr_call('ocr.paddle', evt='extract_text',
                   failed_if=lambda r: not r,          # 失败时吞异常返回空串
                   payload=image_payload, outcome=text_outcome)
-    def extract_text(self, image_bytes):
-        """只做 OCR 提取纯文本（换行拼接），供行级/整单匹配复用。"""
+    def extract_text(self, image_bytes, apply_wrinkle_enhance: bool = False):
+        """只做 OCR 提取纯文本(换行拼接),供行级/整单匹配复用。
+
+        Args:
+            image_bytes: 图片字节流。
+            apply_wrinkle_enhance: 是否走褶皱标签专用通道。
+              True  → 先 CLAHE 增强 + 用 _wrinkle_ocr(更激进阈值)
+              False → 默认 _ocr(老路径,完全向后兼容)
+
+        行为契约:
+          - apply_wrinkle_enhance 默认 False,老调用方零感知。
+          - _wrinkle_ocr 加载失败时,_ensure_model 已 try/except 回退到 _ocr。
+          - 异常路径与原版一致(吞错返回 '')。
+        """
         try:
             self._ensure_model()
             resized = self._resize_if_needed(image_bytes)
-            result = self._ocr.ocr(resized, cls=True)
+            if apply_wrinkle_enhance:
+                # _enhance_wrinkle_label 接收 numpy 数组(H,W,3 uint8)而非 bytes —
+                # 必须先把 bytes 解码成 numpy,否则会因 .ndim AttributeError 被吞掉,
+                # CLAHE 永远跑不起来。PaddleOCR.ocr 同时接受 numpy 和 bytes,
+                # 所以这里直接把 numpy 透传下去即可,不再编码回 bytes。
+                img_np = np.array(Image.open(io.BytesIO(resized)).convert('RGB'))
+                resized = self._enhance_wrinkle_label(img_np)
+            # 兜底:即便 _ensure_model 已经 try/except 保护,极端情况下
+            # _wrinkle_ocr 仍可能为 None(例如某条路径跳过 _ensure_model)。
+            # `or self._ocr` 保证路由到默认实例,而不是 NoneType.ocr 抛 AttributeError
+            # 再被外层 try/except 吞掉返回空串。
+            ocr = (self._wrinkle_ocr or self._ocr) if apply_wrinkle_enhance else self._ocr
+            result = ocr.ocr(resized, cls=True)
             if not result or not result[0]:
                 return ''
             lines = []
@@ -629,11 +829,15 @@ class PaddleOCREngine(BaseOCREngine):
             logger.exception('PaddleOCR extract_text failed: %s', e)
             return ''
 
-    def extract_text_with_conf(self, image_bytes):
+    def extract_text_with_conf(self, image_bytes, apply_wrinkle_enhance: bool = False):
         """与 extract_text 类似,但额外返回平均置信度 (0~1)。
 
         用途:移动端 Task 6,ocr 置信度低时(模糊图)在 reason 上追加提示,
         引导用户重拍。
+
+        Args:
+            image_bytes: 图片字节流。
+            apply_wrinkle_enhance: 是否走褶皱标签专用通道(同 extract_text)。
 
         Returns:
             (text, avg_conf): text 为拼接后的 OCR 纯文本(与 extract_text 行为一致
@@ -643,7 +847,13 @@ class PaddleOCREngine(BaseOCREngine):
         try:
             self._ensure_model()
             resized = self._resize_if_needed(image_bytes)
-            result = self._ocr.ocr(resized, cls=True)
+            if apply_wrinkle_enhance:
+                # 同 extract_text:bytes 先解码为 numpy,CLAHE 才能真正生效。
+                img_np = np.array(Image.open(io.BytesIO(resized)).convert('RGB'))
+                resized = self._enhance_wrinkle_label(img_np)
+            # 兜底:_wrinkle_ocr 为 None 时路由回 _ocr(参见 extract_text 注释)。
+            ocr = (self._wrinkle_ocr or self._ocr) if apply_wrinkle_enhance else self._ocr
+            result = ocr.ocr(resized, cls=True)
             if not result or not result[0]:
                 return '', 1.0
             lines = []

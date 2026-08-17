@@ -1,0 +1,9 @@
+{
+  "id": 2355,
+  "image_path": "C:\\Users\\Administrator\\worklog-app\\upload\\2026-08\\b8afc05ed7ea40d095b2da11386b1697.jpg",
+  "product_name": "黑磅布三文治",
+  "specification": "1.2软性",
+  "match_status": "yellow",
+  "match_score": null,
+  "match_reason": "OCR出现磅布三文治，厚度1.2mm、软性匹配；但品名中的‘黑’未见明确颜色词，标签背景黑色不作为商品颜色依据，需人工核对"
+}

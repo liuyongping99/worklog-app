@@ -1,0 +1,9 @@
+{
+  "id": 2143,
+  "image_path": "C:\\Users\\Administrator\\worklog-app\\upload\\2026-07\\b2338c77016c40c1903b72cf8cd8956c..jpg",
+  "product_name": "白磅布三文治",
+  "specification": "1.2中性",
+  "match_status": "red",
+  "match_score": 55.45454545454545,
+  "match_reason": "本地模糊匹配 55分 (品名未命中, 规格命中)"
+}

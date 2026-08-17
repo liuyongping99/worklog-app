@@ -1,0 +1,9 @@
+{
+  "id": 2031,
+  "image_path": "C:\\Users\\Administrator\\worklog-app\\upload\\2026-07\\514e10220a8b4bc582e41e404c944fc5..jpg",
+  "product_name": "黑磅布三文治",
+  "specification": "1.4硬性",
+  "match_status": "yellow",
+  "match_score": 70.0,
+  "match_reason": "品名缺失'黑'字，但厚度1.4mm和加硬/硬性匹配，颜色信息在品名中未在OCR出现"
+}

@@ -21,7 +21,7 @@ from blueprints._helpers import (
     validate_image_content, check_uploaded_image,
     match_label_to_row, detect_bg_color,
 )
-from blueprints.ocr_engine import PaddleOCREngine, get_ocr_engine, OCR_MATCH_PROMPT_VERSION
+from blueprints.ocr_engine import PaddleOCREngine, get_ocr_engine, OCR_MATCH_PROMPT_VERSION, is_wrinkle_label_category
 from blueprints import _helpers
 from models._db import get_db
 from blueprints.ocr_log import set_log_context
@@ -841,8 +841,9 @@ def api_v1_loading_orders_ai_judge_image(image_id):
         pass
     if not ocr_text.strip():
         try:
+            apply_wrinkle_enhance = is_wrinkle_label_category(record.get('product_name', ''))
             with open(img['file_path'], 'rb') as _f:
-                ocr_text = get_ocr_engine('paddleocr').extract_text(_f.read()) or ''
+                ocr_text = get_ocr_engine('paddleocr').extract_text(_f.read(), apply_wrinkle_enhance=apply_wrinkle_enhance) or ''
         except Exception:
             current_app.logger.exception('重跑 PaddleOCR 失败(image_id=%s)', image_id)
     if ocr_text.strip():

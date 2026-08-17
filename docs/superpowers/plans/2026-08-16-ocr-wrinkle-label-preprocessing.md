@@ -1306,7 +1306,11 @@ git commit -m "test(ocr): 真实 fixture 集成测试
 
 **潜在冲突:**
 - Task 3 在 PaddleOCREngine 内部加了 `_wrinkle_ocr` 属性 — 这是私有,Task 4/5 不直接引用,只通过 `extract_text_with_conf(apply_wrinkle_enhance=True)` 间接触发,无耦合风险
-- Task 4/5 的 mock 测试 patch 的是 `blueprints.shipping.get_ocr_engine` — 假设该函数在 shipping 模块里被 import,需要 grep 确认;若是 `from blueprints.ocr_engine import get_ocr_engine`,应改为 `patch('blueprints.ocr_engine.get_ocr_engine')`
+- ~~Task 4/5 的 mock 测试 patch 路径~~ — **更正**:shipping/inbound/loading 三个蓝图均 `from blueprints.ocr_engine import get_ocr_engine`。`from X import Y` 在 importer 命名空间创建**独立绑定**,patch `X.Y` 不影响 importer。必须 patch importer 自己的局部绑定,即 `patch('blueprints.shipping.get_ocr_engine')`(实证:`tests/test_record_upload_match.py:36` 用此模式工作)。已修正 Task 4/5 测试代码
+
+**deferred minor(Pre-flight 发现,不阻塞):**
+- `shipping.py:1644` 整单 ai-match 重 OCR 路径 — 不带 CLAHE。当前 plan 只覆盖行级图上传路径。这是次要场景(整单比对不是用户主诉),留待后续 patch。
+- `shipping.py:967` / `shipping.py:1033` 的 fuzzy-match / ai-judge fallback — 优先读 `ocr_match_event` 存的 ocr_text(已带 CLAHE),只有 stored 缺失才重 OCR。生产几乎不触发 fallback。
 
 **回滚:**
 - 改任意 task 的 commit 即可 revert
