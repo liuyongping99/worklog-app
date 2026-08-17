@@ -61,13 +61,13 @@ class InboundModelTests(_TempDb):
             order_pk=oid,
             file_path='/tmp/fake.png',
             source='manual',
-            source_tag='备货照',
+            source_tag='打板照',
         )
         self.assertIsInstance(iid, int)
         result = InboundImage.get_all_by_orders([oid])
         self.assertIn(oid, result)
         self.assertEqual(len(result[oid]), 1)
-        self.assertEqual(result[oid][0]['source_tag'], '备货照')
+        self.assertEqual(result[oid][0]['source_tag'], '打板照')
 
     def test_inbound_record_get_verified_warnings_default_empty(self):
         """新建明细的 verified_warnings 默认空 dict(不是 None)。"""

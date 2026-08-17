@@ -140,11 +140,13 @@ class ServerSideNoMatchColTests(_TempDb):
 
 
 class JsdomMatchColumnTests(unittest.TestCase):
-    """_ensureMatchColumn / setRowMatchBadge 行为测试(jsdom 抽真实函数跑)。
+    """_ensureMatchColumn / setRowMatchBadge / initAllMatchColumns 行为测试(jsdom 抽真实函数跑)。
 
     2026-08-04 改造:match-col 由 JS 动态插入;这里调 subprocess 跑
-    node scripts/record_image_match_column_check.js 验证三 case:
-    Case 1 空 table 插列、Case 2 已有列不重复插、Case 3 5 行表兄弟行对齐。
+    node tests/record_image_match_column_check.js 验证四 case:
+    Case 1 空 table 插列、Case 2 已有列不重复插、Case 3 5 行表兄弟行对齐、
+    Case 4 页面刷新场景(服务端不渲染 match-col,DOM 里有 img-item-record + 徽章
+        → 调 initAllMatchColumns 应补建 th + td + 填徽章)。
     """
 
     @unittest.skipUnless(

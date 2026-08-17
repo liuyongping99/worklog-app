@@ -85,7 +85,7 @@ def create_app():
     # 单人用场景也给登录"选身份"加一道闸门,
     # 目的:1) 记录谁在操作;2) 让多人化只需加密码层、不用改 gate。
     # 注意:API (REST /api/v1/*) 不在此处拦截 — 它们自己返回 401,由前端引导跳转。
-    _AUTH_PUBLIC_PREFIXES = ("/static", "/api/", "/m/")
+    _AUTH_PUBLIC_PREFIXES = ("/static", "/api/", "/m/", "/upload/")
     _AUTH_PUBLIC_PATHS = ("/login", "/logout", "/favicon.ico")
 
     @app.before_request
@@ -165,8 +165,10 @@ def create_app():
     from blueprints.vehicles import bp as vehicles_bp
     from blueprints.staff import bp as staff_bp
     from blueprints.audit import bp as audit_bp
-    from blueprints.mobile_shipping import bp as mobile_shipping_bp
     from blueprints.voice import bp as voice_bp
+    from blueprints.category_prompts_manage import bp as cat_prompt_manage_bp
+    from blueprints.mobile_shipping import bp as mobile_shipping_bp
+    from blueprints.point_count import bp as point_count_bp, bp_api as point_count_api_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(upload_bp)
@@ -183,8 +185,11 @@ def create_app():
     app.register_blueprint(staff_bp)
     app.register_blueprint(audit_bp)
     app.register_blueprint(voice_bp)
-
+    app.register_blueprint(cat_prompt_manage_bp)
     app.register_blueprint(mobile_shipping_bp)
+    app.register_blueprint(point_count_bp)
+    app.register_blueprint(point_count_api_bp)
+
     return app
 
 
@@ -193,5 +198,7 @@ app = create_app()
 
 if __name__ == '__main__':
     print('\n  丰源工作台已启动')
-    print('  访问地址: http://127.0.0.1:5050\n')
-    app.run(debug=True, port=5050)
+    print('  访问地址: http://127.0.0.1:5050')
+    print('  局域网访问: http://192.168.1.149:5050  (需先放行防火墙)\n')
+    # host='0.0.0.0' 让 Flask 同时监听所有网卡接口,本机 + 局域网都能访问
+    app.run(debug=True, host='0.0.0.0', port=5050)

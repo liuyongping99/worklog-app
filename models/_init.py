@@ -1,4 +1,4 @@
-"""数据库初始化：建表 + 迁移"""
+﻿"""数据库初始化：建表 + 迁移"""
 import json
 import os
 import sqlite3
@@ -291,6 +291,23 @@ def init_db():
             FOREIGN KEY (order_pk) REFERENCES shipping_orders(id)
         )
     ''')
+    # 2026-08-15: 摆放图计数点表(供"支"类商品清点数量)
+    # 每张摆放图(image_id)可有多枚点击计数点,按 seq 顺序撤销
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS placement_marks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            image_id INTEGER NOT NULL,
+            seq INTEGER NOT NULL,          -- 点击序号 1,2,3...
+            x_ratio REAL NOT NULL,          -- 相对图片宽度比例 0~1
+            y_ratio REAL NOT NULL,          -- 相对图片高度比例 0~1
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (image_id) REFERENCES shipping_images(id)
+        )
+    ''')
+    try:
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_placement_marks_image_id ON placement_marks(image_id)')
+    except Exception:
+        pass
     # 2026-07-30: 老表增量加 match_source 列(若已存在则 skip)
     for tbl in ('shipping_images', 'loading_order_images'):
         try:
@@ -308,6 +325,76 @@ def init_db():
         cursor.execute("ALTER TABLE shipping_images ADD COLUMN source_tag TEXT DEFAULT NULL")
     except Exception:
         pass
+    # 2026-08-15: 增量加 circles 列(摆放图用 OpenCV 检测的圆柱端面,JSON 数组)
+    try:
+        cursor.execute("ALTER TABLE shipping_images ADD COLUMN circles TEXT DEFAULT NULL")
+    except Exception:
+        pass
+    # 2026-08-15: 增量加 mark_r 列(计数点所属圆柱的归一化半径,相对展示区宽度)
+    try:
+        cursor.execute("ALTER TABLE placement_marks ADD COLUMN mark_r REAL DEFAULT 0")
+    except Exception:
+        pass
+    # 2026-08-16: 增量加 mark_scale 列(摆放图计数数字整体缩放比例,弹框内放大/缩小按钮写入)
+    try:
+        cursor.execute("ALTER TABLE shipping_images ADD COLUMN mark_scale REAL DEFAULT 1")
+    except Exception:
+        pass
+    # 2026-08-16: 增量加 loose_count 列(摆放图散码数量,点数弹框内「散码」按钮录入)
+    try:
+        cursor.execute("ALTER TABLE shipping_images ADD COLUMN loose_count INTEGER DEFAULT 0")
+    except Exception:
+        pass
+
+
+    # 2026-08-17: 独立点数工具 -- 独立建表 / 单独持久化(可追溯)
+    # 设计: 参考出货页摆放图计数, 但会话/图片/计数点 都新建独立表, 不挂在出货订单上。
+    #   point_count_sessions  -- 一个"点数任务"(谁来点/何时/标题/可选期望值)
+    #   point_count_images   -- 一张上传的图(物理文件 + 缩放/散码等局部状态)
+    #   point_count_marks    -- 图上每枚点击(相对 x/y + seq 顺序号)
+    # 可追溯: session 记 user_id+created_at; image 记 created_at;
+    #          mark 记 created_at; session 总数 = SUM(marks) + loose_count。
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS point_count_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            expected_count INTEGER DEFAULT NULL,
+            unit TEXT NOT NULL DEFAULT '支',
+            remark TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'open',
+            total_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            closed_at TEXT DEFAULT NULL
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS point_count_images (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id INTEGER NOT NULL,
+            file_path TEXT NOT NULL,
+            original_name TEXT NOT NULL DEFAULT '',
+            mark_scale REAL NOT NULL DEFAULT 1,
+            loose_count INTEGER NOT NULL DEFAULT 0,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES point_count_sessions(id) ON DELETE CASCADE
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS point_count_marks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            image_id INTEGER NOT NULL,
+            seq INTEGER NOT NULL,
+            x_ratio REAL NOT NULL,
+            y_ratio REAL NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (image_id) REFERENCES point_count_images(id) ON DELETE CASCADE
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_point_count_images_session ON point_count_images(session_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_point_count_marks_image ON point_count_marks(image_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_point_count_sessions_user ON point_count_sessions(user_id)')
 
     # ── 2026-08-02: 入库图片补齐 record-level 匹配能力 ──
     # 补齐之前遗漏的 source 列(InboundImage.create 已经写了 source,但建表未声明)

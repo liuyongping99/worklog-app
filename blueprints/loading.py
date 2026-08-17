@@ -8,7 +8,7 @@ import os
 import re
 import base64
 from datetime import date, timedelta, datetime
-from flask import Blueprint, render_template, request, jsonify, current_app, session
+from flask import Blueprint, render_template, request, jsonify, current_app, session, abort
 from models import (
     LoadingOrder, LoadingOrderRecord, LoadingOrderImage, ProductUnit, PieceConversion, get_db, AuditLog,
     OcrMatchEvent,
@@ -1051,3 +1051,99 @@ def api_v1_loading_orders_record_images_area(record_id):
     for it in items:
         it['scope'] = 'order' if it.get('record_pk') is None else 'record'
     return jsonify({'success': True, 'images': items, 'count': len(items)})
+
+
+# ── 移动端（参照 mobile_shipping 的 /m/shipping-today 布局）──────────────
+_BOARD_KEYWORDS = ("皮革", "木板")
+
+
+def _is_loading_board(product_name: str) -> bool:
+    """是否为皮革/木板类商品(无需拍照,按"块"计数)。"""
+    return any(k in (product_name or "") for k in _BOARD_KEYWORDS)
+
+
+def _latest_loading_status(images) -> "str | None":
+    """取最新一张图片的状态(get_by_record 已按 sort_order ASC, id ASC 排,末尾为最新)。无图返回 None。"""
+    if not images:
+        return None
+    last = images[-1]
+    return last.get("match_status") or "green"
+
+
+def _summarize_loading_group(group: dict) -> dict:
+    records = group.get("records", [])
+    total = len(records)
+    has_image = 0
+    stats = {"green": 0, "yellow": 0, "red": 0}
+    for r in records:
+        imgs = LoadingOrderImage.get_by_record(r["id"])
+        if imgs:
+            has_image += 1
+            # 取最新一张图的状态(与详情页一致:新拍覆盖旧拍)
+            st = _latest_loading_status(imgs)
+            if st in stats:
+                stats[st] += 1
+    return {**group, "total": total, "has_image": has_image, "stats": stats}
+
+
+@bp.route("/m/loading")
+def mobile_loading():
+    """移动端装柜今日列表(布局参照 /m/shipping-today)。"""
+    today = date.today().isoformat()
+    groups = LoadingOrderRecord.get_grouped(today, today)
+    groups = [_summarize_loading_group(g) for g in groups]
+    return render_template("mobile/loading-today.html", today=today, groups=groups)
+
+
+@bp.route("/m/loading/order/<int:oid>")
+def mobile_loading_order(oid: int):
+    """移动端装柜订单详情(拍照/识别/详情,布局参照 /m/shipping-today/order/<oid>)。"""
+    set_log_context(biz="mobile_loading", order_id=oid)
+    order = LoadingOrder.get_by_id(oid)
+    if not order:
+        abort(404)
+    records = LoadingOrderRecord.get_by_order(oid)
+    record_states = {}
+    for r in records:
+        imgs = LoadingOrderImage.get_by_record(r["id"])
+        st = _latest_loading_status(imgs) if imgs else None
+        record_states[r["id"]] = {
+            "status": st,
+            "images": imgs,
+            "is_board": _is_loading_board(r["product_name"]),
+            "color_note": None,
+        }
+    # 订单级共享图(record_pk IS NULL)
+    order_images = [i for i in LoadingOrderImage.get_by_order(oid) if i.get("record_pk") is None]
+    return render_template(
+        "mobile/loading-order.html",
+        order=order,
+        records=records,
+        record_states=record_states,
+        order_images=order_images,
+    )
+
+
+@bp.route("/api/v1/loading-orders/images/<int:image_id>/match-status", methods=["GET"])
+def api_v1_loading_orders_image_match_status(image_id):
+    """查询行级图匹配状态(移动端轮询用,与出货 /api/v1/shipping-orders/... 同语义)。
+
+    装柜图片识别为同步流程(上传后由前端触发 fuzzy-match / ai-judge 写库),
+    故本端点 processing 恒为 false,直接返回 DB 最新状态。
+    """
+    img = LoadingOrderImage.get_by_id(image_id)
+    if not img:
+        return jsonify({"success": False, "error": "图片不存在"}), 404
+    return jsonify({
+        "success": True,
+        "processing": False,
+        "image": {
+            "image_id": image_id,
+            "match_status": img.get("match_status") or None,
+            "match_score": img.get("match_score"),
+            "reason": img.get("reason") or "",
+            "match_source": img.get("match_source") or "local_fuzzy",
+            "bg_color": img.get("bg_color") or None,
+            "human_verified": bool(img.get("human_verified")),
+        },
+    })

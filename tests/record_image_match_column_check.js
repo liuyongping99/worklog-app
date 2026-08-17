@@ -168,6 +168,97 @@ if (!badgeFnSrc) {
         'Case 3: 兄弟行 td.match-col 应为空');
 }
 
+// ── Case 4: 页面刷新场景 — 服务端不渲染 match-col,DOM 里只有 img-item-record + match-badge ──
+//         调用 initAllMatchColumns() 应补建 th + td + 徽章
+{
+  const dom = new JSDOM(`<!DOCTYPE html><html><body>
+<table class="record-table">
+  <thead><tr><th>序号</th><th>重点</th><th>品名</th>
+         <th class="spec-cell">规格</th><th>数量</th></tr></thead>
+  <tbody>
+    <tr data-record-id="7">
+      <td>1</td><td></td>
+      <td class="product-name-cell">环保杂胶</td>
+      <td class="spec-cell">0.8黑中加面</td><td>50</td>
+    </tr>
+  </tbody>
+</table>
+<div class="img-item-record" data-record-pk="7" data-image-id="100">
+  <div class="img-meta-row-1">
+    <span class="match-badge match-badge-deepseek" data-match-status="green" data-match-source="deepseek" title="图文相符">⊛</span>
+  </div>
+</div>
+</body></html>`);
+  global.window = dom.window;
+  global.document = dom.window.document;
+  // 抽 initAllMatchColumns + initRowMatchColumn + refreshRowMatchBadge
+  const initAllFnSrc = extractFunc(tpl, 'initAllMatchColumns');
+  const initRowFnSrc = extractFunc(tpl, 'initRowMatchColumn');
+  const refreshFnSrc = extractFunc(tpl, 'refreshRowMatchBadge');
+  if (!initAllFnSrc) {
+    console.error('❌ 抽不出 initAllMatchColumns —— 未实现');
+    process.exit(1);
+  }
+  if (!initRowFnSrc) {
+    console.error('❌ 抽不出 initRowMatchColumn —— 未实现');
+    process.exit(1);
+  }
+  eval(badgeFnSrc + '\n' + ensureFnSrc + '\n' + setBadgeFnSrc + '\n' + refreshFnSrc + '\n' + initRowFnSrc + '\n' + initAllFnSrc);
+  initAllMatchColumns();
+
+  const table = dom.window.document.querySelector('table');
+  const ths = table.querySelectorAll('thead th.match-col');
+  const trs = table.querySelectorAll('tbody tr');
+  check(ths.length === 1, `Case 4: 表头 match-col 应自动补建 1 个,实际 ${ths.length}`);
+  check(ths[0] && ths[0].textContent === 'AI 比对', 'Case 4: match-col th 文本应为 "AI 比对"');
+  check(trs[0].querySelector('td.match-col'), 'Case 4: 目标行 td.match-col 应自动补建');
+  check(trs[0].querySelector('td.match-col').innerHTML.includes('green'),
+        'Case 4: 目标行 td.match-col 应已填入 green 徽章(从 img-item-record 读出)');
+}
+
+// ── Case 5: 行级徽章符号须与图下徽章来源一致(2026-08-15 一致性修复) ──
+//         deepseek → ⊛/◇/◆, local_fuzzy → ✓/⚠/✗;颜色也要一致
+{
+  const dom = new JSDOM(`<!DOCTYPE html><html><body>
+<table class="record-table">
+  <thead><tr><th>序号</th><th>重点</th><th>品名</th>
+         <th class="spec-cell">规格</th><th>数量</th></tr></thead>
+  <tbody>
+    <tr data-record-id="11">
+      <td>1</td><td></td>
+      <td class="product-name-cell">a</td><td class="spec-cell">x</td><td>1</td>
+    </tr>
+    <tr data-record-id="12">
+      <td>2</td><td></td>
+      <td class="product-name-cell">b</td><td class="spec-cell">y</td><td>2</td>
+    </tr>
+  </tbody>
+</table>
+</body></html>`);
+  global.window = dom.window;
+  global.document = dom.window.document;
+  eval(badgeFnSrc + '\n' + ensureFnSrc + '\n' + setBadgeFnSrc);
+  setRowMatchBadge(11, 'green', '', 'deepseek');
+  setRowMatchBadge(12, 'green', '', 'local_fuzzy');
+
+  const cellDeep = dom.window.document.querySelector('tr[data-record-id="11"] td.match-col');
+  const cellLocal = dom.window.document.querySelector('tr[data-record-id="12"] td.match-col');
+  const spanDeep = cellDeep.querySelector('span.match-badge');
+  const spanLocal = cellLocal.querySelector('span.match-badge');
+  const symDeep = cellDeep.textContent.trim();
+  const symLocal = cellLocal.textContent.trim();
+  check(symDeep === '⊛', `Case 5: deepseek 行级徽章应为 ⊛,实际 "${symDeep}"`);
+  check(symLocal === '✓', `Case 5: local_fuzzy 行级徽章应为 ✓,实际 "${symLocal}"`);
+  check(spanDeep && spanDeep.getAttribute('data-match-source') === 'deepseek',
+        'Case 5: deepseek 行级徽章应带 data-match-source="deepseek"');
+  check(spanLocal && spanLocal.getAttribute('data-match-source') === 'local_fuzzy',
+        'Case 5: local_fuzzy 行级徽章应带 data-match-source="local_fuzzy"');
+  check(spanDeep && spanDeep.style.color.replace(/\s/g, '').toLowerCase() === 'rgb(13,148,136)',
+        `Case 5: deepseek 行级徽章颜色应为 #0d9488(rgb 13,148,136),实际 "${spanDeep && spanDeep.style.color}"`);
+  check(spanLocal && spanLocal.style.color.replace(/\s/g, '').toLowerCase() === 'rgb(22,163,74)',
+        `Case 5: local_fuzzy 行级徽章颜色应为 #16a34a(rgb 22,163,74),实际 "${spanLocal && spanLocal.style.color}"`);
+}
+
 if (errors.length) {
   errors.forEach(e => console.error('❌ ' + e));
   process.exit(1);

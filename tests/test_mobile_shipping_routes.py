@@ -407,3 +407,27 @@ def test_overall_thumb_text_matches_buttons(client):
     assert "装车照\u3000未拍" in body
     assert "归仓照\u3000未拍" in body
     assert "整体照\u3000未拍" not in body  # 旧文案已无
+
+
+def test_overall_thumb_initial_state_from_db(client):
+    """回归：刷新页面时,缩略图占位应根据 DB source_tag 显示'已拍+时间'或'未拍'。"""
+    from datetime import date as _today_date
+    from models.orders import ShippingOrder, ShippingRecord, ShippingImage
+    today = _today_date.today().isoformat()
+    oid = ShippingOrder.create(today, "客户")
+    ShippingRecord.create(today, "客户", "商品", "规格", 1, "件", "", order_pk=oid)
+    # 已有"备货照"图 → 应显示"已拍 ✓"
+    ShippingImage.create(oid, r"upload\2026-08\备货照.jpg", "备货照.jpg", "upload", None, 1, "备货照")
+    # 没有"装车照" → 应显示"未拍"
+    resp = client.get(f"/m/shipping-today/order/{oid}")
+    body = resp.get_data(as_text=True)
+    import re
+    # 备货照 thumb 含 ✓
+    m = re.search(r'data-thumb-source="备货照"[^>]*>([^<]+)', body)
+    assert m and "✓" in m.group(1), f"备货照 thumb 未显示已拍: {m.group(1) if m else 'no match'}"
+    # 装车照 thumb 含"未拍"
+    m = re.search(r'data-thumb-source="装车照"[^>]*>([^<]+)', body)
+    assert m and "未拍" in m.group(1), f"装车照 thumb 应显示未拍: {m.group(1) if m else 'no match'}"
+    # 备货照 thumb 已加 filled class
+    assert body.count('data-thumb-source="备货照" class="overall-thumb filled"') == 1 or \
+           'class="overall-thumb filled"' in body

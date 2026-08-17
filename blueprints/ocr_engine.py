@@ -717,6 +717,9 @@ class PaddleOCREngine(BaseOCREngine):
                 lang='ch',
                 use_angle_cls=True,   # 自动纠正旋转/倒置图片
                 show_log=False,       # 抑制 PaddleOCR 调试输出
+                det_db_thresh=0.2,    # 默认 0.3
+                det_db_box_thresh=0.4,  # 默认 0.6 — 关键:调低才能框出小字厚度
+                use_dilation=True,    # 连通断裂笔画,利好细小数字
             )
         # 褶皱标签专用 OCR 实例:更激进的检测阈值(det_db_thresh=0.15 / det_db_box_thresh=0.30)
         # 默认实例的阈值适合清晰印刷体;褶皱标签经 CLAHE 增强后,文字边缘弱,
@@ -737,22 +740,23 @@ class PaddleOCREngine(BaseOCREngine):
                 self._wrinkle_ocr = self._ocr
 
     def _resize_if_needed(self, image_bytes):
-        """如果图片过大，等比缩放到长边 ≤ MAX_DIMENSION。"""
+        """解码为 RGB numpy 数组传给 PaddleOCR。
+
+        2026-08-09 修复:原先直接把原始 bytes 交给 PaddleOCR.ocr(),
+        实测小字「厚度：1.0mm」会被整块丢漏(字节解码路径的预处理对细字不友好)。
+        改成解码成 numpy RGB 数组后,同样的检测参数即可稳定框出厚度数字。
+        同时:超大图等比缩放到长边 ≤ MAX_DIMENSION(防内存爆炸)。
+        """
         try:
-            img = Image.open(io.BytesIO(image_bytes))
+            img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
             w, h = img.size
             longest = max(w, h)
-            if longest <= self.MAX_DIMENSION:
-                return image_bytes
-            ratio = self.MAX_DIMENSION / longest
-            new_size = (int(w * ratio), int(h * ratio))
-            img = img.resize(new_size, Image.LANCZOS)
-            buf = io.BytesIO()
-            fmt = img.format or 'JPEG'
-            img.save(buf, format=fmt)
-            return buf.getvalue()
+            if longest > self.MAX_DIMENSION:
+                ratio = self.MAX_DIMENSION / longest
+                img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
+            return np.array(img)
         except Exception:
-            # 缩放失败就直接用原图
+            # 解码失败就退回原始 bytes,PaddleOCR 自行解码(至多损失小字召回)
             return image_bytes
 
     def _enhance_wrinkle_label(self, image_np: np.ndarray) -> np.ndarray:
@@ -824,7 +828,13 @@ class PaddleOCREngine(BaseOCREngine):
                     text = item[1][0]
                     if text and text.strip():
                         lines.append(text.strip())
-            return '\n'.join(lines)
+            text = '\n'.join(lines)
+            # 2026-08-09 修复:小字「厚度：1.0mm」常被识别成「度：1.0mm」(缺"厚"),
+            # 这里补回"厚"字,让下游 AI 判别的厚度规则能稳定命中。
+            import re as _re
+            text = _re.sub(r'(?m)^\s*度\s*[:：]\s*(\d+\.?\d*)\s*mm?\s*$',
+                           r'厚度：\1mm', text)
+            return text
         except Exception as e:
             logger.exception('PaddleOCR extract_text failed: %s', e)
             return ''
@@ -917,24 +927,12 @@ class PaddleOCREngine(BaseOCREngine):
             }
 
 
-# ═══════════════════════════════════════════════════════════════════
-# 品类关键词兜底表（_classify_product 在用）
-# 格式: [(category_code, [keyword1, keyword2, ...]), ...]
-# 匹配规则：按列表顺序，第一个 product_name 中含有关键词的行即命中
-# 关键词去掉了 'A料'/'B料'（它们更可能是产品等级而非品类）、'LB'（可能不是独立品类）
-# ═══════════════════════════════════════════════════════════════════
-CLASS_FALLBACK_KEYWORDS = [
-    ('0201', ['杂胶']),
-    ('0301', ['纯胶']),
-    ('0401', ['回力胶', 'EVA']),
-    ('0204', ['无纺布']),
-    ('0701', ['鱼鳞布', 'HA']),
-    ('0208', ['潜水胶']),
-    ('0601', ['PE板', 'PE']),
-    ('0501', ['不织布']),
-    ('0205', ['路华里']),
-    ('0302', ['热熔胶']),
-]
+# 2026-08-09 改造:删掉本地硬编码的 CLASS_FALLBACK_KEYWORDS,
+# 改用 models.category_prompt._load_level3_keywords() 从 DB 派生。
+# 旧的分类关键字表是历史包袱,与 models 里的 FALLBACK_CATEGORY_KEYWORDS
+# 已发生 drift;统一为 DB 派生后,两路分类器自动跟随 product_categories 表。
+
+
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -1068,6 +1066,16 @@ class DeepSeekEngine(BaseOCREngine):
         '  - 规格里有"单面" + OCR 文字里有"加面" → 不匹配 ✗\n'
         '  - 规格里无加面/单面字样 + OCR 文字里有"加面"或"单面" → 视为多余信息，不判错\n'
         '\n'
+        '▌规则 5：手感 / 软硬度匹配（软、中、硬）\n'
+        '规格中常含手感词：软、中、硬。其中"中"是"中性"的简写，判定前一律先把"中"归一化为"中性"（中 ≡ 中性）。\n'
+        'OCR 文字里若出现"手感"、"软"、"中性"、"中"、"硬"等字样，按以下规则与规格比对：\n'
+        '  - 规格手感"软" + OCR 有"软" → 手感匹配 ✓\n'
+        '  - 规格手感"软" + OCR 有"中性"/"中" → 手感不一致（规格要软，标签是中性）→ 按 yellow 处理，需人工核对\n'
+        '  - 规格手感"中性"/"中" + OCR 有"中性"/"中" → 手感匹配 ✓\n'
+        '  - 规格手感"硬" + OCR 有"硬" → 手感匹配 ✓\n'
+        '  - 规格有手感词 + OCR 无任何手感词（连"手感"字样都没有）→ 手感缺失，按 yellow 处理\n'
+        '  - 规格无手感词 + OCR 有手感词 → 视为多余信息，不判错\n'
+        '\n'
         '════════════════════════════════════════\n'
         '【判定标准】\n'
         '════════════════════════════════════════\n'
@@ -1139,11 +1147,15 @@ class DeepSeekEngine(BaseOCREngine):
 
     @staticmethod
     def _classify_product(product_name):
-        """品名 → 品类代码（level 3 category_code）。
+        """品名 → 品类代码(level 3 category_code)。
 
-        1. 先查 product 表（product_name → category_id → 向上取 level=3 父节点）
-        2. 兜底：CLASS_FALLBACK_KEYWORDS 子串匹配
+        1. 先查 product 表(product_name → category_id → 向上取 level=3 父节点)
+        2. 兜底(2026-08-09 改造):models.category_prompt._load_level3_keywords()
+           从 product_categories.level=3 自动派生,共享 classify_record 的逻辑
         3. 都无匹配 → None
+
+        2026-08-09 之前用的 CLASS_FALLBACK_KEYWORDS 已删除,与
+        models.category_prompt.FALLBACK_CATEGORY_KEYWORDS 合并为单一 DB 派生来源。
         """
         if not product_name:
             return None
@@ -1174,14 +1186,11 @@ class DeepSeekEngine(BaseOCREngine):
                         conn.close()
                         return code
                     cat_id = parent
-            # ── 策略 2: 关键词兜底 ──
-            pn_lower = product_name.lower()
-            for code, keywords in CLASS_FALLBACK_KEYWORDS:
-                for kw in keywords:
-                    if kw.lower() in pn_lower:
-                        conn.close()
-                        return code
             conn.close()
+            # ── 策略 2: 复用 classify_record 的 DB 派生兜底 ──
+            from models.category_prompt import classify_record
+            cls = classify_record(product_name=product_name)
+            return cls['category_code'] if cls else None
         except Exception:
             pass
         return None
@@ -1226,10 +1235,12 @@ class DeepSeekEngine(BaseOCREngine):
                 conditions.append(f'sr.product_name IN ({placeholders})')
                 params.extend(known_names)
 
-            # (b) 关键词 LIKE(同品类的 fallback 关键词)
-            for code, keywords in CLASS_FALLBACK_KEYWORDS:
-                if code == category_code:
-                    for kw in keywords:
+            # (b) DB 派生关键词(2026-08-09):复用 classify_record 的兜底,
+            #     取该 category_code 对应品类名切出的 tokens
+            from models.category_prompt import _load_level3_keywords
+            for entry in _load_level3_keywords():
+                if entry['category_code'] == category_code:
+                    for kw in entry['tokens']:
                         conditions.append('sr.product_name LIKE ?')
                         params.append(f'%{kw}%')
 
@@ -1312,11 +1323,13 @@ class DeepSeekEngine(BaseOCREngine):
                 item['match_status'] = 'yellow'
         return results
 
-    def compare_single_record(self, ocr_text, record):
+    def compare_single_record(self, ocr_text, record, supplement_prompt: str = ''):
         """2026-07-30 新增:对单条 record 比对 OCR 文字,供行级图上传及 AI判别按钮调用。
 
         与 compare_rows 区别:prompt 只含 1 行(单 record),省 token、省时间。
         2026-07-31 改造:返回 prompt_text + raw_response 供前端「详情」按钮审计。
+        2026-08-09 改造:接受 supplement_prompt(由调用方从 CategoryPrompt.compose_for_record 取),
+                       非空时拼到 prompt 末尾「自适应提示词」段(与 compare_rows 一致)。
 
         返回 {'match_status', 'match_score', 'reason', 'prompt_text', 'raw_response'}
 
@@ -1326,8 +1339,15 @@ class DeepSeekEngine(BaseOCREngine):
             {'record_id': record.get('id', 0), 'product_name': record.get('product_name', ''),
              'specification': record.get('specification', '')},
             ensure_ascii=False)
-        prompt_text = (self.COMPARE_PROMPT + '\n【OCR文字】\n' + ocr_text +
+        base_prompt = (self.COMPARE_PROMPT + '\n【OCR文字】\n' + ocr_text +
                        '\n【明细行】\n' + row_json)
+        if supplement_prompt:
+            prompt_text = (base_prompt +
+                           '\n\n════════════════════════════════════════\n'
+                           '【自适应提示词(同品类 / 同规格历史人工案例)】\n'
+                           '════════════════════════════════════════\n' + supplement_prompt)
+        else:
+            prompt_text = base_prompt
         raw = ''
         try:
             result = self._call_api_with_prompt(prompt_text, multi=False)

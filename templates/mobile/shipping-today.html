@@ -7,7 +7,13 @@
 {% block content %}
 <div class="mobile-today">
   <header class="app-head">
-    <h2>今日出货</h2>
+    <div class="head-row">
+      <h2>今日出货</h2>
+      <div class="head-actions">
+        <span class="header-stat">{{ groups|length }} 单</span>
+        <a class="refresh-btn" href="{{ url_for('mobile_shipping.shipping_today') }}" title="整体刷新">↻</a>
+      </div>
+    </div>
     <p class="subtitle">{{ today }}</p>
   </header>
   {% if not groups %}
@@ -26,7 +32,7 @@
         </div>
         <div class="line"><i style="width: {{ (g.has_image * 100 // g.total) if g.total else 0 }}%"></i></div>
         <div class="metrics">
-          <span><b>{{ g.total }}</b> 项商品</span>
+          <span><b>{{ g.total }}</b> 项商品{% if g.board_total %} + 板 {{ g.board_total }} 块{% endif %}</span>
           <span>✓ {{ g.stats.green }}　⚠ {{ g.stats.yellow }}　✕ {{ g.stats.red }}</span>
         </div>
         <button class="enter">进入商品详情 ›</button>

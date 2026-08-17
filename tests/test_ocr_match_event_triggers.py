@@ -113,6 +113,9 @@ class RecordOcrTriggerTests(_Base):
         """multipart 行级上传成功后,写一条 record_ocr 事件(image_id+ocr_engine=local_fuzzy)。"""
         fake_paddle = mock.MagicMock()
         fake_paddle.extract_text.return_value = '硬加面 黑色 1.5M'
+        # 2026-08-10 Task 6:_process_record_image_async 现在调用 extract_text_with_conf
+        # 而不是 extract_text,必须同步 mock 这个新接口,否则 MagicMock 返回不可解包的 MagicMock。
+        fake_paddle.extract_text_with_conf.return_value = ('硬加面 黑色 1.5M', 0.95)
         mock_factory.side_effect = lambda name: fake_paddle if name == 'paddleocr' else mock.DEFAULT
 
         from models import OcrMatchEvent, ShippingImage
@@ -163,6 +166,8 @@ class RecordOcrTriggerTests(_Base):
         """
         fake_paddle = mock.MagicMock()
         fake_paddle.extract_text.return_value = ''
+        # 2026-08-10 Task 6:同样要 mock extract_text_with_conf
+        fake_paddle.extract_text_with_conf.return_value = ('', 1.0)
         mock_factory.side_effect = lambda name: fake_paddle if name == 'paddleocr' else mock.DEFAULT
 
         import base64

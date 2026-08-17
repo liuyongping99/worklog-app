@@ -232,6 +232,8 @@ class RecordUploadTests(P1Base):
         # NP0-1 之后走 get_ocr_engine('paddleocr') 单例;按引擎名分派 fake
         fake_paddle = mock.MagicMock()
         fake_paddle.extract_text.return_value = '硬加面 黑色'
+        # 2026-08-10 Task 6:同步 mock extract_text_with_conf,避免 MagicMock 不可解包
+        fake_paddle.extract_text_with_conf.return_value = ('硬加面 黑色', 0.95)
         mock_factory.side_effect = lambda name: fake_paddle if name == 'paddleocr' else mock.DEFAULT
 
         data = {'image': (io.BytesIO(_PNG()), 'label.png')}

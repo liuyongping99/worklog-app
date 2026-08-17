@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 """移动端当天出货页面：列表 + 订单详情，仅拍照/人工确认。"""
+import re
 from datetime import date as _date
 
 from flask import Blueprint, render_template
 
-from models.orders import ShippingOrder, ShippingRecord, ShippingImage, OcrMatchEvent
+from models.orders import ShippingOrder, ShippingRecord, ShippingImage, PlacementImage, OcrMatchEvent
 from blueprints.ocr_log import set_log_context
 
 bp = Blueprint("mobile_shipping", __name__)
@@ -39,11 +40,16 @@ def _color_note(image: dict) -> str | None:
 
 
 def _latest_status(images) -> "str | None":
-    """取最新一张图片的状态(get_by_record 已按 sort_order ASC, id ASC 排,末尾为最新)。无图返回 None。"""
-    if not images:
+    """取最新一张 OCR/AI 比对图的状态(排除 placement 摆放图;新拍覆盖旧拍)。
+    黄/红 + 已人工确认(human_verified=1) → 视为 green(人工覆盖)。无图返回 None。"""
+    ocr = [i for i in images if i.get("source") != "placement"]
+    if not ocr:
         return None
-    last = images[-1]
-    return last.get("match_status") or "green"
+    last = ocr[-1]
+    st = last.get("match_status") or "green"
+    if last.get("human_verified") and st in ("yellow", "red"):
+        return "green"
+    return st
 
 
 def _status_badge(status) -> "tuple[str, str]":
@@ -55,6 +61,34 @@ def _status_badge(status) -> "tuple[str, str]":
     if status == "red":
         return ("warn", "✕ 不符")
     return ("todo", "待拍")
+
+
+def _placement_compare(rec: dict) -> dict:
+    """摆放图清点结果:支合计/散码合计 与 备注 分开比较,供移动端订单页点数按钮下方展示。"""
+    pimgs = PlacementImage.get_by_record(rec["id"])
+    zhi_actual = sum(p.get("n_marks", 0) for p in pimgs)
+    loose_actual = sum(p.get("loose_count", 0) for p in pimgs)
+    remark = rec.get("remark") or ""
+    zhi_m = list(re.finditer(r"(\d+)\s*支", remark))
+    expected_zhi = sum(int(x.group(1)) for x in zhi_m)
+    has_zhi = len(zhi_m) > 0
+    san_m = list(re.finditer(r"(\d+)\s*[yY]", remark))
+    expected_san = sum(int(x.group(1)) for x in san_m)
+    has_san = len(san_m) > 0
+    zhi_match = (not has_zhi) or zhi_actual == expected_zhi
+    san_match = (not has_san) or loose_actual == expected_san
+    return {
+        "has_placement": len(pimgs) > 0,
+        "zhi_actual": zhi_actual,
+        "zhi_expected": expected_zhi,
+        "has_zhi": has_zhi,
+        "zhi_match": zhi_match,
+        "loose_actual": loose_actual,
+        "loose_expected": expected_san,
+        "has_san": has_san,
+        "san_match": san_match,
+        "all_match": zhi_match and san_match,
+    }
 
 
 def _summarize_group(group: dict) -> dict:
@@ -69,18 +103,17 @@ def _summarize_group(group: dict) -> dict:
         images = ShippingImage.get_by_record(r["id"])
         if images:
             has_image += 1
-            # 取最差档（红 > 黄 > 绿）
-            worst = "green"
-            for img in images:
-                st = img.get("match_status") or "green"
-                if st == "red":
-                    worst = "red"
-                    break
-                if st == "yellow" and worst == "green":
-                    worst = "yellow"
-            if worst in stats:
-                stats[worst] += 1
+            # 取最新一张图的状态(与详情页 _latest_status 一致:新拍覆盖旧拍)
+            st = _latest_status(images)
+            if st in stats:
+                stats[st] += 1
     return {**group, "total": total, "board_total": board_total, "has_image": has_image, "stats": stats}
+
+
+@bp.route("/m/")
+def mobile_index():
+    """移动端入口页:聚合今日出货 / 今日入库两个入口。"""
+    return render_template("mobile/index.html")
 
 
 @bp.route("/m/shipping-today")
@@ -115,16 +148,58 @@ def shipping_order_detail(oid: int):
     record_states = {}
     for rec in records:
         imgs = record_images[rec["id"]]
+        ocr_imgs = [i for i in imgs if i.get("source") != "placement"]
+        last_ocr = ocr_imgs[-1] if ocr_imgs else None
+        base = (last_ocr.get("match_status") or "green") if last_ocr else None
+        human_confirmed = bool(
+            last_ocr and last_ocr.get("human_verified") and base in ("yellow", "red")
+        )
         record_states[rec["id"]] = {
             "images": imgs,
+            "ocr_images": ocr_imgs,
             "status": _latest_status(imgs),
-            "color_note": _color_note(imgs[-1]) if imgs else None,
+            "human_confirmed": human_confirmed,
+            "color_note": _color_note(last_ocr) if last_ocr else None,
             "is_board": _is_board(rec["product_name"]),
+            "placement": _placement_compare(rec),
         }
+    # 整体图缩略图初始状态(按 source_tag):None=未拍,否则显示时间
+    from datetime import datetime as _dt
+    thumb_states = {}
+    for tag in ("备货照", "装车照", "归仓照"):
+        match = [img for img in order_images if img.get("source_tag") == tag]
+        if match:
+            last = match[-1]
+            try:
+                t = _dt.strptime(last["created_at"], "%Y-%m-%d %H:%M:%S")
+                ts = f"{t.hour:02d}:{t.minute:02d}"
+            except Exception:
+                ts = ""
+            thumb_states[tag] = {"taken": True, "time_text": ts}
+        else:
+            thumb_states[tag] = {"taken": False, "time_text": ""}
     return render_template(
         "mobile/shipping-order.html",
         order=order,
         records=records,
         record_states=record_states,
         order_images=order_images,
+        thumb_states=thumb_states,
+    )
+
+
+@bp.route("/m/shipping-today/order/<int:oid>/placement/<int:record_id>")
+def shipping_placement_count(oid: int, record_id: int):
+    """移动端点数页:复用 PC 摆放图后端机制,手机拍照 + 手指点击计数。"""
+    set_log_context(biz="mobile_shipping", order_id=oid, record_id=record_id)
+    order = ShippingOrder.get_by_id(oid)
+    rec = ShippingRecord.get_by_id(record_id)
+    if order is None or rec is None or rec.get("order_pk") != oid:
+        from flask import abort
+        abort(404)
+    return render_template(
+        "mobile/placement-count.html",
+        order=order,
+        rec=rec,
+        oid=oid,
     )

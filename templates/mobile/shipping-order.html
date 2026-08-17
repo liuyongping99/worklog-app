@@ -26,9 +26,15 @@
     <input type="file" accept="image/*" data-role="overall-input" hidden>
     <div class="upload-progress" data-role="overall-progress" hidden></div>
     <div class="overall-thumbs">
-      <div class="overall-thumb" data-thumb-source="备货照">备货照　未拍</div>
-      <div class="overall-thumb" data-thumb-source="装车照">装车照　未拍</div>
-      <div class="overall-thumb" data-thumb-source="归仓照">归仓照　未拍</div>
+      <div class="overall-thumb {% if thumb_states['备货照']['taken'] %}filled{% endif %}" data-thumb-source="备货照">
+        备货照　{% if thumb_states['备货照']['taken'] %}✓ {{ thumb_states['备货照']['time_text'] }}{% else %}未拍{% endif %}
+      </div>
+      <div class="overall-thumb {% if thumb_states['装车照']['taken'] %}filled{% endif %}" data-thumb-source="装车照">
+        装车照　{% if thumb_states['装车照']['taken'] %}✓ {{ thumb_states['装车照']['time_text'] }}{% else %}未拍{% endif %}
+      </div>
+      <div class="overall-thumb {% if thumb_states['归仓照']['taken'] %}filled{% endif %}" data-thumb-source="归仓照">
+        归仓照　{% if thumb_states['归仓照']['taken'] %}✓ {{ thumb_states['归仓照']['time_text'] }}{% else %}未拍{% endif %}
+      </div>
     </div>
   </section>
 
@@ -40,10 +46,15 @@
       {% set status_text = '皮革/木板类，无需拍照' %}
       {% set confirm_hidden = True %}
     {% else %}
-      {% set badge_cls, badge_text = ('done', '✓ 通过') if state.status == 'green' else ('warn', '⚠ 待确认') if state.status == 'yellow' else ('warn', '✕ 不符') if state.status == 'red' else ('todo', '待拍') %}
+      {% set badge_cls, badge_text = ('done', '✓ 已确认') if state.human_confirmed else ('done', '✓ 通过') if state.status == 'green' else ('warn', '⚠ 待确认') if state.status == 'yellow' else ('warn', '✕ 不符') if state.status == 'red' else ('todo', '待拍') %}
       {% if state.status == 'green' %}
-        {% set status_cls = '' %}
-        {% set status_text = '最近一次识别：标签与规格一致' %}
+        {% if state.human_confirmed %}
+          {% set status_cls = '' %}
+          {% set status_text = '已人工确认通过' %}
+        {% else %}
+          {% set status_cls = '' %}
+          {% set status_text = '最近一次识别：标签与规格一致' %}
+        {% endif %}
       {% elif state.status == 'yellow' %}
         {% set status_cls = 'warn' %}
         {% set status_text = 'AI 判定与标签不一致' %}
@@ -72,8 +83,18 @@
       <input type="file" accept="image/*" capture="environment" data-role="record-input" hidden>
       {% endif %}
       <div class="status-line {{ status_cls }}" data-role="status" data-initial-status="{{ state.status or '' }}">
-        {{ status_text }}{% if state.color_note %} <span class="color-note" data-role="color-note">· 标签背景:{{ state.color_note }}</span>{% endif %}
+        {{ status_text }}{% if state.color_note %} <span class="color-note" data-role="color-note">· 标签背景:{{ state.color_note }}</span>{% endif %}{% if not state.is_board and state.status in ('green','yellow','red') and state.ocr_images %} <a href="#" data-role="detail" data-image-id="{{ state.ocr_images[-1]['id'] }}">详情</a>{% endif %}
       </div>
+      {% if not state.is_board %}
+      <a class="point-entry" href="{{ url_for('mobile_shipping.shipping_placement_count', oid=order['id'], record_id=rec['id']) }}">🔢 点数</a>
+      {% set pc = state.placement %}
+      {% if pc and pc.has_placement %}
+      <div class="place-result {{ 'ok' if pc.all_match else 'bad' }}">
+        <span class="pr-row">支数：<b>{{ pc.zhi_actual }}</b>{% if pc.has_zhi %} / 备注 {{ pc.zhi_expected }}{% if pc.zhi_match %} ✓{% else %} ✗{% endif %}{% endif %}</span>
+        <span class="pr-row">散码：<b>{{ pc.loose_actual }}</b> y{% if pc.has_san %} / 备注 {{ pc.loose_expected }}{% if pc.san_match %} ✓{% else %} ✗{% endif %}{% endif %}</span>
+      </div>
+      {% endif %}
+      {% endif %}
       <div class="upload-progress" data-role="upload-progress" hidden></div>
       <button class="confirm" data-action="confirm" {% if confirm_hidden %}hidden{% endif %}>✓ 人工确认通过</button>
     </div>
@@ -92,6 +113,32 @@
     </div>
   </section>
   {% endif %}
+</div>
+
+<div class="photo-preview-mask" id="photoPreviewMask" hidden>
+  <div class="photo-preview-box">
+    <div class="photo-preview-title">确认照片</div>
+    <div class="photo-preview-stage">
+      <canvas id="photoPreviewCanvas"></canvas>
+    </div>
+    <div class="photo-preview-hint" id="photoPreviewHint">可旋转调整方向，确认后再上传</div>
+    <div class="photo-preview-actions">
+      <button type="button" id="photoRotateLeft">↺ 左转</button>
+      <button type="button" id="photoRotateRight">↻ 右转</button>
+      <button type="button" class="photo-retake" id="photoRetake">重拍</button>
+      <button type="button" class="photo-confirm" id="photoConfirm">✓ 上传</button>
+    </div>
+  </div>
+</div>
+
+<div class="ocr-detail-mask" id="ocrDetailMask" hidden>
+  <div class="ocr-detail-box">
+    <div class="ocr-detail-title" id="ocrDetailTitle">识别详情</div>
+    <div class="ocr-detail-body" id="ocrDetailBody"></div>
+    <div class="ocr-detail-actions">
+      <button type="button" class="ocr-detail-close" id="ocrDetailClose">关闭</button>
+    </div>
+  </div>
 </div>
 
 <script src="{{ url_for('static', filename='js/mobile_blur.js') }}"></script>

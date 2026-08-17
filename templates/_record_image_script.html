@@ -12,15 +12,28 @@
 // ============================================================
 
 // 1. badgeHtml — 生成 AI 比对状态徽章 HTML
-function badgeHtml(status, reason) {
+// 2026-08-15: 改为按来源(source)分两套符号/颜色，与图片下方徽章保持一致：
+//    本地 RapidFuzz: ✓/⚠/✗ + 浅色调   |   云端 DeepSeek: ⊛/◇/◆ + 深色调
+function badgeHtml(status, reason, source) {
     // reason: AI 给出的判定依据(中文),可空；空时只显示状态标签
     // 2026-07-30 修复：徽章加 data-match-status 属性，与服务端模板首次渲染保持一致，
     // 避免 refreshRowMatchBadge 重建徽章后丢失属性（影响 .match-badge[data-match-status] 选择器）。
     reason = reason || '';
+    source = source || 'local_fuzzy';
     var suffix = reason ? ' — ' + reason : '';
-    if (status === 'green')  return '<span class="match-badge" data-match-status="green" title="图文相符' + suffix + '" style="color:#16a34a;">✓</span>';
-    if (status === 'yellow') return '<span class="match-badge" data-match-status="yellow" title="存疑，请人工核对' + suffix + '" style="color:#d97706;">⚠</span>';
-    if (status === 'red')    return '<span class="match-badge" data-match-status="red" title="可能不符' + suffix + '" style="color:#dc2626;">✗</span>';
+    var sym, colorMap;
+    if (source === 'deepseek') {
+        sym = {green: '⊛', yellow: '◇', red: '◆'};
+        colorMap = {green: '#0d9488', yellow: '#b45309', red: '#b91c1c'};
+    } else {
+        sym = {green: '✓', yellow: '⚠', red: '✗'};
+        colorMap = {green: '#16a34a', yellow: '#d97706', red: '#dc2626'};
+    }
+    var cls = 'match-badge match-badge-' + source;
+    var baseStyle = 'font-size:1.05rem;font-weight:700;cursor:help;';
+    if (status === 'green')  return '<span class="' + cls + '" data-match-status="green" data-match-source="' + source + '" title="图文相符' + suffix + '" style="color:' + colorMap.green + ';' + baseStyle + '">' + sym.green + '</span>';
+    if (status === 'yellow') return '<span class="' + cls + '" data-match-status="yellow" data-match-source="' + source + '" title="存疑，请人工核对' + suffix + '" style="color:' + colorMap.yellow + ';' + baseStyle + '">' + sym.yellow + '</span>';
+    if (status === 'red')    return '<span class="' + cls + '" data-match-status="red" data-match-source="' + source + '" title="可能不符' + suffix + '" style="color:' + colorMap.red + ';' + baseStyle + '">' + sym.red + '</span>';
     return '';
 }
 
@@ -85,6 +98,34 @@ function _ensureMatchColumn(table, targetRow, badgeHtml) {
         emptyTd.style.textAlign = 'center';
         var ref = tr.querySelector('td.spec-cell');
         insertAfter(tr, ref, emptyTd);
+    });
+}
+
+// 2.6 initRowMatchColumn — 页面刷新场景:服务端不渲染 match-col,
+// 但 DB 里已有 match_status → 页面加载时由 JS 主动补建列并填徽章。
+// 与 refreshRowMatchBadge 的区别:refresh =「更新」(假定 td 已存在);
+//                            init   =「创建」(先 _ensureMatchColumn 插列,再 refresh 填徽章)。
+function initRowMatchColumn(recordPk) {
+    var imgs = document.querySelectorAll('.img-item-record[data-record-pk="' + recordPk + '"]');
+    if (!imgs.length) return false;  // 没图就没徽章,不创建列
+    var tr = document.querySelector('.record-table tr[data-record-id="' + recordPk + '"]');
+    if (!tr) return false;
+    var table = tr.closest('table');
+    // 关键:先 _ensureMatchColumn(table, tr, '') 占位插列(确保兄弟行也对齐),
+    //      再 refreshRowMatchBadge(recordPk) 填徽章 —— refresh 假设 td 已存在。
+    _ensureMatchColumn(table, tr, '');
+    refreshRowMatchBadge(recordPk);
+    return true;
+}
+
+// 2.7 initAllMatchColumns — 页面加载时一次性扫所有 img-item-record,对每个有图的 record 调用 initRowMatchColumn
+function initAllMatchColumns() {
+    var pks = new Set();
+    document.querySelectorAll('.img-item-record[data-record-pk]').forEach(function (img) {
+        pks.add(img.getAttribute('data-record-pk'));
+    });
+    pks.forEach(function (pk) {
+        initRowMatchColumn(pk);
     });
 }
 
@@ -283,9 +324,114 @@ function updateImageBadge(imgId, status, score, reason, source) {
         // 插入到 row-1 的最前面
         metaRow1.insertBefore(span, metaRow1.firstChild);
     }
-    // 同时刷新该记录行的徽章
+    // 同时刷新该记录行的徽章(带 source,保证行级图标与图下徽章一致)
     var recordPk = imgItem.getAttribute('data-record-pk');
-    if (recordPk) setRowMatchBadge(recordPk, status);
+    if (recordPk) setRowMatchBadge(recordPk, status, null, source);
+    return true;
+}
+
+// 8.1 refreshImageMatchUI — 局部刷新某张图片的「图下判别图标 + 行级图标 + 按钮可见性」
+// 与 updateImageBadge 的区别: 额外按新 status 重建「✓ 确认通过 / 👤 已确认 / 💡 提示词优化」按钮，
+// 并把行级徽章改为聚合刷新(尊重人工确认 👤)。供 AI判别 / 模糊匹配 两个手动按钮复用。
+// opts: { bgColor: 'black'|'white'|undefined, humanVerified: bool|undefined }
+function refreshImageMatchUI(imgId, status, score, reason, source, opts) {
+    opts = opts || {};
+    var item = document.querySelector('.img-item-record[data-image-id="' + imgId + '"]');
+    if (!item) return false;
+    var row1 = item.querySelector('.img-meta-row-1');
+    if (!row1) return false;
+    var recordPk = item.getAttribute('data-record-pk');
+
+    // 人工确认状态:优先用传入值,否则看 DOM 是否已有「👤 已确认」(manual-undo-btn)
+    var humanVerified = (typeof opts.humanVerified === 'boolean')
+        ? opts.humanVerified
+        : !!item.querySelector('.manual-undo-btn');
+
+    // 1) 清掉旧徽章 / 确认 / 撤销 / 提示词按钮(保留 bg-color-tag,避免 AI 判别时黑/白底标签被误删)
+    row1.querySelectorAll('.match-badge, .manual-confirm-btn, .manual-undo-btn, .gen-prompt-btn').forEach(function(el) { el.remove(); });
+
+    // 2) 判别图标(图下,图标 #1)
+    var badge = document.createElement('span');
+    if (humanVerified && (status === 'yellow' || status === 'red')) {
+        // 人工已确认覆盖:仍显示 👤(绿),不让 AI 结果回退掉人工裁决
+        badge.className = 'match-badge match-badge-' + source + ' match-badge-overridden';
+        badge.setAttribute('data-match-status', 'green');
+        badge.setAttribute('data-match-source', source);
+        badge.setAttribute('data-overridden-by-human', '1');
+        badge.title = '人工确认通过(覆盖原始 ' + status + ')';
+        badge.style.cssText = 'color:#10b981;font-size:1.05rem;font-weight:700;cursor:help;';
+        badge.textContent = '👤';
+    } else if (status) {
+        var srcLabel = source === 'deepseek' ? '云端 DeepSeek' : '本地 RapidFuzz';
+        var sym = source === 'deepseek'
+            ? {green: '⊛', yellow: '◇', red: '◆'}
+            : {green: '✓', yellow: '⚠', red: '✗'};
+        var colorMap = source === 'deepseek'
+            ? {green: '#0d9488', yellow: '#b45309', red: '#b91c1c'}
+            : {green: '#16a34a', yellow: '#d97706', red: '#dc2626'};
+        badge.className = 'match-badge match-badge-' + source;
+        badge.setAttribute('data-match-status', status);
+        badge.setAttribute('data-match-source', source);
+        badge.title = (status === 'green' ? '图文相符' : status === 'yellow' ? '存疑' : '可能不符')
+            + '（' + srcLabel + '）' + (reason ? ' — ' + reason : '');
+        badge.style.cssText = 'color:' + colorMap[status] + ';font-size:1.05rem;font-weight:700;cursor:help;';
+        badge.textContent = sym[status];
+    }
+    row1.appendChild(badge);
+
+    // 3) 背景色标签:传入则刷新,否则保留现有(不动)
+    if (opts.bgColor) {
+        var oldTag = row1.querySelector('.bg-color-tag');
+        if (oldTag) oldTag.remove();
+        var tag = document.createElement('span');
+        tag.className = 'bg-color-tag';
+        tag.title = '自动识别背景色';
+        if (opts.bgColor === 'black') {
+            tag.style.cssText = 'padding:1px 6px;font-size:0.65rem;border-radius:3px;background:#2d3436;color:#fff;';
+            tag.textContent = '⬛ 黑底';
+        } else {
+            tag.style.cssText = 'padding:1px 6px;font-size:0.65rem;border-radius:3px;background:#f1f3f5;color:#2d3436;border:1px solid #ced4da;';
+            tag.textContent = '⬜ 白底';
+        }
+        row1.appendChild(tag);
+    }
+
+    // 4) 按钮可见性:黄/红 牌才需要「确认 / 已确认」
+    if (status === 'yellow' || status === 'red') {
+        if (humanVerified) {
+            var undo = document.createElement('button');
+            undo.type = 'button';
+            undo.className = 'manual-undo-btn lock-hide';
+            undo.setAttribute('data-verified-marker', imgId);
+            undo.setAttribute('data-undo-btn', imgId);
+            undo.title = '人工已确认(覆盖 ' + status + ');点击撤销';
+            undo.style.cssText = 'padding:2px 8px;font-size:0.7rem;background:#10b981;color:#fff;border:none;border-radius:4px;cursor:pointer;';
+            undo.textContent = '👤 已确认';
+            row1.appendChild(undo);
+            var gp = document.createElement('button');
+            gp.type = 'button';
+            gp.className = 'gen-prompt-btn lock-hide';
+            gp.style.cssText = 'margin-left:.35rem;padding:.1rem .5rem;font-size:.75rem;background:#7c3aed;color:#fff;border:none;border-radius:4px;cursor:pointer;';
+            gp.setAttribute('data-gen-prompt', imgId);
+            gp.textContent = '💡 提示词优化';
+            row1.appendChild(gp);
+        } else {
+            var conf = document.createElement('button');
+            conf.type = 'button';
+            conf.className = 'manual-confirm-btn lock-hide';
+            conf.setAttribute('data-image-id', imgId);
+            conf.setAttribute('data-confirm-btn', imgId);
+            conf.textContent = '✓ 确认通过';
+            row1.appendChild(conf);
+        }
+    }
+
+    // 5) 重新绑定新按钮
+    bindManualConfirmButtons();
+    if (typeof bindGenPromptButtons === 'function') bindGenPromptButtons();
+
+    // 6) 行级徽章(图标 #2):聚合该 record 所有图 + 尊重人工确认 👤
+    if (recordPk) refreshRowMatchBadge(recordPk);
     return true;
 }
 
@@ -456,6 +602,7 @@ function appendOrderImageArea(orderPk, images, recordInfo) {
             '<div class="img-meta">' +
                 '<div class="img-meta-row img-meta-row-1">' + badgeHtml + btnHtml + bgColorTag + '</div>' +
                 '<div class="img-meta-row img-meta-row-2">' +
+                    '<button type="button" class="re-ocr-btn lock-hide" data-re-ocr="' + escAttr(img.image_id) + '" title="用 PaddleOCR 重新识别该图文字,并重写 OCR 记录 + 重新模糊匹配" style="padding:.1rem .5rem;font-size:.7rem;background:#00b894;color:#fff;border:none;border-radius:4px;cursor:pointer;">OCR</button>' +
                     '<button type="button" class="fuzzy-match-btn lock-hide" data-fuzzy-match="' + escAttr(img.image_id) + '" title="用 RapidFuzz 对该图 OCR 文字与商品名/规格做本地模糊匹配" style="padding:.1rem .5rem;font-size:.7rem;background:#74b9ff;color:#fff;border:none;border-radius:4px;cursor:pointer;">模糊匹配</button>' +
                     '<button type="button" class="ai-judge-btn lock-hide" data-ai-judge="' + escAttr(img.image_id) + '" title="将 OCR 文字发给 DeepSeek 大模型进行 AI 判别" style="padding:.1rem .5rem;font-size:.7rem;background:#a29bfe;color:#fff;border:none;border-radius:4px;cursor:pointer;">AI判别</button>' +
                     '<button type="button" class="ocr-detail-btn lock-hide" data-ocr-detail="' + escAttr(img.image_id) + '" title="查看 OCR 原文 / 提示词 / 推理结果" style="padding:.1rem .5rem;font-size:.7rem;background:#dfe6e9;color:#2d3436;border:1px solid #b2bec3;border-radius:4px;cursor:pointer;">详情</button>' +
@@ -471,8 +618,9 @@ function appendOrderImageArea(orderPk, images, recordInfo) {
     bindManualConfirmButtons();
     bindFuzzyMatchButtons();
     bindAiJudgeButtons();
+    bindReOcrButtons();
     if (typeof bindOcrDetailButtons === 'function') bindOcrDetailButtons();
-    // 复用后立刻给新出现的人工确认按钮挂上"💡 生成提示词"按钮
+    // 复用后立刻给新出现的人工确认按钮挂上"💡 提示词优化"按钮
     (function(){
         document.querySelectorAll('.img-item-record .manual-undo-btn:not([data-gp-bound])').forEach(function(undoBtn){
             undoBtn.setAttribute('data-gp-bound', '1');
@@ -483,7 +631,7 @@ function appendOrderImageArea(orderPk, images, recordInfo) {
             btn.type='button'; btn.className='gen-prompt-btn lock-hide';
             btn.style.cssText='margin-left:.35rem;padding:.1rem .5rem;font-size:.75rem;background:#7c3aed;color:#fff;border:none;border-radius:4px;cursor:pointer;';
             btn.setAttribute('data-gen-prompt', imgId);
-            btn.textContent='💡 生成提示词';
+            btn.textContent='💡 提示词优化';
             undoBtn.parentNode.appendChild(btn);
         });
         bindGenPromptButtons();
@@ -513,15 +661,17 @@ window.recordImageUploaded = function(data, recordPk, orderPk) {
     // (一次上传可能多张，score 高的覆盖，这里只取最近一次结果——单次上传上限 1 张 OR 取最优)
     var bestStatus = '';
     var bestScore = -1;
+    var bestSource = 'local_fuzzy';
     data.images.forEach(function(img) {
         var s = img.match_status || '';
         var sc = (typeof img.match_score === 'number') ? img.match_score : -1;
         if (s && (sc > bestScore || (sc === bestScore && s === 'green'))) {
             bestStatus = s;
             bestScore = sc;
+            bestSource = img.match_source || 'local_fuzzy';
         }
     });
-    if (bestStatus) setRowMatchBadge(recordPk, bestStatus);
+    if (bestStatus) setRowMatchBadge(recordPk, bestStatus, null, bestSource);
     // 异步处理中的图片:启动轮询,完成后局部刷新徽章/背景色/行徽章
     // (出货页走异步:上传即返回 processing:true;装柜/入库仍同步返回,无 processing 标记则不轮询)
     data.images.forEach(function(img) {
@@ -592,7 +742,7 @@ function bindManualConfirmButtons() {
     });
 }
 
-// 13. _replaceConfirmBtnWithMarker — 确认后把按钮替换为 marker（同时加 💡 生成提示词 按钮）
+// 13. _replaceConfirmBtnWithMarker — 确认后把按钮替换为 marker（同时加 💡 提示词优化 按钮）
 function _replaceConfirmBtnWithMarker(btn, imgId) {
     var metaRow1 = btn.closest('.img-meta-row-1');
     if (!metaRow1) {
@@ -628,7 +778,7 @@ function _replaceConfirmBtnWithMarker(btn, imgId) {
     genBtn.type='button'; genBtn.className='gen-prompt-btn lock-hide';
     genBtn.style.cssText = 'margin-left:.35rem;padding:.1rem .5rem;font-size:.75rem;background:#7c3aed;color:#fff;border:none;border-radius:4px;cursor:pointer;';
     genBtn.setAttribute('data-gen-prompt', imgId);
-    genBtn.textContent = '\u{1F4A1} 生成提示词';
+    genBtn.textContent = '\u{1F4A1} 提示词优化';
     metaRow1.appendChild(genBtn);
     if (typeof bindGenPromptButtons === 'function') bindGenPromptButtons();
     var imgItem = metaRow1.closest('.img-item-record');
@@ -736,7 +886,7 @@ function _renderBadgeFromImage(badge, img) {
     }
 }
 
-// 18. bindGenPromptButtons — 「💡 生成提示词」按钮绑定
+// 18. bindGenPromptButtons — 「💡 提示词优化」按钮绑定
 // 调后端 /generate-prompt-suggestion 拿草稿，弹模态编辑器，保存到 /category-prompts。
 function bindGenPromptButtons() {
     document.querySelectorAll('.gen-prompt-btn:not([data-bound])').forEach(function(btn) {
@@ -747,145 +897,99 @@ function bindGenPromptButtons() {
             fetch('{{ api_prefix }}/images/' + imgId + '/generate-prompt-suggestion', {
                 method: 'POST'
             }).then(function(res) { return res.json(); }).then(function(data) {
-                btn.disabled = false; btn.textContent = '💡 生成提示词';
+                btn.disabled = false; btn.textContent = '💡 提示词优化';
                 if (!data.success) { alert('生成失败: ' + (data.error || '')); return; }
                 openCategoryPromptModal(data.suggestion, imgId);
-            }).catch(function(e) { btn.disabled = false; btn.textContent = '💡 生成提示词'; console.error(e); alert('请求失败: ' + (e && e.message || '')); });
+            }).catch(function(e) { btn.disabled = false; btn.textContent = '💡 提示词优化'; console.error(e); alert('请求失败: ' + (e && e.message || '')); });
         });
     });
 }
 
-// 19. openCategoryPromptModal — 打开类别/规格自适应提示词编辑器
+// 19. openCategoryPromptModal — 打开分类提示词编辑器(2026-08-09 简化版)
+//
+// 2026-08-09 简化:弹框只保留与 category_prompts 表相关的内容。
+//   - 移除:OCR 模板说明 / 作用范围下拉 / 品类编号 / 品名关键词 / 规格通配输入
+//          / 已有提示词列表(全品类管理请去 /manage/category-prompts)
+//   - 保留:分类显示 + 提示词正文编辑框 + 保存
+//
+// 后端 generate-prompt-suggestion 端点已经把 prompt_text 直接从
+// category_prompts 表加载,弹框主编辑框就是用户已填的内容(可微调)。
 function openCategoryPromptModal(sug, imgId) {
     var existing = document.getElementById('categoryPromptModal');
     if (existing) existing.remove();
-    // 已有提示词展示
-    var ep = sug.existing_prompts || {};
-    var catList = (ep.category_prompts || []);
-    var specList = (ep.spec_prompts || []);
-    var existingHtml = '';
-    var allExisting = catList.concat(specList);
-    if (catList.length || specList.length) {
-        existingHtml = '<div id="cp_existing_list" style="margin-bottom:.8rem;padding:.5rem;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;font-size:.78rem;">'
-            + '<div style="font-weight:600;color:#166534;margin-bottom:.3rem;">📋 该品类已有自定义提示词(点击加载)</div>';
-        catList.forEach(function(p, i) {
-            var isFirst = (i === 0);
-            existingHtml += '<div class="cp-existing-item' + (isFirst ? ' cp-existing-active' : '') + '" data-cp-idx="' + i + '" data-cp-prompt="' + escAttr(p.prompt_text || '') + '" data-cp-scope="category" data-cp-pid="' + p.id + '" style="display:flex;align-items:center;gap:.3rem;margin:.2rem 0;padding:.2rem .3rem;border-radius:4px;' + (isFirst ? 'background:#bbf7d0;' : '') + '">'
-                + '<span class="cp-item-content" style="flex:1;min-width:0;cursor:pointer;">'
-                + '<span style="background:#d1fae5;padding:0 .3rem;border-radius:3px;">大类</span> '
-                + escHtml(p.product_name_keyword || p.category_code || '') + ': '
-                + escHtml((p.prompt_text || '').substring(0, 80))
-                + (p.prompt_text && p.prompt_text.length > 80 ? '...' : '') + '</span>'
-                + '<button class="cp-del-btn" data-cp-del="' + p.id + '" title="删除此提示词" style="flex-shrink:0;padding:0 .35rem;font-size:.7rem;background:#e74c3c;color:#fff;border:none;border-radius:3px;cursor:pointer;">✕</button></div>';
-        });
-        var offset = catList.length;
-        specList.forEach(function(p, i) {
-            var gi = offset + i;
-            existingHtml += '<div class="cp-existing-item" data-cp-idx="' + gi + '" data-cp-prompt="' + escAttr(p.prompt_text || '') + '" data-cp-scope="spec" data-cp-spec-pattern="' + escAttr(p.spec_pattern || '') + '" data-cp-pid="' + p.id + '" style="display:flex;align-items:center;gap:.3rem;margin:.2rem 0;padding:.2rem .3rem;border-radius:4px;">'
-                + '<span class="cp-item-content" style="flex:1;min-width:0;cursor:pointer;">'
-                + '<span style="background:#d1fae5;padding:0 .3rem;border-radius:3px;">规格</span> '
-                + escHtml(p.spec_pattern || '') + ': '
-                + escHtml((p.prompt_text || '').substring(0, 80))
-                + (p.prompt_text && p.prompt_text.length > 80 ? '...' : '') + '</span>'
-                + '<button class="cp-del-btn" data-cp-del="' + p.id + '" title="删除此提示词" style="flex-shrink:0;padding:0 .35rem;font-size:.7rem;background:#e74c3c;color:#fff;border:none;border-radius:3px;cursor:pointer;">✕</button></div>';
-        });
-        existingHtml += '</div>';
-    }
-    var defaultPrompt = sug.prompt_text || '';
-    if (allExisting.length) { defaultPrompt = allExisting[0].prompt_text || defaultPrompt; }
+    var currentPrompt = sug.prompt_text || '';
+    var isEmpty = !currentPrompt.trim();
     var html = ''
         + '<div id="categoryPromptModal" style="position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9999;display:flex;align-items:center;justify-content:center;">'
-        + '<div style="background:#fff;border-radius:8px;padding:1.2rem;max-width:560px;width:92%;box-shadow:0 8px 24px rgba(0,0,0,.25);">'
-        + '<h3 style="margin:0 0 .6rem;color:#7c3aed;">💡 生成自适应提示词</h3>'
-        + '<p style="font-size:.82rem;color:#636e72;margin:0 0 .8rem;">基于 OCR 原文 + AI/人裁决自动生成的提示词草稿;可编辑后保存,下次同品类/同规格比对生效。</p>'
-        + existingHtml
-        + '<label style="font-size:.82rem;">作用范围:</label><br>'
-        + '<select id="cp_scope" style="width:100%;margin:.3rem 0 .6rem;padding:.3rem;">'
-        + '<option value="category"' + (sug.scope === 'category' ? ' selected' : '') + '>大类(按商品品类)</option>'
-        + '<option value="spec"'     + (sug.scope === 'spec'     ? ' selected' : '') + '>具体规格(品类+通配符)</option>'
-        + '</select>'
-        + '<label style="font-size:.82rem;">品类编号:</label><br>'
-        + '<input id="cp_category_code" value="' + escHtml(sug.category_code || '') + '" placeholder="如 0204" style="width:100%;margin:.3rem 0 .6rem;padding:.3rem;">'
-        + '<label style="font-size:.82rem;">品名关键词(大类时填):</label><br>'
-        + '<input id="cp_product_name_keyword" value="' + escHtml(sug.product_name_keyword || '') + '" placeholder="如 杂胶 / HA猪皮纹" style="width:100%;margin:.3rem 0 .6rem;padding:.3rem;">'
-        + '<label style="font-size:.82rem;">规格通配(选具体规格时填,SQL LIKE 语法 %/_):</label><br>'
-        + '<input id="cp_spec_pattern" value="' + escHtml(sug.spec_pattern || '') + '" placeholder="如 %黑中加面% / 0._%" style="width:100%;margin:.3rem 0 .6rem;padding:.3rem;">'
-        + '<label style="font-size:.82rem;">提示词内容(可编辑):</label><br>'
-        + '<textarea id="cp_prompt_text" rows="5" style="width:100%;margin:.3rem 0 .8rem;padding:.4rem;font-size:.85rem;">' + escHtml(defaultPrompt) + '</textarea>'
+        + '<div style="background:#fff;border-radius:8px;padding:1.2rem 1.4rem;max-width:560px;width:92%;box-shadow:0 8px 24px rgba(0,0,0,.25);">'
+        + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.6rem;">'
+        + '<h3 style="margin:0;color:#7c3aed;">💡 编辑分类提示词</h3>'
+        + '<button id="cp_close_x" type="button" style="background:none;border:none;font-size:1.2rem;color:#9ca3af;cursor:pointer;line-height:1;padding:0 .2rem;" title="关闭">✕</button>'
+        + '</div>'
+        // 分类信息(只读):从 category_prompts 表自动确定
+        + '<div id="cp_category_info" style="font-size:.82rem;color:#636e72;margin-bottom:.6rem;padding:.4rem .6rem;background:#f5f3ff;border-left:3px solid #7c3aed;border-radius:3px;">'
+        + '<span style="color:#9ca3af;">分类编号</span> '
+        + '<span id="cp_category_code" style="font-family:monospace;font-weight:600;color:#1f2937;">' + escHtml(sug.category_code || '（未识别）') + '</span>'
+        + (sug.product_name_keyword ? ' &nbsp;|&nbsp; <span style="color:#9ca3af;">品名</span> ' + escHtml(sug.product_name_keyword) : '')
+        + '</div>'
+        // 提示词正文(从 category_prompts 表加载,主编辑区)
+        + '<label style="font-size:.82rem;font-weight:600;display:block;margin-bottom:.3rem;">提示词正文(可编辑):</label>'
+        + '<textarea id="cp_prompt_text" rows="7" autofocus '
+        +   'placeholder="' + (isEmpty ? '该分类还没提示词,在这里输入内容后点保存。&#10;例:环保等级 ±0.1mm 可放宽;厚度对得上即可。' : '') + '" '
+        +   'style="width:100%;margin-bottom:.4rem;padding:.5rem;font-size:.88rem;line-height:1.55;border:1px solid #d1d5db;border-radius:6px;box-sizing:border-box;font-family:inherit;'
+        +          (isEmpty ? 'border-color:#f59e0b;background:#fffbeb;' : 'background:#fafafa;') + '">' + escHtml(currentPrompt) + '</textarea>'
+        + '<div style="font-size:.72rem;color:#9ca3af;margin-bottom:.8rem;">'
+        + (isEmpty ? '💡 还没填过 → 保存后会写入 category_prompts 表,下次 AI 判别自动加载。' : '💡 改完保存 → 会更新 category_prompts 表当前分类的提示词。')
+        + '</div>'
         + '<div style="text-align:right;">'
-        + '<button id="cp_cancel" style="margin-right:.4rem;padding:.3rem .7rem;background:#dfe6e9;border:none;border-radius:4px;cursor:pointer;">取消</button>'
-        + '<button id="cp_save" style="padding:.3rem .8rem;background:#7c3aed;color:#fff;border:none;border-radius:4px;cursor:pointer;">保存</button>'
+        + '<button id="cp_cancel" type="button" style="margin-right:.4rem;padding:.4rem .8rem;background:#dfe6e9;border:none;border-radius:4px;cursor:pointer;">取消</button>'
+        + '<button id="cp_save" type="button" style="padding:.4rem 1rem;background:#7c3aed;color:#fff;border:none;border-radius:4px;cursor:pointer;">保存</button>'
         + '</div>'
         + '</div></div>';
     document.body.insertAdjacentHTML('beforeend', html);
-    // 已有提示词文字区域点击: 加载到编辑器并高亮
-    document.querySelectorAll('#cp_existing_list .cp-item-content').forEach(function(content) {
-        content.addEventListener('click', function(e) {
-            e.stopPropagation();
-            var item = this.closest('.cp-existing-item');
-            if (!item) return;
-            var promptText = item.getAttribute('data-cp-prompt');
-            var scope = item.getAttribute('data-cp-scope');
-            var specPattern = item.getAttribute('data-cp-spec-pattern') || '';
-            document.getElementById('cp_prompt_text').value = promptText || '';
-            document.getElementById('cp_scope').value = scope || 'category';
-            if (specPattern) document.getElementById('cp_spec_pattern').value = specPattern;
-            document.querySelectorAll('#cp_existing_list .cp-existing-item').forEach(function(el) {
-                el.style.background = ''; el.classList.remove('cp-existing-active');
-            });
-            item.style.background = '#bbf7d0'; item.classList.add('cp-existing-active');
-        });
-    });
-    // 删除按钮: 软删该提示词
-    document.querySelectorAll('#cp_existing_list .cp-del-btn').forEach(function(btn) {
-        btn.addEventListener('click', function(e) {
-            e.stopPropagation();
-            var pid = this.getAttribute('data-cp-del');
-            if (!confirm('确定删除此提示词？')) return;
-            var self = this;
-            self.disabled = true;
-            // /api/v1/category-prompts 是三套订单共享端点，不随 api_prefix 变化
-            fetch('/api/v1/category-prompts/' + pid, { method: 'DELETE' })
-                .then(function(r) { return r.json(); })
-                .then(function(d) {
-                    if (d.success) {
-                        var item = self.closest('.cp-existing-item');
-                        if (item) item.remove();
-                    } else {
-                        self.disabled = false;
-                        alert('删除失败: ' + (d.error || ''));
-                    }
-                })
-                .catch(function() { self.disabled = false; alert('请求失败'); });
-        });
-    });
     var modal = document.getElementById('categoryPromptModal');
-    document.getElementById('cp_cancel').onclick = function() { modal.remove(); };
+    var close = function() { modal.remove(); };
+    document.getElementById('cp_close_x').onclick = close;
+    document.getElementById('cp_cancel').onclick = close;
+    // 点击背景关闭
+    modal.onclick = function(e) { if (e.target === modal) close(); };
+    // 保存
     document.getElementById('cp_save').onclick = function() {
-        var body = {
-            scope: document.getElementById('cp_scope').value,
-            category_code: document.getElementById('cp_category_code').value || null,
-            product_name_keyword: document.getElementById('cp_product_name_keyword').value || null,
-            spec_pattern: document.getElementById('cp_spec_pattern').value || null,
-            prompt_text: document.getElementById('cp_prompt_text').value || '',
-            source_ocr_text: sug.source_ocr_text,
-            source_ai_status: sug.source_ai_status,
-            source_human_status: 'green',
-        };
+        var promptText = document.getElementById('cp_prompt_text').value || '';
         var saveBtn = document.getElementById('cp_save');
         saveBtn.disabled = true; saveBtn.textContent = '保存中...';
-        // /api/v1/category-prompts 是三套订单共享端点，不随 api_prefix 变化
-        fetch('/api/v1/category-prompts', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(body)
-        }).then(function(r){ return r.json(); }).then(function(data){
+        var onDone = function(data) {
             saveBtn.disabled = false; saveBtn.textContent = '保存';
-            if (data.success) {
+            if (data && data.success) {
                 modal.remove();
                 alert('已保存,下次同类比对生效');
-            } else { alert('保存失败: ' + (data.error || '')); }
-        }).catch(function(){ saveBtn.disabled = false; saveBtn.textContent = '保存'; alert('请求失败'); });
+            } else { alert('保存失败: ' + ((data && data.error) || '')); }
+        };
+        var onErr = function() { saveBtn.disabled = false; saveBtn.textContent = '保存'; alert('请求失败'); };
+        // 已有提示词 → PATCH 更新(不新增);否则 POST 新建
+        if (sug.existing_prompt_id) {
+            fetch('/api/v1/manage/category-prompts/' + sug.existing_prompt_id, {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({prompt_text: promptText})
+            }).then(function(r){ return r.json(); }).then(onDone).catch(onErr);
+        } else {
+            var body = {
+                scope: 'category',  // 2026-08-09 简化:只支持大类 scope
+                category_code: sug.category_code || null,
+                product_name_keyword: sug.product_name_keyword || null,
+                spec_pattern: null,
+                prompt_text: promptText,
+                source_ocr_text: sug.source_ocr_text,
+                source_ai_status: sug.source_ai_status,
+                source_human_status: 'green',
+            };
+            fetch('/api/v1/category-prompts', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body)
+            }).then(function(r){ return r.json(); }).then(onDone).catch(onErr);
+        }
     };
 }
 
@@ -925,7 +1029,7 @@ function bindFuzzyMatchButtons() {
                     self.disabled = false;
                     self.textContent = '模糊匹配';
                     if (!data.success) { alert('模糊匹配失败: ' + (data.error || '')); return; }
-                    if (!updateImageBadge(imgId, data.match_status, data.match_score, data.reason, data.match_source)) {
+                    if (!refreshImageMatchUI(imgId, data.match_status, data.match_score, data.reason, data.match_source)) {
                         alert('模糊匹配结果: ' + (data.match_status || '无') + ' (界面未找到元素,请刷新)');
                     }
                 })
@@ -950,11 +1054,36 @@ function bindAiJudgeButtons() {
                     self.disabled = false;
                     self.textContent = 'AI判别';
                     if (!data.success) { alert('AI 判别失败: ' + (data.error || '')); return; }
-                    if (!updateImageBadge(imgId, data.match_status, data.match_score, data.reason, data.match_source)) {
+                    if (!refreshImageMatchUI(imgId, data.match_status, data.match_score, data.reason, data.match_source)) {
                         alert('AI判别结果: ' + (data.match_status || '无') + ' (界面未找到元素,请刷新)');
                     }
                 })
                 .catch(function(){ self.disabled = false; self.textContent = 'AI判别'; alert('请求失败,请检查网络'); });
+        });
+    });
+}
+
+// 22.5 bindReOcrButtons — 重做 OCR 按钮
+// 重新跑 PaddleOCR 识别该图,重写 OCR 记录并自动重跑本地模糊匹配,刷新判别图标
+function bindReOcrButtons() {
+    document.querySelectorAll('.re-ocr-btn:not([data-bound])').forEach(function(btn){
+        btn.setAttribute('data-bound','1');
+        btn.addEventListener('click', function(){
+            var imgId = this.getAttribute('data-re-ocr');
+            var self = this;
+            self.disabled = true;
+            self.textContent = '识别中...';
+            fetch('{{ api_prefix }}/images/' + imgId + '/re-ocr', { method: 'POST' })
+                .then(function(r){ return r.json(); })
+                .then(function(data){
+                    self.disabled = false;
+                    self.textContent = 'OCR';
+                    if (!data.success) { alert('OCR 重做失败: ' + (data.error || '')); return; }
+                    if (!refreshImageMatchUI(imgId, data.match_status, data.match_score, data.reason, data.match_source, { bgColor: data.bg_color })) {
+                        alert('OCR 重做完成, 结果: ' + (data.match_status || '无') + ' (界面未找到元素,请刷新)');
+                    }
+                })
+                .catch(function(){ self.disabled = false; self.textContent = 'OCR'; alert('请求失败,请检查网络'); });
         });
     });
 }

@@ -197,6 +197,19 @@ window.openImageModalForRecord = function(recordPk, orderPk) {
     clearPreview();
 };
 
+// 摆放图(record 级)上传入口 —— 与核对规格图走同一个弹框(交互完全一致),
+// 仅后端落 placement 端点、且上传后进入计数模式(点击清点支数)。
+// recordPk: 明细行主键; orderPk: 所在订单主键
+window.openPlacementImageModal = function(recordPk, orderPk) {
+    _setTarget('placement', recordPk, orderPk);
+    pasteActive = false;
+    pendingFile = null;
+    uploadImageRotation = 0;
+    document.getElementById('imageModal').classList.add('show');
+    document.getElementById('pasteBox').classList.remove('active');
+    clearPreview();
+};
+
 window.closeImageModal = function() {
     currentUploadTarget = null;
     currentImageOrderPk = null;
@@ -306,6 +319,8 @@ window.confirmUpload = function() {
     //   'record' → IMAGE_API + '/records/<record_pk>/images'
     var url = savedTarget.type === 'record'
         ? IMAGE_API + '/records/' + savedTarget.pk + '/images'
+        : savedTarget.type === 'placement'
+        ? IMAGE_API + '/records/' + savedTarget.pk + '/placement-images'
         : IMAGE_API + '/' + savedTarget.pk + '/images';
     // ── loading 状态: OCR 跑分需 ~1-3s, 给用户即时反馈避免以为卡死
     var _confirmBtn = document.querySelector('.preview-actions .btn-confirm');
@@ -323,12 +338,18 @@ window.confirmUpload = function() {
         if (data.success) {
             _restoreBtn();
             closeImageModal();
-            // 按 type 分发回调,新逻辑(record 级)走新回调,旧逻辑(订单级)走老回调
+            // 按 type 分发回调,新逻辑(record 级 / placement 级)走新回调,旧逻辑(订单级)走老回调
             if (savedTarget.type === 'record') {
                 if (typeof window.recordImageUploaded === 'function') {
                     window.recordImageUploaded(data, savedTarget.pk, savedTarget.orderPk);
                 } else if (typeof onImageUploaded === 'function') {
                     onImageUploaded(data, savedTarget.orderPk);
+                } else {
+                    location.reload();
+                }
+            } else if (savedTarget.type === 'placement') {
+                if (typeof window.placementImageUploaded === 'function') {
+                    window.placementImageUploaded(data, savedTarget.pk, savedTarget.orderPk);
                 } else {
                     location.reload();
                 }

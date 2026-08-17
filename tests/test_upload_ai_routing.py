@@ -144,6 +144,8 @@ class RecordUploadImageDeepSeekFallbackTests(_TempDb):
             # mock paddleocr: 提取文字
             fake_paddle = mock.MagicMock()
             fake_paddle.extract_text.return_value = '环保杂胶 0.8mm 加面 黑色'
+            # 2026-08-10 Task 6:同步 mock extract_text_with_conf
+            fake_paddle.extract_text_with_conf.return_value = ('环保杂胶 0.8mm 加面 黑色', 0.95)
 
             # mock deepseek (在 compare_single_record 时被调用)
             fake_ds = mock.MagicMock()
@@ -211,6 +213,8 @@ class RecordUploadImageDeepSeekFallbackTests(_TempDb):
         with mock.patch('blueprints.shipping.get_ocr_engine') as mock_factory:
             fake_paddle = mock.MagicMock()
             fake_paddle.extract_text.return_value = '环保杂胶 0.8mm 加面 黑色'
+            # 2026-08-10 Task 6:同步 mock extract_text_with_conf
+            fake_paddle.extract_text_with_conf.return_value = ('环保杂胶 0.8mm 加面 黑色', 0.95)
             fake_ds = mock.MagicMock()
             fake_ds.API_KEY = 'sk-test'
             fake_ds.compare_single_record.side_effect = Exception('云端超时')
@@ -239,6 +243,8 @@ class RecordUploadImageDeepSeekFallbackTests(_TempDb):
         with mock.patch('blueprints.shipping.get_ocr_engine') as mock_factory:
             fake_paddle = mock.MagicMock()
             fake_paddle.extract_text.return_value = ''  # OCR 空
+            # 2026-08-10 Task 6:同步 mock extract_text_with_conf
+            fake_paddle.extract_text_with_conf.return_value = ('', 1.0)
             fake_ds = mock.MagicMock()
             fake_ds.API_KEY = 'sk-test'
             fake_ds.compare_single_record.return_value = {'match_status': 'green'}
@@ -301,6 +307,44 @@ class DeepSeekEngineSingleRecordTests(_TempDb):
             result = eng.compare_single_record('OCR', {'product_name': 'X', 'specification': 'Y'})
             self.assertEqual(result['match_status'], 'yellow')
             self.assertEqual(result['reason'], '黄色')
+
+    def test_compare_single_record_no_supplement_keeps_prompt_clean(self):
+        """supplement_prompt='' (默认) → 不应出现【自适应提示词】段标识。"""
+        from unittest import mock
+        from blueprints.ocr_engine import DeepSeekEngine
+        eng = DeepSeekEngine()
+        with mock.patch.object(eng, '_call_api_with_prompt') as mock_api:
+            mock_api.return_value = {"match_status":"green","reason":"OK"}
+            result = eng.compare_single_record('OCR', {'product_name': 'X', 'specification': 'Y'})
+            self.assertNotIn('【自适应提示词', result['prompt_text'])
+            self.assertNotIn('同品类 / 同规格历史人工案例', result['prompt_text'])
+
+    def test_compare_single_record_with_supplement_appends_block(self):
+        """supplement_prompt 非空 → prompt_text 末尾追加「自适应提示词」段(与 compare_rows 同格式)。"""
+        from unittest import mock
+        from blueprints.ocr_engine import DeepSeekEngine
+        eng = DeepSeekEngine()
+        supplement = '## 大类补充提示词\n- [red→人工确认] 厚度 ±0.1mm 可放宽'
+        with mock.patch.object(eng, '_call_api_with_prompt') as mock_api:
+            mock_api.return_value = {"match_status":"yellow","reason":"OK"}
+            result = eng.compare_single_record('OCR文字', {'product_name': 'A', 'specification': 'B'},
+                                              supplement_prompt=supplement)
+            self.assertIn('【自适应提示词', result['prompt_text'])
+            self.assertIn(supplement, result['prompt_text'])
+            # 自适应段应在明细行之后
+            self.assertGreater(result['prompt_text'].index('【自适应提示词'),
+                               result['prompt_text'].index('【明细行】'))
+
+    def test_compare_single_record_empty_supplement_string_skips_block(self):
+        """supplement_prompt='' 显式传 → 与不传一致。"""
+        from unittest import mock
+        from blueprints.ocr_engine import DeepSeekEngine
+        eng = DeepSeekEngine()
+        with mock.patch.object(eng, '_call_api_with_prompt') as mock_api:
+            mock_api.return_value = {"match_status":"green","reason":"OK"}
+            result = eng.compare_single_record('OCR', {'product_name': 'X', 'specification': 'Y'},
+                                              supplement_prompt='')
+            self.assertNotIn('【自适应提示词', result['prompt_text'])
 
 
 if __name__ == '__main__':

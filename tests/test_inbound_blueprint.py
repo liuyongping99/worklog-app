@@ -115,7 +115,7 @@ class InboundSourceTagTests(_TempDb):
         from tests import fake_png_bytes
         data = {
             'image': (io.BytesIO(fake_png_bytes()), 'test.png'),
-            'source_tag': '备货照',
+            'source_tag': '打板照',
         }
         res = self.client.post(
             f'/api/v1/inbound-orders/records/{rid}/images',
@@ -130,7 +130,7 @@ class InboundSourceTagTests(_TempDb):
         conn = sqlite3.connect(self.tmp.name)
         row = conn.execute('SELECT source_tag FROM inbound_images WHERE record_pk = ?', (rid,)).fetchone()
         conn.close()
-        self.assertEqual(row[0], '备货照')
+        self.assertEqual(row[0], '打板照')
 
     def test_record_image_upload_rejects_invalid_source_tag(self):
         from models import InboundOrder, InboundRecord

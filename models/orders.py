@@ -2,6 +2,7 @@
 import os
 import shutil
 import subprocess
+import json as _json
 from datetime import datetime
 from ._db import get_db
 
@@ -146,6 +147,24 @@ class ShippingOrder:
         rows = cursor.fetchall()
         conn.close()
         return [dict(row) for row in rows]
+
+    @staticmethod
+    def count() -> int:
+        """出货单总条数(全部,不限日期)。"""
+        conn = get_db()
+        cursor = conn.cursor()
+        n = cursor.execute('SELECT COUNT(*) FROM shipping_orders').fetchone()[0]
+        conn.close()
+        return n
+
+    @staticmethod
+    def count_by_date(date: str) -> int:
+        """指定日期的出货单条数。"""
+        conn = get_db()
+        cursor = conn.cursor()
+        n = cursor.execute('SELECT COUNT(*) FROM shipping_orders WHERE date = ?', (date,)).fetchone()[0]
+        conn.close()
+        return n
 
     @staticmethod
     def get_by_id(order_id: int):
@@ -1276,8 +1295,14 @@ class ShippingImage:
         """
         conn = get_db()
         cursor = conn.cursor()
-        cursor.execute('SELECT file_path FROM shipping_images WHERE record_pk = ?', (record_pk,))
-        file_paths = [row['file_path'] for row in cursor.fetchall()]
+        cursor.execute('SELECT id, file_path FROM shipping_images WHERE record_pk = ?', (record_pk,))
+        rows = cursor.fetchall()
+        ids = [r['id'] for r in rows]
+        file_paths = [r['file_path'] for r in rows]
+        # 连带清理摆放图计数点(若有)
+        if ids:
+            qmarks = ','.join('?' * len(ids))
+            cursor.execute(f'DELETE FROM placement_marks WHERE image_id IN ({qmarks})', ids)
         cursor.execute('DELETE FROM shipping_images WHERE record_pk = ?', (record_pk,))
         conn.commit()
         conn.close()
@@ -1295,10 +1320,16 @@ class ShippingImage:
         conn = get_db()
         cursor = conn.cursor()
         cursor.execute(
-            'SELECT file_path FROM shipping_images WHERE order_pk = ? AND record_pk IS NOT NULL',
+            'SELECT id, file_path FROM shipping_images WHERE order_pk = ? AND record_pk IS NOT NULL',
             (order_pk,)
         )
-        file_paths = [row['file_path'] for row in cursor.fetchall()]
+        rows = cursor.fetchall()
+        ids = [r['id'] for r in rows]
+        file_paths = [r['file_path'] for r in rows]
+        # 连带清理摆放图计数点(若有)
+        if ids:
+            qmarks = ','.join('?' * len(ids))
+            cursor.execute(f'DELETE FROM placement_marks WHERE image_id IN ({qmarks})', ids)
         cursor.execute(
             'DELETE FROM shipping_images WHERE order_pk = ? AND record_pk IS NOT NULL',
             (order_pk,)
@@ -1308,6 +1339,192 @@ class ShippingImage:
         for file_path in file_paths:
             _safe_remove_file(file_path)
         return file_paths
+
+
+class PlacementImage:
+    """摆放图 + 计数点(供"支"类商品清点数量)。
+
+    摆放图复用 shipping_images 表,标记 source='placement',与 OCR/AI 比对图彻底隔离
+    (不参与 OCR、不进整体图区、不进 match-col 聚合)。点击计数点存 placement_marks 表。
+    """
+
+    PLACEMENT_SOURCE = 'placement'
+
+    @staticmethod
+    def create(order_pk: int, record_pk: int, file_path: str, original_name: str = '', sort_order: int = None):
+        return ShippingImage.create(
+            order_pk=order_pk, file_path=file_path, original_name=original_name,
+            source=PlacementImage.PLACEMENT_SOURCE, record_pk=record_pk, sort_order=sort_order,
+        )
+
+    @staticmethod
+    def _parse_circles(raw):
+        """把 DB 里的 circles 文本解析成列表;异常/null 返回空列表。"""
+        if not raw:
+            return []
+        if isinstance(raw, (list, tuple)):
+            return list(raw)
+        try:
+            val = _json.loads(raw)
+            return val if isinstance(val, list) else []
+        except Exception:
+            return []
+
+    @staticmethod
+    def get_by_record(record_pk: int):
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM shipping_images WHERE record_pk = ? AND source = 'placement' ORDER BY sort_order ASC, id ASC",
+            (record_pk,))
+        rows = cursor.fetchall()
+        conn.close()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item['relative_path'] = ShippingImage.get_relative_path(item['file_path'])
+            item['marks'] = PlacementImage.get_marks(item['id'])
+            item['n_marks'] = len(item['marks'])
+            item['circles'] = PlacementImage._parse_circles(item.get('circles'))
+            item['mark_scale'] = item.get('mark_scale') or 1
+            item['loose_count'] = item.get('loose_count') or 0
+            result.append(item)
+        return result
+
+    @staticmethod
+    def get_by_id(image_id: int):
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM shipping_images WHERE id = ? AND source = 'placement'", (image_id,))
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        item = dict(row)
+        item['relative_path'] = ShippingImage.get_relative_path(item['file_path'])
+        item['marks'] = PlacementImage.get_marks(item['id'])
+        item['n_marks'] = len(item['marks'])
+        item['circles'] = PlacementImage._parse_circles(item.get('circles'))
+        item['mark_scale'] = item.get('mark_scale') or 1
+        item['loose_count'] = item.get('loose_count') or 0
+        return item
+
+    @staticmethod
+    def set_circles(image_id: int, circles):
+        """写入检测到的圆柱端面(circles 为 list[dict],会被 json 序列化)。"""
+        import json as _json
+        conn = get_db()
+        cursor = conn.cursor()
+        raw = _json.dumps(circles, ensure_ascii=False) if circles else None
+        cursor.execute('UPDATE shipping_images SET circles = ? WHERE id = ?', (raw, image_id))
+        conn.commit()
+        conn.close()
+
+    @staticmethod
+    def set_mark_scale(image_id: int, scale: float):
+        """写入该摆放图计数数字的整体系缩放比例(弹框放大/缩小按钮)。clamp 到 0.3~4.0。"""
+        try:
+            scale = float(scale)
+        except (TypeError, ValueError):
+            scale = 1.0
+        if scale <= 0:
+            scale = 1.0
+        scale = max(0.3, min(4.0, scale))
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('UPDATE shipping_images SET mark_scale = ? WHERE id = ?', (scale, image_id))
+        conn.commit()
+        conn.close()
+        return scale
+
+    @staticmethod
+    def set_loose_count(image_id: int, count: int):
+        """写入该摆放图的散码数量(点数弹框内「散码」按钮录入)。负数按 0 处理。"""
+        try:
+            count = int(round(float(count)))
+        except (TypeError, ValueError):
+            count = 0
+        if count < 0:
+            count = 0
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('UPDATE shipping_images SET loose_count = ? WHERE id = ?', (count, image_id))
+        conn.commit()
+        conn.close()
+        return count
+
+    @staticmethod
+    def delete(image_id: int):
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('SELECT file_path FROM shipping_images WHERE id = ? AND source = ?',
+                       (image_id, PlacementImage.PLACEMENT_SOURCE))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return False
+        file_path = row['file_path']
+        cursor.execute('DELETE FROM placement_marks WHERE image_id = ?', (image_id,))
+        cursor.execute('DELETE FROM shipping_images WHERE id = ?', (image_id,))
+        conn.commit()
+        conn.close()
+        _safe_remove_file(file_path)
+        return True
+
+    @staticmethod
+    def add_mark(image_id: int, x_ratio: float, y_ratio: float, mark_r: float = 0.0) -> int:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('SELECT COALESCE(MAX(seq), 0) + 1 FROM placement_marks WHERE image_id = ?', (image_id,))
+        seq = cursor.fetchone()[0]
+        cursor.execute(
+            'INSERT INTO placement_marks (image_id, seq, x_ratio, y_ratio, mark_r, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+            (image_id, seq, x_ratio, y_ratio, mark_r, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+        conn.commit()
+        conn.close()
+        return seq
+
+    @staticmethod
+    def get_marks(image_id: int):
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM placement_marks WHERE image_id = ? ORDER BY seq ASC', (image_id,))
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+
+    @staticmethod
+    def delete_last_mark(image_id: int):
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('SELECT MAX(seq) FROM placement_marks WHERE image_id = ?', (image_id,))
+        max_seq = cursor.fetchone()[0]
+        if max_seq is None:
+            conn.close()
+            return []
+        cursor.execute('DELETE FROM placement_marks WHERE image_id = ? AND seq = ?', (image_id, max_seq))
+        conn.commit()
+        conn.close()
+        return PlacementImage.get_marks(image_id)
+
+    @staticmethod
+    def delete_by_record(record_pk: int):
+        """删除某明细的所有摆放图(连带计数点 + 物理文件)。"""
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('SELECT id, file_path FROM shipping_images WHERE record_pk = ? AND source = ?',
+                       (record_pk, PlacementImage.PLACEMENT_SOURCE))
+        rows = cursor.fetchall()
+        for row in rows:
+            cursor.execute('DELETE FROM placement_marks WHERE image_id = ?', (row['id'],))
+            _safe_remove_file(row['file_path'])
+        n = len(rows)
+        if n:
+            cursor.execute('DELETE FROM shipping_images WHERE record_pk = ? AND source = ?',
+                           (record_pk, PlacementImage.PLACEMENT_SOURCE))
+        conn.commit()
+        conn.close()
+        return n
 
 
 class OcrMatchEvent:

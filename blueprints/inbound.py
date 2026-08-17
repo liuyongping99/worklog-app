@@ -643,7 +643,7 @@ def api_v1_inbound_orders_upload_image(order_id):
     source = request.form.get('source', 'upload')
     if source not in ('upload', 'ai'):
         source = 'upload'
-    _VALID_SOURCE_TAGS = {'备货照', '装车照', '归仓照'}
+    _VALID_SOURCE_TAGS = {'打板照', '装车照', '归仓照'}
     source_tag = request.form.get('source_tag')
     if source_tag not in _VALID_SOURCE_TAGS:
         source_tag = None
@@ -1009,7 +1009,7 @@ def api_v1_inbound_orders_record_upload_images(record_id):
     source = 'upload'
     saved = []
 
-    _VALID_SOURCE_TAGS = {'备货照', '装车照', '归仓照'}
+    _VALID_SOURCE_TAGS = {'打板照', '装车照', '归仓照'}
     source_tag = request.form.get('source_tag')
     if source_tag not in _VALID_SOURCE_TAGS:
         source_tag = None
@@ -1202,3 +1202,140 @@ def api_v1_inbound_orders_record_images_area(record_id):
     for it in items:
         it['scope'] = 'order' if it.get('record_pk') is None else 'record'
     return jsonify({'success': True, 'images': items, 'count': len(items)})
+
+
+# ── 移动端（参照 mobile_shipping 的 /m/shipping-today 布局）──────────────
+_BOARD_KEYWORDS = ("皮革", "木板")
+_COLOR_KEYWORDS = ("黑", "白", "红", "蓝", "绿", "黄", "棕", "灰", "米", "杏", "紫", "粉", "橙")
+_BG_CN = {"black": "黑色", "white": "白色"}
+
+
+def _inbound_is_board(product_name: str) -> bool:
+    """是否为皮革/木板类商品(无需拍照,按"块"计数)。"""
+    return any(k in (product_name or "") for k in _BOARD_KEYWORDS)
+
+
+def _inbound_has_color_word(text: str) -> bool:
+    return any(c in text for c in _COLOR_KEYWORDS)
+
+
+def _inbound_color_note(image: dict) -> str | None:
+    bg = image.get("bg_color")
+    if not bg:
+        return None
+    evt = OcrMatchEvent.get_latest_by_image(image["id"], "record_ocr")
+    ocr_text = (evt or {}).get("ocr_text") or ""
+    if _inbound_has_color_word(ocr_text):
+        return None
+    return _BG_CN.get(bg, bg)
+
+
+def _inbound_latest_status(images) -> "str | None":
+    """取最新一张图片的状态(get_by_record 已按 sort_order ASC, id ASC 排,末尾为最新)。"""
+    if not images:
+        return None
+    last = images[-1]
+    return last.get("match_status") or "green"
+
+
+def _summarize_inbound_group(group: dict) -> dict:
+    records = group.get("records", [])
+    regular = [r for r in records if not _inbound_is_board(r["product_name"])]
+    boards = [r for r in records if _inbound_is_board(r["product_name"])]
+    total = len(regular)
+    board_total = len(boards)
+    has_image = 0
+    stats = {"green": 0, "yellow": 0, "red": 0}
+    for r in regular:
+        images = InboundImage.get_by_record(r["id"])
+        if images:
+            has_image += 1
+            st = _inbound_latest_status(images)
+            if st in stats:
+                stats[st] += 1
+    return {**group, "total": total, "board_total": board_total, "has_image": has_image, "stats": stats}
+
+
+@bp.route('/m/inbound')
+def mobile_inbound():
+    """移动端入库今日列表(布局参照 /m/shipping-today)。"""
+    today = date_cls.today().isoformat()
+    groups = InboundRecord.get_groups(today, today)
+    groups = [_summarize_inbound_group(g) for g in groups]
+    return render_template('mobile/inbound-today.html', today=today, groups=groups)
+
+
+@bp.route('/m/inbound/order/<int:oid>')
+def mobile_inbound_order(oid: int):
+    """移动端入库订单详情(拍照/识别/详情,布局参照 /m/shipping-today/order/<oid>)。"""
+    set_log_context(biz='mobile_inbound', order_id=oid)
+    order = InboundOrder.get_by_id(oid)
+    if order is None:
+        from flask import abort
+        abort(404)
+    groups = InboundRecord.get_groups(order["date"], order["date"])
+    records = next(
+        (group.get("records", []) for group in groups if group.get("id") == oid),
+        [],
+    )
+
+    def _with_rel(imgs):
+        return [{**img, "rel_path": InboundImage.get_relative_path(img["file_path"])} for img in imgs]
+    record_images = {
+        rec["id"]: _with_rel(InboundImage.get_by_record(rec["id"]))
+        for rec in records
+    }
+    order_images = _with_rel(InboundImage.get_by_order(oid))
+    record_states = {}
+    for rec in records:
+        imgs = record_images[rec["id"]]
+        record_states[rec["id"]] = {
+            "images": imgs,
+            "status": _inbound_latest_status(imgs),
+            "color_note": _inbound_color_note(imgs[-1]) if imgs else None,
+            "is_board": _inbound_is_board(rec["product_name"]),
+        }
+    # 整体图缩略图初始状态(按 source_tag)
+    from datetime import datetime as _dt
+    thumb_states = {}
+    for tag in ("打板照", "装车照", "归仓照"):
+        match = [img for img in order_images if img.get("source_tag") == tag]
+        if match:
+            last = match[-1]
+            try:
+                t = _dt.strptime(last["created_at"], "%Y-%m-%d %H:%M:%S")
+                ts = f"{t.hour:02d}:{t.minute:02d}"
+            except Exception:
+                ts = ""
+            thumb_states[tag] = {"taken": True, "time_text": ts}
+        else:
+            thumb_states[tag] = {"taken": False, "time_text": ""}
+    return render_template(
+        "mobile/inbound-order.html",
+        order=order,
+        records=records,
+        record_states=record_states,
+        order_images=order_images,
+        thumb_states=thumb_states,
+    )
+
+
+@bp.route('/api/v1/inbound-orders/images/<int:image_id>/match-status', methods=['GET'])
+def api_v1_inbound_orders_image_match_status(image_id):
+    """查询行级图 OCR+AI 比对结果(移动端上传后轮询)。入库上传为同步处理,上传即出结果。"""
+    img = InboundImage.get_by_id(image_id)
+    if not img:
+        return jsonify({'success': False, 'error': '图片不存在'}), 404
+    return jsonify({
+        'success': True,
+        'processing': False,
+        'image': {
+            'image_id': image_id,
+            'match_status': img.get('match_status') or None,
+            'match_score': img.get('match_score'),
+            'reason': img.get('reason') or '',
+            'match_source': img.get('match_source') or 'local_fuzzy',
+            'bg_color': img.get('bg_color') or None,
+            'human_verified': bool(img.get('human_verified')),
+        },
+    })
