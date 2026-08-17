@@ -28,7 +28,10 @@ from blueprints._helpers import (
     match_label_to_row, detect_bg_color,
     apply_user_rotation,
 )
-from blueprints.ocr_engine import PaddleOCREngine, get_ocr_engine, OCR_MATCH_PROMPT_VERSION
+from blueprints.ocr_engine import (
+    PaddleOCREngine, get_ocr_engine, OCR_MATCH_PROMPT_VERSION,
+    is_wrinkle_label_category,
+)
 from blueprints import _helpers
 from models._db import get_db
 from blueprints.ocr_log import set_log_context
@@ -96,8 +99,10 @@ def _process_record_image_async(image_id, filepath, record, order_id, record_id)
             ocr_text = ''
             avg_conf = 1.0
             try:
+                apply_wrinkle_enhance = is_wrinkle_label_category(record.get('product_name', ''))
                 with open(filepath, 'rb') as _f:
-                    _ocr_text, avg_conf = get_ocr_engine('paddleocr').extract_text_with_conf(_f.read())
+                    _ocr_text, avg_conf = get_ocr_engine('paddleocr').extract_text_with_conf(
+                        _f.read(), apply_wrinkle_enhance=apply_wrinkle_enhance)
                     ocr_text = _ocr_text or ''
             except Exception:
                 logger.exception('记录 OCR 文本失败(不阻断): %s', filepath)
@@ -966,8 +971,10 @@ def api_v1_shipping_orders_ai_judge_image(image_id):
         pass
     if not ocr_text.strip():
         try:
+            apply_wrinkle_enhance = is_wrinkle_label_category(record.get('product_name', ''))
             with open(img['file_path'], 'rb') as _f:
-                ocr_text = get_ocr_engine('paddleocr').extract_text(_f.read()) or ''
+                ocr_text = get_ocr_engine('paddleocr').extract_text(
+                    _f.read(), apply_wrinkle_enhance=apply_wrinkle_enhance) or ''
         except Exception:
             current_app.logger.exception('重跑 PaddleOCR 失败(image_id=%s)', image_id)
     if ocr_text.strip():
