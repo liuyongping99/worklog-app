@@ -133,9 +133,7 @@ _PaddleOCREngine._resize_if_needed(bytes) → numpy
     },
     "preprocess": {
       "type": "row_split",
-      "row_gap_threshold_ratio": 0.7,
-      "min_gap_height": 6,
-      "min_subimg_height": 30
+      "max_subimgs": 5
     },
     "row_split_priority": "primary"
   },
@@ -216,7 +214,7 @@ _PaddleOCREngine._resize_if_needed(bytes) → numpy
 
 **参数取值依据**:
 
-- **multi_row_table_less(主)**:无表格线多行 → 水平投影找行边界切片 → 逐行 OCR。`row_gap_threshold_ratio=0.7` (文字密度低于均值 70% 视为行间隙,放宽以找更多空隙)+ `min_gap_height=6` 像素 + `min_subimg_height=30` 过滤过短的假子图。OCR 参数用 paper_wrinkle 的激进低阈值(0.10/0.25)+ unclip_ratio=1.8(每行单独 OCR 时捕获更多字符)
+- **multi_row_table_less(主)**:无表格线多行 → 水平投影找行边界切片 → 逐行 OCR。**参数自适应按图大小**(见 `_compute_dynamic_row_split_params`)+ `max_subimgs=5` 上限保护(避免切太细)。OCR 参数用 paper_wrinkle 的激进低阈值(0.10/0.25)+ unclip_ratio=1.8(每行单独 OCR 时捕获更多字符)
 - **paper_wrinkle(次)**:纸面反射差,褶皱产生微阴影→ 激进低阈值(0.10/0.25)+ slow 打分 + unclip_ratio=1.8。**实测对无表格线多行问题改善有限** — paper_wrinkle 只是字符级参数,救不了行级布局问题
 - **film_reflective(次)**:反光高光破坏字符识别→ 更激进阈值(0.10/0.20)+ unclip_ratio=2.0
 - **stamp_dirty(次)**:需同时应对印章字符假阳 + 手写粗细不均 → 折中阈值(0.20/0.40)+ use_dilation=True + slow 打分 + unclip_ratio=1.6 + HSV 印章去除
@@ -244,11 +242,19 @@ def get_label_profile(product_name: str) -> LabelProfile:
 ```
 
 **新增预处理函数**:`_row_split_preprocess(img, cfg) → list[np.ndarray]`
+- 调 `_compute_dynamic_row_split_params(h)` 取自适应参数(无需 JSON 配置阈值)
 - 灰度 → 二值化(阈值180)
-- 沿 Y 轴求文字密度(每行文字像素和)
-- 找局部密度低谷(密度 < 均值 × `row_gap_threshold_ratio` 且连续 ≥ `min_gap_height` 像素)
-- 在低谷处切片 → 返回 list[np.ndarray]
-- 若只找到 1 个低谷 → 返回 [原图](避免无意义切分)
+- 沿 Y 轴求文字密度(每行文字像素和)+ 中位数(`median_density`)
+- 找局部密度低谷(密度 ≤ `median_density × 0.5` 且连续 ≥ `min_gap_height` 像素)
+- 在低谷处切片 → 候选子图 list[np.ndarray]
+- **过滤**:丢掉高度 < `min_subimg_height` 的子图
+- **截断**:若子图数 > `cfg['max_subimgs']` → 只保留前 N 个(其余合并到最后一片)
+- 若过滤后 ≤ 1 个子图 → 返回 [原图](避免无意义切分)
+
+**`_compute_dynamic_row_split_params(h)`**:按图高计算 `min_gap_height` / `min_subimg_height`,对不同尺寸 label 自动适配:
+- `est_row_height = max(20, h // 12)`(假设 4-12 行布局)
+- `min_gap_height = max(6, est_row_height // 2)`(间隙 ≥ 半行高)
+- `min_subimg_height = max(30, est_row_height)`(子图 ≥ 1 行高)
 
 **`blueprints/ocr_engine.py` 修改的公开符号**:
 
