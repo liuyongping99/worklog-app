@@ -133,8 +133,9 @@ _PaddleOCREngine._resize_if_needed(bytes) → numpy
     },
     "preprocess": {
       "type": "row_split",
-      "row_gap_threshold_ratio": 0.3,
-      "min_gap_height": 8
+      "row_gap_threshold_ratio": 0.7,
+      "min_gap_height": 6,
+      "min_subimg_height": 30
     },
     "row_split_priority": "primary"
   },
@@ -215,7 +216,7 @@ _PaddleOCREngine._resize_if_needed(bytes) → numpy
 
 **参数取值依据**:
 
-- **multi_row_table_less(主)**:无表格线多行 → 水平投影找行边界切片 → 逐行 OCR。`row_gap_threshold_ratio=0.3` (文字密度低于均值 30% 视为行间隙)+ `min_gap_height=8` 像素。OCR 参数用 paper_wrinkle 的激进低阈值(0.10/0.25)+ unclip_ratio=1.8(每行单独 OCR 时捕获更多字符)
+- **multi_row_table_less(主)**:无表格线多行 → 水平投影找行边界切片 → 逐行 OCR。`row_gap_threshold_ratio=0.7` (文字密度低于均值 70% 视为行间隙,放宽以找更多空隙)+ `min_gap_height=6` 像素 + `min_subimg_height=30` 过滤过短的假子图。OCR 参数用 paper_wrinkle 的激进低阈值(0.10/0.25)+ unclip_ratio=1.8(每行单独 OCR 时捕获更多字符)
 - **paper_wrinkle(次)**:纸面反射差,褶皱产生微阴影→ 激进低阈值(0.10/0.25)+ slow 打分 + unclip_ratio=1.8。**实测对无表格线多行问题改善有限** — paper_wrinkle 只是字符级参数,救不了行级布局问题
 - **film_reflective(次)**:反光高光破坏字符识别→ 更激进阈值(0.10/0.20)+ unclip_ratio=2.0
 - **stamp_dirty(次)**:需同时应对印章字符假阳 + 手写粗细不均 → 折中阈值(0.20/0.40)+ use_dilation=True + slow 打分 + unclip_ratio=1.6 + HSV 印章去除
@@ -340,7 +341,7 @@ text, conf = engine.extract_text_with_conf(bytes, label_profile=profile)
 
 - **核心**:真实无表格线多行 fixture(5+ 张)→ 验证 match_status 改善 + 字符完整
 - TD-2026-08-16-004 中 id=2994 这张图(原本 yellow "加硬"漏字)→ multi_row_table_less profile 应能让 yellow → green
-- 延迟预算:< 500ms (multi_row 跑两遍 OCR,比 single 行级稍慢)
+- 延迟预算:< 3500ms (实测 3290ms,multi_row 跑多遍 OCR,比 single 行级稍慢)
 
 ## 回滚方案
 
