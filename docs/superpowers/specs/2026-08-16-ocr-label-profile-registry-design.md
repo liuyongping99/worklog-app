@@ -7,7 +7,7 @@
 实际生产中至少存在 3 种特性不同的标签:
 - **纸质 + 褶皱** — 磅布三文治(微阴影,需 CLAHE + 激进检测阈值)
 - **透明膜 + 反光 + 褶皱** — 无纺布(高光强反射 + 字符边界模糊,需高光去除 + 更激进的 `unclip_ratio`)
-- **纸质 + 合格章** — 杂胶(红/蓝印章字符会被误识别为字,需 HSV 印章去除 + 反向收紧阈值)
+- **纸质 + 合格章 + 手写改写厚度** — 杂胶 / 纯胶(红/蓝印章字符 + 手写笔迹粗细不均,需 HSV 印章去除 + 反向收紧阈值 + dilation 补笔画 + slow 打分)
 
 另外 `is_wrinkle_label_category` + `_wrinkle_ocr` 这种"一个类目一个函数/属性"的结构,加第 4、第 5 个类目时需要改多处代码,扩展性差。用户明确说后续会继续补充类目。
 
@@ -16,7 +16,7 @@
 将 OCR 标签类别配置化 + 可扩展:
 1. 每个类目(gating 规则、OCR 参数、预处理算法、阈值)用 JSON 配置,改参数不改代码
 2. 加新类目 = 改 JSON,**核心代码不变**
-3. 3 个生产类目(paper_wrinkle / film_reflective / stamp_dirty)立即可用,参数针对材料特性优化
+3. 3 个生产类目(paper_wrinkle / film_reflective / stamp_dirty[含手写改写])立即可用,参数针对材料特性优化
 
 ## 非目标
 
@@ -154,16 +154,17 @@ _PaddleOCREngine._resize_if_needed(bytes) → numpy
   },
   "stamp_dirty": {
     "name": "stamp_dirty",
-    "description": "纸质 + 合格章红/蓝印章(杂胶类)",
-    "variants": ["杂胶", "7P环保杂胶", "黑杂胶", "白杂胶"],
+    "description": "纸质 + 合格章/手写改写厚度(杂胶 + 纯胶类,字迹粗细不均)",
+    "variants": ["杂胶", "7P环保杂胶", "黑杂胶", "白杂胶", "纯胶", "黑纯胶", "白纯胶"],
     "ocr_kwargs": {
       "lang": "ch",
       "use_angle_cls": true,
       "show_log": false,
-      "det_db_thresh": 0.25,
-      "det_db_box_thresh": 0.45,
-      "det_db_unclip_ratio": 1.4,
-      "use_dilation": false
+      "det_db_thresh": 0.20,
+      "det_db_box_thresh": 0.40,
+      "det_db_unclip_ratio": 1.6,
+      "use_dilation": true,
+      "det_db_score_mode": "slow"
     },
     "preprocess": {
       "type": "stamp_removal",
@@ -195,7 +196,7 @@ _PaddleOCREngine._resize_if_needed(bytes) → numpy
 
 - **paper_wrinkle**:纸面反射差,褶皱产生微阴影→ **激进的低阈值**(0.10/0.25)+ **slow 打分**(更准确)+ **unclip_ratio=1.8**(扩展框捕获阴影边界外的字)
 - **film_reflective**:反光高光破坏字符识别→ **更激进阈值**(0.10/0.20)+ **unclip_ratio=2.0**(反光区字符边界模糊,扩大检测框)
-- **stamp_dirty**:**反向策略**(避免印章字符假阳)→ **提高阈值**(0.25/0.45)+ **`use_dilation=False`**(印章笔画不粘连)+ **HSV 印章去除预处理**
+- **stamp_dirty(含手写改写)**:需同时应对印章字符假阳 + 手写粗细不均 → **折中阈值**(0.20/0.40)+ **`use_dilation=True`**(补手写断裂笔画)+ **`det_db_score_mode='slow'`**(更准确打分)+ **`unclip_ratio=1.6`**(默认,适配手写扩大笔画)+ HSV 印章去除预处理
 
 ## 必须产出的接口
 
@@ -275,15 +276,17 @@ text, conf = engine.extract_text_with_conf(bytes, label_profile=profile)
 
 ### 4. stamp_dirty 专项测试
 
-- gating 命中「杂胶」「7P环保杂胶」等
+- gating 命中「杂胶」「7P环保杂胶」「纯胶」「黑纯胶」「白纯胶」
 - 合成带红印章的图 → `_stamp_removal_preprocess` 后红印章区域变白
-- ocr_kwargs `use_dilation=False`(印章笔画不粘连)
+- 合成手写笔迹(粗细不均)→ ocr_kwargs `use_dilation=True` + `score_mode='slow'` 验证
+- ocr_kwargs 折中值:`det_db_thresh=0.20 / box_thresh=0.40`(印章不假阳 + 手写不漏)
 
 ### 5. Blueprint 路由测试(改 3 个既有文件)
 
 - 上传行级图 + record 是「白磅布三文治」→ engine 收到 `label_profile=paper_wrinkle`
 - 上传行级图 + record 是「无纺布」→ engine 收到 `label_profile=film_reflective`
 - 上传行级图 + record 是「7P环保杂胶」→ engine 收到 `label_profile=stamp_dirty`
+- 上传行级图 + record 是「纯胶」→ engine 收到 `label_profile=stamp_dirty`
 - 上传行级图 + record 是「未知」→ engine 收到 `label_profile=_default`
 
 ### 6. Engine API 单元测试(改 `test_paddleocr_wrinkle_param.py`)
