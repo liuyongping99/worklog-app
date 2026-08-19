@@ -84,20 +84,29 @@ class ReOcrEndpointTests(unittest.TestCase):
         self.rid = ShippingRecord.create(
             '2026-08-19', 'T', '黑磅布三文治', '1.2硬性', '182.5', 'y', '', self.oid,
         )
-        # 上传一张图 (Pillow 能解码)
+        # 准备一张图:实际写 PNG 到 tmp (PaddleOCR mock 返回固定字符串, 不真读图)
+        import os
         from PIL import Image
-        img = Image.new('RGB', (200, 200), 'white')
         import io
-        buf = io.BytesIO()
-        img.save(buf, 'PNG')
-        data = buf.getvalue()
-        img_record = ShippingImage.create_upload(
-            self.oid, data, 'label.png', record_pk=self.rid, source='upload')
-        self.iid = img_record['id']
+        self.img_dir = tempfile.mkdtemp()
+        self.img_path = os.path.join(self.img_dir, 'label.png')
+        Image.new('RGB', (200, 200), 'white').save(self.img_path, 'PNG')
+        # ShippingImage.create 只需 file_path, 实际文件存在即可 (mock PaddleOCR 不读它)
+        self.iid = ShippingImage.create(
+            order_pk=self.oid, file_path=self.img_path,
+            original_name='label.png', source='upload',
+            record_pk=self.rid)['id']
 
         from app import create_app
         self.app = create_app()
         self.client = self.app.test_client()
+
+    def tearDown(self):
+        import models._db as _db
+        import shutil
+        _db.DB_PATH = self._orig_db
+        os.unlink(self.tmp.name)
+        shutil.rmtree(self.img_dir, ignore_errors=True)
 
     def tearDown(self):
         import models._db as _db
@@ -208,14 +217,10 @@ Expected: PASS
     def test_image_without_record_pk_returns_400(self, mock_factory):
         """record_pk 为 NULL 的图(订单级图) -> 400."""
         from models import ShippingImage
-        # 新建一张订单级图(record_pk 为 None)
-        from PIL import Image
-        import io
-        img = Image.new('RGB', (100, 100), 'white')
-        buf = io.BytesIO()
-        img.save(buf, 'PNG')
-        order_img = ShippingImage.create_upload(
-            self.oid, buf.getvalue(), 'order.png', record_pk=None, source='upload')
+        # 新建一张订单级图(record_pk 为 None) -- 复用 setUp 的 self.img_path
+        order_img = ShippingImage.create(
+            order_pk=self.oid, file_path=self.img_path,
+            original_name='order.png', source='upload', record_pk=None)
         resp = self.client.post(f'/api/v1/shipping-orders/images/{order_img["id"]}/re-ocr')
         self.assertEqual(resp.status_code, 400)
         data = resp.get_json()
