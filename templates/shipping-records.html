@@ -1798,6 +1798,7 @@ bindRecordImageButtons();
 bindManualConfirmButtons();
 bindFuzzyMatchButtons();
 bindAiJudgeButtons();
+bindReOcrButtons();
 // 给所有已经存在的"✓ 已人工确认"标记旁追加"💡 提示词优化"按钮
 (function(){
     document.querySelectorAll('.img-item-record .manual-undo-btn:not([data-gp-bound])').forEach(function(undoBtn){
@@ -1821,6 +1822,7 @@ if (typeof initAllMatchColumns === 'function') initAllMatchColumns();
 if (typeof bindOcrDetailButtons === 'function') bindOcrDetailButtons();
 if (typeof bindFuzzyMatchButtons === 'function') bindFuzzyMatchButtons();
 if (typeof bindAiJudgeButtons === 'function') bindAiJudgeButtons();
+if (typeof bindReOcrButtons === 'function') bindReOcrButtons();
 
 
 // ── "已核查"按钮回调 ──
