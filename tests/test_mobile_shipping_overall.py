@@ -43,7 +43,7 @@ def test_overall_image_no_ocr(monkeypatch, client):
     def fake_process(*a, **k):
         called["flag"] = True
 
-    monkeypatch.setattr(shipping_mod, "_process_record_image_async", fake_process)
+    monkeypatch.setattr(shipping_mod.shipping_processor, "process_async", fake_process)
     resp = c.post(
         f"/api/v1/shipping-orders/{oid}/images",
         data={"image": (io.BytesIO(_png()), "整体照.png"), "source": "upload", "original_name": "整体照-1.jpg"},

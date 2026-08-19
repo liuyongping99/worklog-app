@@ -79,7 +79,7 @@ def test_e2e_mobile_to_pc_visible(monkeypatch, client):
             "finished": __import__("time").time(),
         }
 
-    monkeypatch.setattr(shipping_mod, "_process_record_image_async", fake_process)
+    monkeypatch.setattr(shipping_mod.shipping_processor, "process_async", fake_process)
 
     # 1) 移动端上传行级图
     png = _png()
@@ -97,7 +97,8 @@ def test_e2e_mobile_to_pc_visible(monkeypatch, client):
     # 真实生产环境 _process_record_image_async 会被后台线程调用,
     # 测试里我们直接显式调一下确保 DB 写入可见
     record = {"id": rid, "product_name": "商品", "specification": "规格"}
-    shipping_mod._process_record_image_async(iid, "ignored", record, oid, rid)
+    shipping_mod.shipping_processor.process_async(
+        image_id=iid, filepath="ignored", record=record, order_id=oid, record_id=rid)
 
     # 3) PC 端完整出货页 —— ?start_date=今天&end_date=今天 应 200
     today = _today()

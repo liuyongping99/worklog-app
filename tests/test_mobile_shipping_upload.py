@@ -61,11 +61,11 @@ def test_blur_reason_appended(monkeypatch, client):
     def fake_process(image_id, filepath, record, order_id, record_id):
         # 模拟 OCR 完成后写库：先写入基础 match,再追加模糊提示
         ShippingImage.set_match(image_id, "yellow", 0.4, "标签疑似", "local_fuzzy")
-        from blueprints.shipping import _append_blur_reason_if_low_conf
-        _append_blur_reason_if_low_conf(image_id, avg_conf=0.4)
+        from blueprints.ocr_pipeline import _append_blur_reason_if_low_conf
+        _append_blur_reason_if_low_conf(ShippingImage, image_id, avg_conf=0.4)
         shipping_mod._ASYNC_JOBS[image_id] = {"state": "done", "finished": time.time()}
 
-    monkeypatch.setattr(shipping_mod, "_process_record_image_async", fake_process)
+    monkeypatch.setattr(shipping_mod.shipping_processor, "process_async", fake_process)
 
     png = _make_png()
     resp = c.post(
@@ -90,11 +90,11 @@ def test_sharp_no_blur_reason(monkeypatch, client):
 
     def fake_process(image_id, filepath, record, order_id, record_id):
         ShippingImage.set_match(image_id, "green", 0.95, "一致", "local_fuzzy")
-        from blueprints.shipping import _append_blur_reason_if_low_conf
-        _append_blur_reason_if_low_conf(image_id, avg_conf=0.9)
+        from blueprints.ocr_pipeline import _append_blur_reason_if_low_conf
+        _append_blur_reason_if_low_conf(ShippingImage, image_id, avg_conf=0.9)
         shipping_mod._ASYNC_JOBS[image_id] = {"state": "done", "finished": time.time()}
 
-    monkeypatch.setattr(shipping_mod, "_process_record_image_async", fake_process)
+    monkeypatch.setattr(shipping_mod.shipping_processor, "process_async", fake_process)
 
     png = _make_png()
     resp = c.post(

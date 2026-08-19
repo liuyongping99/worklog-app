@@ -46,7 +46,7 @@ def test_rotate_180_accepted(client, monkeypatch):
     # mock 后台 OCR 处理线程，避免真实加载 PaddleOCR
     from blueprints import shipping as shipping_mod
     monkeypatch.setattr(
-        shipping_mod, "_process_record_image_async", lambda *a, **k: None
+        shipping_mod.shipping_processor, "process_async", lambda *a, **k: None
     )
     png = _make_png()
     resp = c.post(

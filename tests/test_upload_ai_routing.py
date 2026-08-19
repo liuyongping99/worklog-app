@@ -176,7 +176,7 @@ class RecordUploadImageDeepSeekFallbackTests(_TempDb):
     def test_with_api_key_uses_deepseek(self):
         png = self._fake_upload_file('deepseek.png')
         # DeepSeek API key 配 → 走云端
-        with mock.patch('blueprints.shipping._run_label_match') as mock_local:
+        with mock.patch('blueprints.ocr_pipeline.match_label_to_row') as mock_local:
             res = self._post_upload({'image': png}, with_api_key=True, deepseek_status='green')
             self.assertEqual(res.status_code, 201)
             data = res.get_json()
@@ -192,7 +192,7 @@ class RecordUploadImageDeepSeekFallbackTests(_TempDb):
 
     def test_without_api_key_falls_back_to_local(self):
         png = self._fake_upload_file('local.png')
-        with mock.patch('blueprints.shipping._run_label_match',
+        with mock.patch('blueprints.ocr_pipeline.match_label_to_row',
                         return_value=('yellow', 60.0, '本地匹配理由')) as mock_local:
             res = self._post_upload({'image': png}, with_api_key=False, deepseek_status='green')
             self.assertEqual(res.status_code, 201)
@@ -219,7 +219,7 @@ class RecordUploadImageDeepSeekFallbackTests(_TempDb):
             fake_ds.API_KEY = 'sk-test'
             fake_ds.compare_single_record.side_effect = Exception('云端超时')
             mock_factory.side_effect = lambda n: fake_paddle if n == 'paddleocr' else fake_ds
-            with mock.patch('blueprints.shipping._run_label_match',
+            with mock.patch('blueprints.ocr_pipeline.match_label_to_row',
                             return_value=('green', 88.0, '本地补算理由')) as mock_local:
                 res = self.client.post(
                     f'/api/v1/shipping-orders/records/{self.rid}/images',
@@ -249,7 +249,7 @@ class RecordUploadImageDeepSeekFallbackTests(_TempDb):
             fake_ds.API_KEY = 'sk-test'
             fake_ds.compare_single_record.return_value = {'match_status': 'green'}
             mock_factory.side_effect = lambda n: fake_paddle if n == 'paddleocr' else fake_ds
-            with mock.patch('blueprints.shipping._run_label_match') as mock_local:
+            with mock.patch('blueprints.ocr_pipeline.match_label_to_row') as mock_local:
                 res = self.client.post(
                     f'/api/v1/shipping-orders/records/{self.rid}/images',
                     data={'image': self._fake_upload_file('empty.png')},

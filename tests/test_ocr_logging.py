@@ -526,7 +526,7 @@ def test_background_thread_spawn_propagates_context(monkeypatch):
         box['ctx'] = get_log_context()
         done.set()
 
-    monkeypatch.setattr(sh, '_process_record_image_async', _probe)
+    monkeypatch.setattr(sh.shipping_processor, 'process_async', _probe)
 
     def outer():
         box['parent_trace'] = new_trace_id()
