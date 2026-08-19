@@ -22,7 +22,8 @@ from blueprints._helpers import (
     validate_image_content, check_uploaded_image,
     match_label_to_row, detect_bg_color,
 )
-from blueprints.ocr_engine import PaddleOCREngine, get_ocr_engine, OCR_MATCH_PROMPT_VERSION, is_wrinkle_label_category
+from blueprints.ocr_engine import PaddleOCREngine, get_ocr_engine, OCR_MATCH_PROMPT_VERSION, ocr_preprocess_kind
+from blueprints.ocr_pipeline import RecordImageProcessor
 from blueprints.ocr_log import set_log_context
 
 bp = Blueprint('inbound', __name__)
@@ -33,6 +34,13 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def _get_upload_dir():
     """薄包装，返回 (upload_dir, month_str)。"""
     return get_helpers_upload_dir()
+
+
+# 行级图 OCR pipeline 共用处理器(入库专用,显式注入 InboundImage)
+# 替代旧的 _classify_and_match_image / _run_label_match(2026-08-19 抽取到 ocr_pipeline)。
+# ocr_engine_getter 用 lambda 包裹让 monkeypatch 生效。
+inbound_processor = RecordImageProcessor(
+    InboundImage, ocr_engine_getter=lambda name: get_ocr_engine(name))
 
 
 def _as_bool(val, default=False):
@@ -73,75 +81,6 @@ def _save_one_base64_image(data_url, upload_dir):
         f.write(img_bytes)
     validate_image_content(filepath)
     return filepath, 'pasted_image'
-
-
-def _run_label_match(image_abspath, record, ocr_text=''):
-    """对一张行级图跑本地匹配 (RapidFuzz)，返回 (status, score, reason)。
-
-    本函数只负责【本地 fallback】逻辑(DeepSeek 调用由
-    _classify_and_match_image 调度)。调用方先抽 OCR文本,如已抽取则复用避免重跑 PaddleOCR。
-    """
-    try:
-        if not ocr_text:
-            with open(image_abspath, 'rb') as f:
-                img_bytes = f.read()
-            ocr_text = get_ocr_engine('paddleocr').extract_text(img_bytes) or ''
-        if not ocr_text.strip():
-            return '', None, ''
-        status, score, reason = match_label_to_row(
-            ocr_text, record.get('product_name', ''), record.get('specification', '')
-        )
-        return status, score, reason
-    except Exception:
-        current_app.logger.exception('行级图片本地匹配失败（不阻断上传）')
-        return '', None, ''
-
-
-def _classify_and_match_image(filepath, record, ocr_text):
-    """对一张图先 OCR → 优先调 DeepSeek 单 record 比对 → fallback 本地 RapidFuzz。
-
-    Returns:
-        {
-            'status': 'green' | 'yellow' | 'red' | '',
-            'score':  float | None,
-            'reason': str,
-            'source': 'deepseek' | 'local_fuzzy' | '',
-            'prompt_text': str,
-            'raw_response': str,
-        }
-    """
-    if not (ocr_text or '').strip():
-        return {'status': '', 'score': None, 'reason': '', 'source': '', 'prompt_text': '', 'raw_response': ''}
-
-    try:
-        ds = get_ocr_engine('deepseek')
-        if getattr(ds, 'API_KEY', ''):
-            # ── 2026-08-09:把分类后的补充提示词也喂给单 record 比对 ──
-            from models.category_prompt import classify_record, CategoryPrompt
-            _cls = classify_record(product_name=record.get('product_name', ''),
-                                   specification=record.get('specification', ''))
-            _cc = _cls['category_code'] if (_cls and _cls.get('category_code')) else None
-            _sup = (CategoryPrompt.compose_for_record(
-                category_code=_cc,
-                product_name=record.get('product_name', ''),
-                specification=record.get('specification', ''),
-            ) if _cc else '')
-            res = ds.compare_single_record(ocr_text, record, supplement_prompt=_sup)
-            ms = (res.get('match_status') or '').lower()
-            if ms in ('green', 'yellow', 'red'):
-                return {
-                    'status': ms,
-                    'score': res.get('match_score'),
-                    'reason': res.get('reason') or '',
-                    'source': 'deepseek',
-                    'prompt_text': res.get('prompt_text', ''),
-                    'raw_response': res.get('raw_response', ''),
-                }
-    except Exception:
-        current_app.logger.exception('DeepSeek 单 record 比对异常，退到本地匹配')
-
-    status, score, reason = _run_label_match(filepath, record, ocr_text=ocr_text)
-    return {'status': status or '', 'score': score, 'reason': reason or '', 'source': 'local_fuzzy', 'prompt_text': '', 'raw_response': ''}
 
 
 def _build_suggestion_text(img: dict, record: dict | None) -> str:
@@ -811,9 +750,9 @@ def api_v1_inbound_orders_ai_judge_image(image_id):
         pass
     if not ocr_text.strip():
         try:
-            apply_wrinkle_enhance = is_wrinkle_label_category(record.get('product_name', ''))
+            preprocess_kind = ocr_preprocess_kind(record.get('product_name', ''))
             with open(img['file_path'], 'rb') as _f:
-                ocr_text = get_ocr_engine('paddleocr').extract_text(_f.read(), apply_wrinkle_enhance=apply_wrinkle_enhance) or ''
+                ocr_text = get_ocr_engine('paddleocr').extract_text(_f.read(), preprocess_kind=preprocess_kind) or ''
         except Exception:
             current_app.logger.exception('重跑 PaddleOCR 失败(image_id=%s)', image_id)
     if ocr_text.strip():
@@ -1031,72 +970,21 @@ def api_v1_inbound_orders_record_upload_images(record_id):
             )
             rel_path = os.path.join(month_str, os.path.basename(filepath)).replace('\\', '/')
             img = InboundImage.get_by_id(image_id)
-            ocr_text = ''
-            try:
-                apply_wrinkle_enhance = is_wrinkle_label_category(record.get('product_name', ''))
-                with open(filepath, 'rb') as _f:
-                    ocr_text = get_ocr_engine('paddleocr').extract_text(_f.read(), apply_wrinkle_enhance=apply_wrinkle_enhance) or ''
-            except Exception:
-                current_app.logger.exception('记录 OCR 文本失败(不阻断): %s', filepath)
-            bg = detect_bg_color(filepath)
-            if bg and ocr_text.strip():
-                ocr_text = ocr_text + '\n[标签背景: ' + ('黑色' if bg == 'black' else '白色') + ']'
-            if bg:
-                try:
-                    InboundImage.set_bg_color(image_id, bg)
-                except Exception:
-                    pass
-            result = _classify_and_match_image(filepath, record, ocr_text)
-            status, score, reason, source_label = (
-                result['status'], result['score'], result['reason'], result['source']
+            # 2026-08-19:OCR + AI 比对 + 落库 + 写事件统一交给 inbound_processor
+            result = inbound_processor.process_full(
+                image_id=image_id, filepath=filepath,
+                record=record, order_id=record['order_pk'], record_id=record_id,
             )
-            if status:
-                InboundImage.set_match(image_id, status, score, reason, source=source_label)
-            try:
-                OcrMatchEvent.create(
-                    'record_ocr', record_id=record_id, order_id=record['order_pk'], image_id=image_id,
-                    ocr_text=ocr_text,
-                    ocr_engine='paddleocr',
-                    ai_engine=source_label or 'local_fuzzy',
-                    ai_match_status=status or None,
-                    ai_match_score=score,
-                    ai_match_reason=reason or None,
-                    product_name=record.get('product_name', ''),
-                    specification=record.get('specification', ''),
-                )
-            except Exception:
-                current_app.logger.exception('record_ocr 事件写库失败(不阻断)')
-            if source_label == 'deepseek' and result.get('prompt_text'):
-                try:
-                    OcrMatchEvent.create(
-                        'ai_match',
-                        record_id=record_id,
-                        order_id=record['order_pk'],
-                        image_id=image_id,
-                        ocr_text=ocr_text,
-                        ocr_engine='paddleocr',
-                        prompt_payload=result['prompt_text'],
-                        ai_engine='deepseek',
-                        ai_match_status=status,
-                        ai_match_score=score,
-                        ai_match_reason=reason or None,
-                        ai_raw_response=result['raw_response'],
-                        prompt_version=OCR_MATCH_PROMPT_VERSION,
-                        product_name=record.get('product_name', ''),
-                        specification=record.get('specification', ''),
-                    )
-                except Exception:
-                    current_app.logger.exception('ai_match 事件写库失败(不阻断)')
             saved.append({
                 'image_id': image_id,
                 'image': rel_path,
                 'original_name': original_name,
                 'sort_order': img['sort_order'],
-                'match_status': status or None,
-                'match_score': score,
-                'reason': reason or '',
-                'match_source': source_label,
-                'bg_color': bg or None,
+                'match_status': result.get('status') or None,
+                'match_score': result.get('score'),
+                'reason': result.get('reason') or '',
+                'match_source': result.get('source'),
+                'bg_color': result.get('bg_color'),
             })
         for s in saved:
             AuditLog.log('upload_image', 'inbound_order', record['order_pk'],
@@ -1123,70 +1011,21 @@ def api_v1_inbound_orders_record_upload_images(record_id):
         )
         rel_path = os.path.join(month_str, os.path.basename(filepath)).replace('\\', '/')
         img = InboundImage.get_by_id(image_id)
-        ocr_text = ''
-        try:
-            with open(filepath, 'rb') as _f:
-                ocr_text = get_ocr_engine('paddleocr').extract_text(_f.read()) or ''
-        except Exception:
-            current_app.logger.exception('记录 OCR 文本失败(不阻断): %s', filepath)
-        bg = detect_bg_color(filepath)
-        if bg and ocr_text.strip():
-            ocr_text = ocr_text + '\n[标签背景: ' + ('黑色' if bg == 'black' else '白色') + ']'
-        if bg:
-            try:
-                InboundImage.set_bg_color(image_id, bg)
-            except Exception:
-                pass
-        result = _classify_and_match_image(filepath, record, ocr_text)
-        status, score, reason, source_label = (
-            result['status'], result['score'], result['reason'], result['source']
+        # 2026-08-19:OCR + AI 比对 + 落库 + 写事件统一交给 inbound_processor
+        result = inbound_processor.process_full(
+            image_id=image_id, filepath=filepath,
+            record=record, order_id=record['order_pk'], record_id=record_id,
         )
-        if status:
-            InboundImage.set_match(image_id, status, score, reason, source=source_label)
-        try:
-            OcrMatchEvent.create(
-                'record_ocr', record_id=record_id, order_id=record['order_pk'], image_id=image_id,
-                ocr_text=ocr_text,
-                ocr_engine='paddleocr',
-                ai_engine=source_label or 'local_fuzzy',
-                ai_match_status=status or None,
-                ai_match_score=score,
-                ai_match_reason=reason or None,
-                product_name=record.get('product_name', ''),
-                specification=record.get('specification', ''),
-            )
-        except Exception:
-            current_app.logger.exception('record_ocr 事件写库失败(不阻断)')
-        if source_label == 'deepseek' and result.get('prompt_text'):
-            try:
-                OcrMatchEvent.create(
-                    'ai_match',
-                    record_id=record_id,
-                    order_id=record['order_pk'],
-                    image_id=image_id,
-                    ocr_text=ocr_text,
-                    ocr_engine='paddleocr',
-                    prompt_payload=result['prompt_text'],
-                    ai_engine='deepseek',
-                    ai_match_status=status,
-                    ai_match_score=score,
-                    ai_match_reason=reason or None,
-                    ai_raw_response=result['raw_response'],
-                    prompt_version=OCR_MATCH_PROMPT_VERSION,
-                    product_name=record.get('product_name', ''),
-                    specification=record.get('specification', ''),
-                )
-            except Exception:
-                current_app.logger.exception('ai_match 事件写库失败(不阻断)')
         AuditLog.log('upload_image', 'inbound_order', record['order_pk'],
                      detail={'filename': rel_path, 'source': source, 'record_id': record_id})
         return jsonify({'success': True, 'images': [{
             'image_id': image_id, 'image': rel_path,
             'original_name': original_name, 'sort_order': img['sort_order'],
-            'match_status': status or None, 'match_score': score,
-            'reason': reason or '',
-            'match_source': source_label,
-            'bg_color': bg or None,
+            'match_status': result.get('status') or None,
+            'match_score': result.get('score'),
+            'reason': result.get('reason') or '',
+            'match_source': result.get('source'),
+            'bg_color': result.get('bg_color'),
         }], 'count': 1}), 201
 
     return jsonify({'success': False, 'error': '未提供图片'}), 400
