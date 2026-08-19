@@ -741,6 +741,20 @@ dialog[open] button:last-child { background: #e8e8e8; color: #333; }
 .btn.loading.btn-danger::before { border-top-color: #fff; }
 .btn.loading.btn-sm::before { width: 11px; height: 11px; border-width: 1.5px; }
 
+/* 行级图 OCR 按钮 spinner (没 .btn class, 单独定义) */
+.re-ocr-btn.loading {
+    position: relative; pointer-events: none; opacity: 0.85;
+    display: inline-flex; align-items: center; gap: 0.3rem;
+}
+.re-ocr-btn.loading::before {
+    content: ''; width: 10px; height: 10px;
+    border: 1.5px solid rgba(255,255,255,0.4);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    flex-shrink: 0;
+}
+
 /* 表格/内容区骨架屏 */
 .skeleton-row {
     display: flex; gap: 0.5rem; padding: 0.6rem 0.75rem;
