@@ -67,6 +67,7 @@ worklog-app/
 │   ├── __init__.py         # 包标记（1 行）
 │   ├── _helpers.py         # 辅助：图片上传校验、YPP 匹配、支数换算、备注校验、汇总（552 行）
 │   ├── ocr_engine.py       # 辅助：OCR 引擎抽象层三引擎（1,064 行）
+│   ├── ocr_pipeline.py     # 辅助：行级图 OCR pipeline 共享层（RecordImageProcessor,出货/入库/装柜共用,新增）★
 │   ├── auth.py             # 蓝图：登录/登出（67 行）
 │   ├── upload.py           # 蓝图：/upload/<path> 静态文件（17 行）
 │   ├── basic_records.py    # 蓝图：经验/错误/待办/车辆维护（126 行）
@@ -411,7 +412,23 @@ Flask 按定义顺序匹配路由。具体路由如 `/loading-orders/delete/<int
 - 商品/人员/车辆管理用 POST + flash + redirect（传统风格）
 - 任务流用 REST API + fetch + JSON
 
-### 10. 缓存控制
+### 10. OCR 行级图 pipeline 共享层（2026-08-19 新增）
+`blueprints/ocr_pipeline.py` 把出货/入库/装柜三套订单重复的 OCR 流水
+（extract + classify + persist_match）抽到一个共享类：
+
+- `RecordImageProcessor(image_model, *, ocr_engine_getter=None)` — 显式注入 image_model（ShippingImage / LoadingOrderImage / InboundImage），统一封装三个步骤
+- 三个核心方法：
+  - `extract_ocr(filepath, record, *, image_id=None, use_cached=True)` — PaddleOCR + 背景色 + 平均置信度（可选缓存命中）
+  - `classify(ocr_text, record, *, with_supplement=True)` — DeepSeek → 本地 RapidFuzz 降级
+  - `persist_match(*, image_id, ocr_text, avg_conf, result, record, order_id)` — 写 image.match_* + OcrMatchEvent record_ocr + ai_match + blur_reason
+- 两个编排方法：
+  - `process_full(...)` — 同步全流程（入库用）
+  - `process_async(...)` — 锁内 OCR+classify，锁外 persist（出货用；后台线程由调用方起）
+- 模块级 `_OCR_LOCK` 与 `_ASYNC_JOBS` 由 `ocr_pipeline` 模块提供，三个蓝图 re-export 共用（用 `lambda name: get_ocr_engine(name)` 注入 `ocr_engine_getter` 让 `mock.patch` monkeypatch 能穿透到 ocr_pipeline）
+
+加新行为（如新预处理 kind / 新事件类型 / 新比对规则）：改 `ocr_pipeline.py` 一处，三套订单自动跟随，行为漂移风险归零。**装柜端点显式传 `with_supplement=False`** 保留 2026-07-30 起的 loading 行为（不注入自适应提示词）。
+
+### 11. 缓存控制
 `app.py` 中已禁用开发缓存：
 ```python
 app.config['TEMPLATES_AUTO_RELOAD'] = True
@@ -609,6 +626,7 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 | `blueprints/loading.py` | 1,049 | 装柜 REST + 行级图片 |
 | `blueprints/task_flow.py` | 616 | 任务流 REST + 状态机 + 证据闸门 + 建单/推进/退单/退货 |
 | `blueprints/_helpers.py` | 552 | 共享：图片上传校验、YPP 匹配、支数换算、备注校验、汇总 |
+| `blueprints/ocr_pipeline.py` | ~340 | 行级图 OCR pipeline 共享层：RecordImageProcessor(三套订单共用,2026-08-19 新增)★ |
 | `blueprints/products.py` | 302 | 商品管理 |
 | `blueprints/notice.py` | 220 | 通知 CRUD |
 | `blueprints/staff.py` | 176 | 人员档案 CRUD |
