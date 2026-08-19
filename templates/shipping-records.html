@@ -337,6 +337,14 @@
 .placement-count-modal .pcm-loose {
     font-weight: 700; color: #55efc4; font-size: 0.85rem; margin-left: 0.1rem;
 }
+.placement-count-modal .pcm-manual-btn {
+    background: #0984e3; color: #fff; border: none; border-radius: 6px;
+    padding: 0.3rem 0.7rem; cursor: pointer; font-weight: 700; font-size: 0.82rem;
+}
+.placement-count-modal .pcm-manual-btn:active { background: #0770c2; }
+.placement-count-modal .pcm-manual {
+    font-weight: 700; color: #74b9ff; font-size: 0.85rem; margin-left: 0.1rem;
+}
 .placement-count-modal .pcm-close-btn { background: none; border: none; color: #fff; font-size: 1.2rem; cursor: pointer; }
 .placement-count-modal .pcm-body {
     position: relative; overflow: auto; background: #1e272e; display: flex; justify-content: center;
@@ -868,7 +876,9 @@ document.getElementById('voiceInputBtn').addEventListener('click', function () {
             <button type="button" id="pcmBigger" class="pcm-size-btn" title="增大数字">A＋ 放大</button>
             <button type="button" id="pcmSmaller" class="pcm-size-btn" title="缩小数字">A－ 缩小</button>
             <button type="button" id="pcmLoose" class="pcm-loose-btn" title="录入散码数量">散码</button>
+            <button type="button" id="pcmManual" class="pcm-manual-btn" title="直接输入支数（与点击计数等效，用于比对）">输入支数</button>
             <span class="pcm-loose" id="pcmLooseVal" style="display:none;"></span>
+            <span class="pcm-manual" id="pcmManualVal" style="display:none;"></span>
             <button type="button" id="pcmUndo" class="pcm-undo-btn" title="撤销最近一次点击">↩ 撤销</button>
             <button type="button" id="pcmClose" class="pcm-close-btn" title="关闭">✕</button>
         </div>
@@ -878,7 +888,7 @@ document.getElementById('voiceInputBtn').addEventListener('click', function () {
                 <div id="pcmMarks" class="pcm-marks"></div>
             </div>
         </div>
-        <div class="pcm-tip">点击图中<b>任意位置</b>计 1 支，数字为固定可读尺寸。「撤销」可连续撤销。</div>
+        <div class="pcm-tip">点击图中<b>任意位置</b>计 1 支，数字为固定可读尺寸。「撤销」可连续撤销。也可点「输入支数」直接录入总数，二者等效。</div>
     </div>
 </div>
 
@@ -892,6 +902,20 @@ document.getElementById('voiceInputBtn').addEventListener('click', function () {
         <div class="lcm-actions">
             <button type="button" id="looseCountCancel" class="lcm-cancel">取消</button>
             <button type="button" id="looseCountSave" class="lcm-save">保存</button>
+        </div>
+    </div>
+</div>
+
+{# 2026-08-19: 直接输入支数弹框(与点击计数等效,用于备注比对) #}
+<div id="manualCountModal" class="loose-count-modal">
+    <div class="lcm-inner">
+        <div class="lcm-title">输入支数</div>
+        <div class="lcm-body">
+            <input type="number" id="manualCountInput" min="0" step="1" placeholder="请输入支数（如 50）" inputmode="numeric">
+        </div>
+        <div class="lcm-actions">
+            <button type="button" id="manualCountCancel" class="lcm-cancel">取消</button>
+            <button type="button" id="manualCountSave" class="lcm-save">保存</button>
         </div>
     </div>
 </div>
@@ -1798,6 +1822,7 @@ bindRecordImageButtons();
 bindManualConfirmButtons();
 bindFuzzyMatchButtons();
 bindAiJudgeButtons();
+bindReOcrButtons();
 // 给所有已经存在的"✓ 已人工确认"标记旁追加"💡 提示词优化"按钮
 (function(){
     document.querySelectorAll('.img-item-record .manual-undo-btn:not([data-gp-bound])').forEach(function(undoBtn){
@@ -1821,6 +1846,7 @@ if (typeof initAllMatchColumns === 'function') initAllMatchColumns();
 if (typeof bindOcrDetailButtons === 'function') bindOcrDetailButtons();
 if (typeof bindFuzzyMatchButtons === 'function') bindFuzzyMatchButtons();
 if (typeof bindAiJudgeButtons === 'function') bindAiJudgeButtons();
+if (typeof bindReOcrButtons === 'function') bindReOcrButtons();
 
 
 // ── "已核查"按钮回调 ──
