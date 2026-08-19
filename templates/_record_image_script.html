@@ -1065,25 +1065,27 @@ function bindAiJudgeButtons() {
 
 // 22.5 bindReOcrButtons — 重做 OCR 按钮
 // 重新跑 PaddleOCR 识别该图,重写 OCR 记录并自动重跑本地模糊匹配,刷新判别图标
+// 2026-08-19 异步化: 用 showBtnLoading 工具 (common.js:117) 给按钮加 spinner + 文字变化
 function bindReOcrButtons() {
     document.querySelectorAll('.re-ocr-btn:not([data-bound])').forEach(function(btn){
         btn.setAttribute('data-bound','1');
         btn.addEventListener('click', function(){
-            var imgId = this.getAttribute('data-re-ocr');
-            var self = this;
-            self.disabled = true;
-            self.textContent = '识别中...';
+            var imgId = btn.getAttribute('data-re-ocr');
+            // 全局工具: 自动保存原文本 + 加 .loading class + disabled
+            showBtnLoading(btn, 'OCR中');
             fetch('{{ api_prefix }}/images/' + imgId + '/re-ocr', { method: 'POST' })
                 .then(function(r){ return r.json(); })
                 .then(function(data){
-                    self.disabled = false;
-                    self.textContent = 'OCR';
+                    hideBtnLoading(btn);
                     if (!data.success) { alert('OCR 重做失败: ' + (data.error || '')); return; }
                     if (!refreshImageMatchUI(imgId, data.match_status, data.match_score, data.reason, data.match_source, { bgColor: data.bg_color })) {
                         alert('OCR 重做完成, 结果: ' + (data.match_status || '无') + ' (界面未找到元素,请刷新)');
                     }
                 })
-                .catch(function(){ self.disabled = false; self.textContent = 'OCR'; alert('请求失败,请检查网络'); });
+                .catch(function(){
+                    hideBtnLoading(btn);
+                    alert('请求失败,请检查网络');
+                });
         });
     });
 }
