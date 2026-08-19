@@ -21,7 +21,8 @@ from blueprints._helpers import (
     validate_image_content, check_uploaded_image,
     match_label_to_row, detect_bg_color,
 )
-from blueprints.ocr_engine import PaddleOCREngine, get_ocr_engine, OCR_MATCH_PROMPT_VERSION, is_wrinkle_label_category
+from blueprints.ocr_engine import PaddleOCREngine, get_ocr_engine, OCR_MATCH_PROMPT_VERSION, ocr_preprocess_kind
+from blueprints.ocr_pipeline import RecordImageProcessor
 from blueprints import _helpers
 from models._db import get_db
 from blueprints.ocr_log import set_log_context
@@ -29,6 +30,14 @@ from blueprints.ocr_log import set_log_context
 bp = Blueprint('loading', __name__)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# 行级图 OCR pipeline 共用处理器(装柜专用,显式注入 LoadingOrderImage)
+# 替代端点内嵌的 OCR + AI 比对代码(2026-08-19 抽取到 ocr_pipeline)。
+# ocr_engine_getter 用 lambda 包裹让 monkeypatch 生效。
+# 装柜行为:不注入自适应提示词(2026-07-30 起 loading 不拼 CategoryPrompt;
+# 后续是否补,看准确率再说),端点显式传 with_supplement=False。
+loading_processor = RecordImageProcessor(
+    LoadingOrderImage, ocr_engine_getter=lambda name: get_ocr_engine(name))
 
 
 def _as_bool(value, default=True):
@@ -741,8 +750,8 @@ def api_v1_loading_orders_manual_verify_image(image_id):
 @bp.route('/api/v1/loading-orders/images/<int:image_id>/fuzzy-match', methods=['POST'])
 def api_v1_loading_orders_fuzzy_match_image(image_id):
     """对已上传图片重新运行本地 RapidFuzz 模糊匹配 → 返回新的判别结果。
-    
-    流程: 取图→取关联商品行→取OCR文字→运行 match_label_to_row→更新 loading_order_images→返回
+
+    2026-08-19 改造:OCR + 背景色提取改用 loading_processor.extract_ocr 共享方法。
     """
     img = LoadingOrderImage.get_by_id(image_id)
     if not img:
@@ -757,40 +766,15 @@ def api_v1_loading_orders_fuzzy_match_image(image_id):
     if not record:
         return jsonify({'success': False, 'error': '关联商品行不存在'}), 404
 
-    # 1) 取 OCR 文字：优先从 ocr_match_event 历史取，没有则重跑 PaddleOCR
-    ocr_text = ''
-    try:
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute(
-            'SELECT ocr_text FROM ocr_match_event '
-            'WHERE image_id = ? AND event_type = ? AND ocr_text IS NOT NULL '
-            'ORDER BY id DESC LIMIT 1',
-            (image_id, 'record_ocr'))
-        row = cur.fetchone()
-        conn.close()
-        if row:
-            ocr_text = row['ocr_text'] or ''
-    except Exception:
-        pass
-    if not ocr_text.strip():
-        try:
-            with open(img['file_path'], 'rb') as _f:
-                ocr_text = get_ocr_engine('paddleocr').extract_text(_f.read()) or ''
-        except Exception:
-            current_app.logger.exception('重跑 PaddleOCR 失败(image_id=%s)', image_id)
-    if ocr_text.strip():
-        bg = detect_bg_color(img['file_path'])
-        if bg:
-            ocr_text = ocr_text + '\n[标签背景: ' + ('黑色' if bg == 'black' else '白色') + ']'
-    else:
+    extracted = loading_processor.extract_ocr(
+        img['file_path'], record, image_id=image_id, use_cached=True)
+    if not extracted['ocr_text'].strip():
         return jsonify({'success': False, 'error': 'OCR 无文字，无法匹配'}), 400
 
-    # 2) 运行本地模糊匹配
     status, score, reason = match_label_to_row(
-        ocr_text, record.get('product_name', ''), record.get('specification', ''))
-
-    # 3) 更新图片匹配结果
+        extracted['ocr_text'],
+        record.get('product_name', ''),
+        record.get('specification', ''))
     LoadingOrderImage.set_match(image_id, status, score or 0, reason, source='local_fuzzy')
 
     return jsonify({
@@ -823,85 +807,38 @@ def api_v1_loading_orders_ai_judge_image(image_id):
     if not record:
         return jsonify({'success': False, 'error': '关联商品行不存在'}), 404
 
-    # 1) 取 OCR 文字
-    ocr_text = ''
-    try:
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute(
-            'SELECT ocr_text FROM ocr_match_event '
-            'WHERE image_id = ? AND event_type = ? AND ocr_text IS NOT NULL '
-            'ORDER BY id DESC LIMIT 1',
-            (image_id, 'record_ocr'))
-        row = cur.fetchone()
-        conn.close()
-        if row:
-            ocr_text = row['ocr_text'] or ''
-    except Exception:
-        pass
-    if not ocr_text.strip():
-        try:
-            apply_wrinkle_enhance = is_wrinkle_label_category(record.get('product_name', ''))
-            with open(img['file_path'], 'rb') as _f:
-                ocr_text = get_ocr_engine('paddleocr').extract_text(_f.read(), apply_wrinkle_enhance=apply_wrinkle_enhance) or ''
-        except Exception:
-            current_app.logger.exception('重跑 PaddleOCR 失败(image_id=%s)', image_id)
-    if ocr_text.strip():
-        bg = detect_bg_color(img['file_path'])
-        if bg:
-            ocr_text = ocr_text + '\n[标签背景: ' + ('黑色' if bg == 'black' else '白色') + ']'
-    else:
+    # 2026-08-19 改造:OCR + DeepSeek 调用 + ai_match 事件写库全部走 processor。
+    # 装柜端点显式传 with_supplement=False 保留原行为(2026-07-30 起 loading 不注入
+    # 自适应提示词)。
+    extracted = loading_processor.extract_ocr(
+        img['file_path'], record, image_id=image_id, use_cached=True)
+    if not extracted['ocr_text'].strip():
         return jsonify({'success': False, 'error': 'OCR 无文字，无法判断'}), 400
 
-    # 2) 调用 DeepSeek
     try:
         ds = get_ocr_engine('deepseek')
         if not getattr(ds, 'API_KEY', ''):
             return jsonify({'success': False, 'error': 'DeepSeek API Key 未配置'}), 503
-        res = ds.compare_single_record(ocr_text, record)
-        ms = (res.get('match_status') or '').lower()
-        if ms not in ('green', 'yellow', 'red'):
-            return jsonify({'success': False, 'error': f'DeepSeek 返回异常: {ms}'}), 502
-        status, score, reason = ms, res.get('match_score'), res.get('reason') or ''
-        source_label = 'deepseek'
-        prompt_text = res.get('prompt_text', '')
-        raw_response = res.get('raw_response', '')
-    except Exception as e:
-        current_app.logger.exception('DeepSeek AI 判断失败(image_id=%s)', image_id)
-        return jsonify({'success': False, 'error': f'AI 判断失败: {e}'}), 502
-
-    # 3) 更新图片匹配结果
-    LoadingOrderImage.set_match(image_id, status, score or 0, reason, source=source_label)
-
-    # 4) 持久化 AI 判断事件(prompt + 结果),供前端「详情」按钮审计
-    try:
-        OcrMatchEvent.create(
-            'ai_match',
-            record_id=record_pk,
-            order_id=img['order_pk'],
-            image_id=image_id,
-            ocr_text=ocr_text,
-            ocr_engine='paddleocr',
-            prompt_payload=prompt_text,
-            ai_engine='deepseek',
-            ai_match_status=status,
-            ai_match_score=score,
-            ai_match_reason=reason or None,
-            ai_raw_response=raw_response,
-            prompt_version=OCR_MATCH_PROMPT_VERSION,
-            product_name=record.get('product_name', ''),
-            specification=record.get('specification', ''),
-        )
     except Exception:
-        current_app.logger.exception('ai_match 事件写库失败(不阻断)')
+        return jsonify({'success': False, 'error': 'DeepSeek 引擎初始化失败'}), 503
+
+    result = loading_processor.classify(
+        extracted['ocr_text'], record, with_supplement=False)
+    if not result['status']:
+        return jsonify({'success': False, 'error': 'DeepSeek 返回异常'}), 502
+    loading_processor.persist_match(
+        image_id=image_id, ocr_text=extracted['ocr_text'],
+        result=result, record=record, order_id=img['order_pk'],
+        avg_conf=extracted.get('avg_conf', 1.0),
+    )
 
     return jsonify({
         'success': True,
         'image_id': image_id,
-        'match_status': status,
-        'match_score': score,
-        'reason': reason,
-        'match_source': source_label,
+        'match_status': result['status'],
+        'match_score': result['score'],
+        'reason': result['reason'],
+        'match_source': result['source'],
     })
 
 
