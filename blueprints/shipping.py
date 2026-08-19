@@ -37,6 +37,14 @@ from blueprints.ocr_pipeline import (
 )
 from blueprints import _helpers
 from models._db import get_db
+
+# 2026-08-19:「散码」口径正则 — 用 (?<![\d.]) 负向后顾排除小数点后的 y,
+#   例如 "34.5y" 中的 "5" 不应被识别为独立散码期望,否则会把 160支*34.5y
+#   误判成"支=160、散码=5",导致 placement_match 永远为 False。
+#   两处使用保持一致:
+#     1) line ~202: placement_groups 渲染(每条 record 的备注汇总)
+#     2) line ~303: placement_match 判定(决定"点数"按钮是否加绿框)
+SANMA_RE = re.compile(r'(?<![\d.])(\d+)\s*[yY]')
 from blueprints.ocr_log import set_log_context
 
 
@@ -174,6 +182,11 @@ def shipping_records():
         for img in all_record_imgs:
             target = ai_images if img.get('source') == 'ai' else order_non_ai
             target.setdefault(grp['id'], []).append(img)
+    # 摆放图"支数"口径:直接输入(manual_count)优先,无则回退点击计数点(n_marks)。
+    # 与前端 placement_count.js 的 effectiveZhi 保持一致,避免"前端✓、后端不匹配"的割裂。
+    def _eff_zhi(p):
+        mc = p.get('manual_count')
+        return mc if mc is not None else (p.get('n_marks') or 0)
     # 2026-08-16:按 product_name 把有点数图的 record 进行预分组(连续同 product_name 合并),模板里组内并排显示
     placement_groups = {}
     for grp in groups:
@@ -194,13 +207,13 @@ def shipping_records():
             zhi_m = list(re.finditer(r'(\d+)\s*支', remark))
             expected_zhi = sum(int(x.group(1)) for x in zhi_m)
             has_zhi = len(zhi_m) > 0
-            san_m = list(re.finditer(r'(\d+)\s*[yY]', remark))
+            san_m = list(SANMA_RE.finditer(remark))
             expected_sanma = sum(int(x.group(1)) for x in san_m)
             has_sanma = len(san_m) > 0
             current['items'].append({
                 'record_id': rec['id'],
                 'specification': rec.get('specification') or '',
-                'total': sum(p.get('n_marks', 0) for p in pimgs),
+                'total': sum(_eff_zhi(p) for p in pimgs),
                 'loose_total': loose_total,
                 'remark': remark,
                 'expected_zhi': expected_zhi,
@@ -290,12 +303,12 @@ def shipping_records():
             _pm = False
             if _pimgs:
                 _remark = item.get('remark') or ''
-                _total = sum(p.get('n_marks', 0) for p in _pimgs)
+                _total = sum(_eff_zhi(p) for p in _pimgs)
                 _loose = sum(p.get('loose_count', 0) for p in _pimgs)
                 _zhi_m = list(re.finditer(r'(\d+)\s*支', _remark))
                 _exp_zhi = sum(int(x.group(1)) for x in _zhi_m)
                 _has_zhi = len(_zhi_m) > 0
-                _san_m = list(re.finditer(r'(\d+)\s*[yY]', _remark))
+                _san_m = list(SANMA_RE.finditer(_remark))
                 _exp_san = sum(int(x.group(1)) for x in _san_m)
                 _has_san = len(_san_m) > 0
                 if _has_zhi and _total == _exp_zhi and (not _has_san or _loose == _exp_san):
@@ -801,6 +814,68 @@ def api_v1_shipping_orders_fuzzy_match_image(image_id):
     })
 
 
+@bp.route('/api/v1/shipping-orders/images/<int:image_id>/re-ocr', methods=['POST'])
+def api_v1_shipping_orders_re_ocr_image(image_id):
+    """对一张已上传图片重做 PaddleOCR 识别,自动重跑本地模糊匹配 (2026-08-19)。
+
+    与 /fuzzy-match 的区别:
+      - /fuzzy-match 优先用缓存(免重跑 PaddleOCR),/re-ocr 强制 use_cached=False
+        (出货页右下角"OCR"按钮的语义:重新识别,不允许吃旧结果)
+      - 额外写一条 append-only 'record_ocr' 事件 (审计可看 OCR 重做演变)
+
+    行为:
+      - 复用 RecordImageProcessor.extract_ocr (享受缓存/4角背景色/[标签背景:]后缀)
+      - 自动跑 match_label_to_row (本地 RapidFuzz, <100ms)
+      - 写 append-only record_ocr 事件 (审计)
+      - 更新 shipping_images.match_*
+    """
+    img = ShippingImage.get_by_id(image_id)
+    if not img:
+        return jsonify({'success': False, 'error': '图片不存在'}), 404
+    if not img.get('record_pk'):
+        return jsonify({'success': False, 'error': '该图片未关联商品行，无法重做 OCR'}), 400
+    record = ShippingRecord.get_by_id(img['record_pk'])
+    if not record:
+        return jsonify({'success': False, 'error': '关联商品行不存在'}), 404
+
+    # 1) 复用 RecordImageProcessor (与上传流程一致)
+    extracted = shipping_processor.extract_ocr(
+        img['file_path'], record, image_id=image_id, use_cached=False)
+
+    if not extracted['ocr_text'].strip():
+        return jsonify({'success': False, 'error': 'OCR 无文字，无法识别'}), 400
+
+    # 2) 自动重跑本地模糊匹配
+    status, score, reason = match_label_to_row(
+        extracted['ocr_text'],
+        record.get('product_name', ''),
+        record.get('specification', ''))
+    source_label = 'local_fuzzy'
+    if status:
+        ShippingImage.set_match(image_id, status, score or 0, reason, source=source_label)
+
+    # 3) 写 append-only record_ocr 事件 (审计)
+    try:
+        OcrMatchEvent.create(
+            'record_ocr', record_id=img['record_pk'], order_id=img['order_pk'],
+            image_id=image_id, ocr_text=extracted['ocr_text'],
+            ocr_engine='paddleocr',
+            ai_engine=source_label if status else None,
+            ai_match_status=status or None,
+            ai_match_score=score, ai_match_reason=reason or None,
+            product_name=record.get('product_name', ''),
+            specification=record.get('specification', ''))
+    except Exception:
+        current_app.logger.exception('record_ocr(re-ocr) 事件写库失败(不阻断)')
+
+    return jsonify({
+        'success': True,
+        'image_id': image_id,
+        'match_status': status, 'match_score': score, 'reason': reason,
+        'match_source': source_label, 'bg_color': extracted['bg_color'],
+    })
+
+
 @bp.route('/api/v1/shipping-orders/images/<int:image_id>/ai-judge', methods=['POST'])
 def api_v1_shipping_orders_ai_judge_image(image_id):
     """对已上传图片重新运行 DeepSeek AI 比对 → 返回新的判别结果。
@@ -1164,6 +1239,29 @@ def api_v1_shipping_orders_placement_loose_count(image_id):
         return jsonify({'success': False, 'error': 'count 必须是数字'}), 400
     count = PlacementImage.set_loose_count(image_id, count)
     return jsonify({'success': True, 'count': count})
+
+
+@bp.route('/api/v1/shipping-orders/placement-images/<int:image_id>/manual-count', methods=['POST'])
+def api_v1_shipping_orders_placement_manual_count(image_id):
+    """设置该摆放图直接输入的支数(点数弹框内「输入支数」按钮录入)。body: {count}。
+
+    count 为 null / 空字符串 → 清除直接输入,回退到点击计数(n_marks);
+    为整数(含 0) → 以该值为准,并清空点击计数点(二者互斥)。
+    """
+    img = PlacementImage.get_by_id(image_id)
+    if not img:
+        return jsonify({'success': False, 'error': '摆放图不存在'}), 404
+    data = request.get_json() or {}
+    raw = data.get('count')
+    if raw is None or raw == '':
+        count = None
+    else:
+        try:
+            count = int(round(float(raw)))
+        except (TypeError, ValueError):
+            return jsonify({'success': False, 'error': 'count 必须是数字'}), 400
+    count = PlacementImage.set_manual_count(image_id, count)
+    return jsonify({'success': True, 'manual_count': count})
 
 
 @bp.route('/api/v1/shipping-orders/placement-images/<int:image_id>/marks', methods=['POST'])
