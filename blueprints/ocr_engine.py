@@ -1797,6 +1797,43 @@ class PaddleOCREngine(BaseOCREngine):
                         pass
         return lines, confs
 
+    @staticmethod
+    def _pick_better_ocr(orig_lines, orig_confs, pre_lines, pre_confs):
+        """redstamp 两遍 OCR 取优:按 (行数, 字符总数, 已知字段前缀数) 综合打分。
+
+        背景(2026-08-28):
+        _suppress_red_stamp 的 faded_red 通道阈值过宽,误擦标签文字(如「软性」),
+        导致擦除图 OCR 在 60% 样本里反而比原图 OCR 漏字更多。但擦除图偶尔能修对
+        红章盖住的字(如 1.0 → 1.0),不能完全抛弃。
+
+        综合打分 = (line_count, total_chars, known_prefix_bonus)
+        高者胜。同分时原图胜(更保守,避免擦除图随机性引入噪声)。
+
+        Args:
+            orig_lines / orig_confs: 原图 OCR 结果。
+            pre_lines / pre_confs: 红章擦除后 OCR 结果。
+
+        Returns:
+            (winner_lines, winner_confs): 取优后的结果。
+        """
+        def score(lines):
+            if not lines:
+                return (-1, -1, -1)
+            n_lines = len(lines)
+            total_chars = sum(len(l) for l in lines)
+            # 已知业务字段前缀加权(品名/规格/颜色/厚度/手感/底布),鼓励提取完整结构
+            known_prefixes = ('品名', '规格', '颜色', '厚度', '手感', '底布', '成份', '克重')
+            prefix_bonus = sum(1 for l in lines
+                              if any(p in l for p in known_prefixes))
+            return (n_lines, total_chars, prefix_bonus)
+
+        s_orig = score(orig_lines)
+        s_pre = score(pre_lines)
+        # 同分时原图胜(更保守)
+        if s_pre > s_orig:
+            return list(pre_lines), list(pre_confs)
+        return list(orig_lines), list(orig_confs)
+
     def _resolve_kind(self, preprocess_kind, apply_wrinkle_enhance):
         """统一 kind 入参:优先 preprocess_kind;旧参数 apply_wrinkle_enhance=True
         等价于 'form_nolines'(向后兼容别名)。"""
@@ -1851,9 +1888,18 @@ class PaddleOCREngine(BaseOCREngine):
                     img_np = np.array(Image.open(io.BytesIO(resized)).convert('RGB'))
                 else:
                     img_np = resized
-                pre = _preprocess_for_kind(img_np, kind)
                 ocr = self._ocr
-                lines, _confs = self._collect(ocr.ocr(pre, cls=True))
+                if kind == KIND_REDSTAMP:
+                    # 【2026-08-28】红章擦除 60% 样本漏字(误擦「软性」等标签文字)。
+                    # OCR 两次取优: 原图通常保留更多字段, 擦除图偶尔修对红章盖住的字。
+                    orig_lines, _orig_confs = self._collect(ocr.ocr(img_np, cls=True))
+                    pre = _preprocess_for_kind(img_np, kind)
+                    pre_lines, _pre_confs = self._collect(ocr.ocr(pre, cls=True))
+                    lines, _confs = self._pick_better_ocr(
+                        orig_lines, _orig_confs, pre_lines, _pre_confs)
+                else:
+                    pre = _preprocess_for_kind(img_np, kind)
+                    lines, _confs = self._collect(ocr.ocr(pre, cls=True))
             else:
                 ocr = self._ocr
                 lines, _confs = self._collect(ocr.ocr(resized, cls=True))
@@ -1905,9 +1951,18 @@ class PaddleOCREngine(BaseOCREngine):
                     img_np = np.array(Image.open(io.BytesIO(resized)).convert('RGB'))
                 else:
                     img_np = resized
-                pre = _preprocess_for_kind(img_np, kind)
                 ocr = self._ocr
-                lines, confs = self._collect(ocr.ocr(pre, cls=True))
+                if kind == KIND_REDSTAMP:
+                    # 【2026-08-28】与 extract_text 一致:红章擦除 60% 漏字,
+                    # OCR 两次取优(原图+擦除图)。
+                    orig_lines, orig_confs = self._collect(ocr.ocr(img_np, cls=True))
+                    pre = _preprocess_for_kind(img_np, kind)
+                    pre_lines, pre_confs = self._collect(ocr.ocr(pre, cls=True))
+                    lines, confs = self._pick_better_ocr(
+                        orig_lines, orig_confs, pre_lines, pre_confs)
+                else:
+                    pre = _preprocess_for_kind(img_np, kind)
+                    lines, confs = self._collect(ocr.ocr(pre, cls=True))
             else:
                 ocr = self._ocr
                 lines, confs = self._collect(ocr.ocr(resized, cls=True))
