@@ -1,4 +1,4 @@
-"""OCR 引擎抽象层：Moonshot 云端 + PaddleOCR 本地双引擎。
+﻿"""OCR 引擎抽象层：Moonshot 云端 + PaddleOCR 本地双引擎。
 
 提供统一的 recognize(image_bytes, filename) → {"success": bool, "items": [...]} 接口，
 通过 get_ocr_engine(name) 工厂函数获取引擎实例（单例缓存）。
@@ -34,128 +34,749 @@ logger = logging.getLogger('ocr.engine')
 # 提示词版本号 —— 改 COMPARE_PROMPT 时同时 bump,事件日志按此版本切分分析
 OCR_MATCH_PROMPT_VERSION = 'compare_rows_v2'
 
+# 2026-08-18 v2.3: 业务字段规则纠错 (Direction 1)
+# 字段前缀白名单 + 右列首字反查表:
+#   字典:常见磅布类表单的字段名前缀(2-4 字);
+#   反查:右列首字 -> 期望前缀 (用于 OCR 截断到首字时插回缺失字);
+#   例子:右列以「名」开头 -> 应配前缀「品」->「品名」;
+#         右列以「度」开头 -> 应配前缀「厚」->「厚度」;
+#         右列以「感」开头 -> 应配前缀「手」->「手感」;
+#         右列以「布」开头 -> 应配前缀「底」->「底布」。
+_KNOWN_FIELD_PREFIXES = [
+    '品名', '厚度', '手感', '底布', '成份', '规格', '包装',
+    '尺寸', '颜色', '成份含量', '门幅', '克重', '材质', '面料', '里料',
+    '规格型号', '纱织', '纱支', '纱织密度', '规格参数',
+]
+_KNOWN_FIELD_PREFIX_SET = set(_KNOWN_FIELD_PREFIXES)
+# 右列首字 -> 期望单字前缀
+_RIGHT_FIRST_TO_PREFIX = {
+    '名': '品', '度': '厚', '感': '手', '布': '底',
+    '格': '规', '份': '成', '装': '包', '寸': '尺',
+    '色': '颜', '料': '面', '量': '成', '幅': '门',
+    '重': '克', '织': '纱', '支': '纱', '号': '规',
+}
+
+# 2026-08-18 v2.6: 业务词典加载 (D4)
+# 从出货记录统计高频品名, 用于 OCR 残缺输出补全
+# (例: 2111 OCR 返回 "磅布", 词表最长匹配 "白磅布三文治")。
+import json as _json
+import os as _os
+_PRODUCT_DICT_PATH = _os.path.join(
+    _os.path.dirname(_os.path.abspath(__file__)),
+    '..', '_product_dict.json')
+_PRODUCT_NAME_FREQ = []  # [(name, count), ...] 按频次降序
+try:
+    with open(_PRODUCT_DICT_PATH, 'r', encoding='utf-8') as _f:
+        _PRODUCT_NAME_FREQ = _json.load(_f)
+    # 按 (频次降序, 名字长度降序) 排序 - 优先高频长词
+    _PRODUCT_NAME_FREQ.sort(key=lambda x: (-x[1], -len(x[0])))
+except Exception:
+    pass
+
+def _complete_product_value(value, min_freq=5):
+    """D4: 按业务词典补全 OCR 残缺的品名 value (不含色字前缀)。
+
+    色字 (黑/白/...) 不在本函数补全范围内 — 改由 D5 (背景色补全) 处理,
+    避免出货频次最高的颜色覆盖真实出货颜色。
+    例如 OCR 输出 "磅布", 本函数补全为 "磅布三文治", 色字由 D5 加上。
+
+    Args:
+        value: OCR 输出的品名文本。
+        min_freq: 词典最低出货频次门槛。
+    Returns:
+        补全后的品名 (若词典无匹配则原样返回)。
+    """
+    if not value or not _PRODUCT_NAME_FREQ:
+        return value
+    v = value.strip()
+    if len(v) < 2:
+        return value
+    COLOR_PREFIXES = ('黑', '白', '红', '蓝', '黄', '灰', '绿', '紫', '棕')
+    BRAND_PREFIXES = ('7P', 'TP', '环保', '订做', '定做', '订制')
+
+    def _strip_color(n):
+        for c in COLOR_PREFIXES:
+            if n.startswith(c):
+                return n[1:]
+        return n
+
+    # 关键修复: value 也可能带色字 (如 OCR 出 "白磅布"), 比较时需同时剥离。
+    # 用 stripped_v (v 的剥离色字版本) 匹配 stripped (name 的剥离色字版本)。
+    stripped_v = _strip_color(v)
+    if len(stripped_v) < 2:
+        return value
+    best = None
+    best_score = (-1, -1, 0)  # (无品牌前缀, 右邻字符数, freq)
+    for name, freq in _PRODUCT_NAME_FREQ:
+        if freq < min_freq:
+            continue
+        # 跳过品牌前缀词条 (7P环保磅布三文治 等), 避免给完整核心词硬加品牌前缀
+        if name.startswith(BRAND_PREFIXES):
+            continue
+        stripped_name = _strip_color(name)
+        if len(stripped_name) <= len(stripped_v):
+            continue  # 词条不长于 value, 不会扩展
+        if stripped_v not in stripped_name:
+            continue
+        idx = stripped_name.find(stripped_v)
+        right_len = len(stripped_name) - idx - len(stripped_v)
+        # 评分: 无品牌前缀 (强制 1, 已被上面 skip 排除), 右邻最长, 频次高
+        score = (
+            1,  # 已经全部无品牌前缀
+            right_len,
+            freq,
+        )
+        if score > best_score:
+            best = stripped_name
+            best_score = score
+    if best:
+        return best
+    return value
+
+
+_COLOR_CHARS = ('黑', '白', '红', '蓝', '黄', '灰', '绿', '紫', '棕')
+
+
+def _detect_bg_color_from_np(img_np):
+    """D5 改进 (2026-08-19): 4 角采样判别塑料布色, 行为与 _helpers.detect_bg_color 对齐。
+
+    原算法按 blue_diff (B-R) 阈值判别浅蓝/深蓝塑料, 但 blue_diff 对深蓝塑料
+    也 ≥20 (深蓝 R≈40 B≈80, B-R=40), 导致深蓝塑料包裹的黑磅布三文治被误判为
+    white, 进而污染 OCR 文本 (v2.6.1 _apply_bg_color_prefix 已移除)。
+
+    新算法 (2026-08-19): 4 角采样 + 取 min, 阈值与 _helpers.detect_bg_color 一致:
+        - min < 70  -> 'black'  (任一角为深色塑料即偏黑)
+        - min > 100 -> 'white'  (4 角都浅才认白, 避免单角反光误判)
+        - 70-100    -> None     (中性灰, 放弃推断)
+
+    Args:
+        img_np: numpy RGB 数组 (H, W, 3) uint8。
+    Returns:
+        'black', 'white' 或 None。
+    """
+    try:
+        if img_np is None or img_np.ndim != 3 or img_np.shape[2] < 3:
+            return None
+        h, w = img_np.shape[:2]
+        if h < 8 or w < 8:
+            return None
+        # 4 角采样: 边长 1/8 的矩形, 避开中心标签
+        size_x = max(8, w // 8)
+        size_y = max(8, h // 8)
+        corners = [
+            (0, 0, size_x, size_y),
+            (w - size_x, 0, w, size_y),
+            (0, h - size_y, size_x, h),
+            (w - size_x, h - size_y, w, h),
+        ]
+        grays = []
+        for x0, y0, x1, y1 in corners:
+            tile = img_np[y0:y1, x0:x1]
+            R = float(tile[..., 0].mean())
+            G = float(tile[..., 1].mean())
+            B = float(tile[..., 2].mean())
+            grays.append(0.299 * R + 0.587 * G + 0.114 * B)
+        # 取最暗角 (任一角深即偏 black)
+        dark = min(grays)
+        if dark < 70:
+            return 'black'
+        if dark > 100:
+            return 'white'
+        return None
+    except Exception:
+        return None
+
+
+def _normalize_field_line(line_text):
+    """v2.3: 基于右列首字推断字段名前缀的规范化。
+
+    Examples:
+      '品度：1.0mm'        -> '厚度：1.0mm'    (OCR 漏了'厚'前缀,反查修复)
+      '口名：磅布三文治'    -> '品名：磅布三文治' (前 1 字相似修正)
+      '主厚度：0.6mm'      -> '厚度：0.6mm'    (前 2 字 endswith 期望前缀)
+      '手底布：磅布'       -> '底布：磅布'      (前 2 字 endswith 期望前缀)
+      '厚手感：中性'        -> '手感：中性'      (前 2 字 endswith 期望前缀)
+      '品名：磅布三文治'    -> 不改 (已对齐)
+      '：加硬'             -> 不改 (无前缀,跳过)
+    """
+    import re as _re
+    if not line_text:
+        return line_text
+    s = line_text.strip()
+    # 提取前缀(0-3 个汉字,以第一个 ：或 : 切分)
+    m = _re.match(r'^([\u4e00-\u9fff]{0,3})[：:](.*)$', s)
+    if not m:
+        return line_text
+    pre, rest = m.group(1), m.group(2)
+    rest_stripped = rest.lstrip('：:').strip()
+
+    # Case 1: 前缀是字典已知全词 - 不动
+    if pre in _KNOWN_FIELD_PREFIX_SET:
+        return line_text
+
+    # Case 2: 无前缀 - 不动
+    if not pre:
+        return line_text
+
+    # Case 3+: 用右列首字反查
+    right_first = rest_stripped[:1] if rest_stripped else ''
+    expected = _RIGHT_FIRST_TO_PREFIX.get(right_first)
+
+    if len(pre) == 1:
+        # 单字前缀:校验与右列首字是否匹配
+        if expected == pre:
+            return line_text  # 已对齐
+        if expected and rest_stripped:
+            return expected + '：' + rest_stripped
+    elif len(pre) >= 2:
+        # 多字前缀(可能是「手底」「厚手」「主厚」等冗余);
+        # 若以 expected 结尾,修剪前缀,只保留 expected。
+        if expected and pre.endswith(expected) and rest_stripped:
+            return expected + '：' + rest_stripped
+
+    # Case 5: 都不匹配,RapidFuzz 兜底。
+    # 同时尝试 fuzz.partial_ratio 应对 整词不似但子串重叠的场景
+    # (例如「口名」vs「品名」仅 1/3 字匹配)。score_cutoff 放宽到 60。
+    try:
+        from rapidfuzz import process, fuzz
+        best_ratio = process.extractOne(
+            pre, _KNOWN_FIELD_PREFIXES, scorer=fuzz.ratio, score_cutoff=60)
+        best_partial = process.extractOne(
+            pre, _KNOWN_FIELD_PREFIXES, scorer=fuzz.partial_ratio, score_cutoff=60)
+        best = best_ratio or best_partial
+        if best:
+            return best[0] + '：' + (rest_stripped or rest)
+    except Exception:
+        pass
+    return line_text
+
+
 # ═══════════════════════════════════════════════════════════════════
-# CLAHE 局部对比度增强(褶皱标签专用)
+# 无表格线# 2026-08-18 v2.4: Direction 2 - 行位置 + 值模式 感知的字段名纠错
+# 磅布三文治表单固定结构: 品名/厚度/手感/底布 (top→bottom)
+# D1 在以下场景失明:
+#   (a) 右列首字为数字(如「1.0mm」) -> D1 反查表无数字入口
+#   (b) 完全无前缀 -> D1 Case 2 直接跳过
+#   (c) 前缀与期期整词相似度低(「口名」 vs 「品名」 仅 1/3 字匹配, ratio<60)
+# D2 用 (行位置 + 值模式) 二级信号纠错。
+_FORM_ROW_PREFIXES = ['品名', '厚度', '手感', '底布']
+
+
+def _value_matches_expected_row(value, row_name):
+    """值是否匹配指定行的预期内容类型。
+
+    Args:
+        value: 字段冒号后的值(已 strip)。
+        row_name: 期期的字段名(品名/厚度/手感/底布)。
+    Returns:
+        bool
+    """
+    import re as _re
+    if not value:
+        return False
+    v = value.strip()
+    if row_name == '手感':
+        return v in ('加硬', '中性', '软性', '硬性', '加软', '硬', '软')
+    if row_name == '厚度':
+        return bool(_re.match(r'^\d+(\.\d+)?\s*m?m?$', v))
+    if row_name in ('品名', '底布'):
+        if '布' in v:
+            return True
+        for fab in ('棉', '涤', '麻', '丝', '绒', '无纺', '纺'):
+            if fab in v:
+                return True
+        return False
+    return False
+
+
+def _normalize_row_by_position(lines, nrows=4):
+    """Direction 2: 行位置 + 值模式 感知纠错。
+
+    对 OCR 分行后的 nrows 行, 按行位置先验(磅布三文治固定顺序
+    品名/厚度/手感/底布)配合值模式检测, 强制校正错误的字段名前缀。
+
+    Args:
+        lines: 行文本列表(每个含「：」或「:」分隔符)。
+        nrows: 期期行数, 默认 4。
+    Returns:
+        校正后的行文本列表(同长度)。
+    """
+    out = list(lines)
+    for i, ln in enumerate(out):
+        if i >= len(_FORM_ROW_PREFIXES) or i >= nrows:
+            break
+        expected = _FORM_ROW_PREFIXES[i]
+        if not ln:
+            continue
+        for sep in ('：', ':'):
+            if sep in ln:
+                pre, _, val = ln.partition(sep)
+                pre = pre.strip()
+                val = val.strip()
+                # 1) 前缀已正确 -> 不动
+                if pre == expected:
+                    break
+                # 2) 值非空且匹配期期行模式 -> 强制纠正
+                if val and _value_matches_expected_row(val, expected):
+                    out[i] = expected + '：' + val
+                break
+        else:
+            # 行内无分隔符: 视为纯值行, 按位置补前缀
+            ln_strip = ln.lstrip('：:').strip()
+            if ln_strip and _value_matches_expected_row(ln_strip, expected):
+                out[i] = expected + '：' + ln_strip
+    return out
+
+
+def _classify_line_value(val, prefix=''):
+    """根据值(或前缀+值)分类到 4 行之一, 返回 品名/厚度/手感/底布/None。"""
+    import re as _re
+    if not val:
+        return None
+    v = val.strip()
+    # 手感离散值
+    if v in ('加硬', '中性', '软性', '硬性', '加软', '硬', '软'):
+        return '手感'
+    # 厚度: 数字+mm
+    if _re.match(r'^\d+(\.\d+)?\s*m?m?$', v):
+        return '厚度'
+    # fabric: 含布或纺织字
+    if '布' in v or any(fab in v for fab in ('棉', '涤', '麻', '丝', '绒')):
+        if prefix == '品名':
+            return '品名'
+        if prefix == '底布':
+            return '底布'
+        return None  # ambiguous, 由 D3 按长度决定
+    return None
+
+
+def _reorder_by_value(lines, nrows=4):
+    """D3: 按值分类后, 按 _FORM_ROW_PREFIXES 顺序输出 4 行。
+
+    即使 OCR 错把厚度值放到了品名行, D3 仍按值的实际类型重排。
+    品名/底布 ambiguous 时用长度消歧: 长的当品名, 短的当底布。
+    """
+    by_field = {'品名': [], '厚度': [], '手感': [], '底布': []}
+    fabric_pool = []
+    for ln in lines:
+        pre, val = '', ''
+        for sep in ('：', ':'):
+            if sep in ln:
+                pre, _, val = ln.partition(sep)
+                pre = pre.strip()
+                val = val.strip()
+                break
+        else:
+            val = ln.lstrip('：:').strip()
+        f = _classify_line_value(val, prefix=pre)
+        if f and f in by_field:
+            by_field[f].append(val)
+        elif '布' in val or any(fab in val for fab in ('棉', '涤', '麻', '丝', '绒')):
+            fabric_pool.append(val)
+    # 品名/底布消歧
+    all_fab = (by_field['品名'] + by_field['底布'] + fabric_pool)
+    if len(all_fab) >= 2:
+        all_fab_sorted = sorted(set(all_fab), key=lambda x: -len(x))
+        # 已正确分类的保留; ambiguous 的按长度分配
+        if not by_field['品名']:
+            by_field['品名'] = [all_fab_sorted[0]]
+        if not by_field['底布']:
+            remaining = [v for v in all_fab_sorted[1:] if v not in by_field['品名']]
+            by_field['底布'] = remaining[:1]
+    out = []
+    for f in _FORM_ROW_PREFIXES:
+        items = by_field[f]
+        if items:
+            out.append(f + '：' + items[0])
+        else:
+            out.append('')
+    return out
+
+
+def _apply_business_dict(lines):
+    """D4: 对每行应用业务词典补全。
+
+    只对品名行 (前缀含「品名」) 的 value 调用 _complete_product_value。
+    其他字段 (厚度/手感/底布) 都是离散或结构化值, 不走词典补全。
+    """
+    out = []
+    for ln in lines:
+        if not ln:
+            out.append(ln)
+            continue
+        # 找分隔符
+        pre, _, val = '', '', ''
+        for sep in ('：', ':'):
+            if sep in ln:
+                pre, _, val = ln.partition(sep)
+                break
+        else:
+            val = ln.lstrip('：:').strip()
+        pre = pre.strip()
+        if pre == '品名' and val:
+            new_val = _complete_product_value(val)
+            if new_val != val:
+                out.append('品名：' + new_val)
+                continue
+        out.append(ln)
+    return out
+
+
+# 表单分行预处理(磅布三文治等 4 行×2 列表单标签)
+# 背景:标签无表格线,DB 检测把同行文字合并、或漏检整行 → 漏字。
+#       实测 CLAHE/降阈值对"无表格线"几乎无效,正确解法是重建行结构。
+# 做法:检测文字上下边界后等分 N 行,逐行 OCR,再与整图 OCR 择优。
 # ═══════════════════════════════════════════════════════════════════
 
-# CLAHE 常量(褶皱标签专用)
-_CLAHE_TILE_SIZE = 8
-_CLAHE_CLIP_LIMIT = 2.0
-_CLAHE_BINS = 256
+# 表单固定行数(磅布三文治:品名/厚度/手感/底布 4 行)
+_FORM_ROWS = 4
+# 判定"有文字行"的投影阈值系数(相对投影最大值)
+_FORM_TEXT_PROJ_COEF = 0.05
 
 
 # ═══════════════════════════════════════════════════════════════════
-# 褶皱标签类别门控(双轨:子串 + 品类 code)
+# 标签退化类型分派(双轨:子串 + 品类 code)
+# 不同退化机制需要不同预处理管线,故用 kind 字符串而非布尔开关。
 # ═══════════════════════════════════════════════════════════════════
 
-# 轨 1:子串白名单(品名中包含任一即命中)
-_WRINKLE_VARIANTS = frozenset({
+# 退化类型 kind 取值
+KIND_FORM_NOLINES = 'form_nolines'   # 磅布三文治等:无表格线表单 → 分行 OCR
+KIND_GLARE = 'glare'                 # 无纺布:透明膜反光 → 反光抑制
+KIND_REDSTAMP = 'redstamp'           # 杂胶/纯胶:红章污染 → 红章掩膜+擦除
+
+# 轨 1:子串白名单(品名包含任一即命中对应 kind)
+_FORM_NOLINES_VARIANTS = frozenset({
     '白磅布三文治', '黑磅布三文治', 'B级 磅布三文治',
-    '7P环保磅布三文治', '磅布三文治',
+    '7P环保磅布三文治',
+    # '磅布三文治' 已移除:它是其他变体的公共子串,
+    # 会误中「环保磅布三文治」(有表格线标签,不走 form_nolines 分行 OCR)
+})
+_GLARE_VARIANTS = frozenset({'无纺布'})
+_REDSTAMP_VARIANTS = frozenset({'杂胶', '纯胶'})
+
+# 【2026-08-27 修复】已知有表格线标签, 显式排除 — 不会被任何轨命中 form_nolines。
+# 背景:订单 TD-2026-08-27-006(879/阿桂)三条「环保磅布三文治」OCR 不全。
+# 根因 1:白名单里「磅布三文治」是公共子串, 误中「环保磅布三文治」→ 已删。
+# 根因 2:删完后「环保磅布三文治」与 7P 变体共享同一品类 code(0212/021003 等),
+#         轨 2 仍命中 form_nolines。需显式按品名前缀排除环保磅布三文治(横版表格标签)。
+_FORM_NOLINES_EXCLUDES = frozenset({
+    '环保磅布三文治',  # 横版表格标签, 含「品名:/规格:/手感:」字段, 应走默认 _ocr 整图路径
 })
 
 # 轨 2:品类 code 白名单(DeepSeekEngine._classify_product 返回值命中即算)
+# 目前仅 form_nolines 有稳定 code;glare/redstamp 以子串轨覆盖。
 _WRINKLE_CATEGORY_CODES = frozenset({
     '0212', '021003', '021201', '021202', '021203',
 })
 
 
-def is_wrinkle_label_category(product_name: Optional[str]) -> bool:
-    """双轨判定:品名是否属于"褶皱标签"类别(决定是否走 CLAHE 预处理)。
+def ocr_preprocess_kind(product_name: Optional[str]) -> Optional[str]:
+    """双轨判定:品名属于哪类退化标签,返回对应预处理 kind。
 
-    轨 1:子串匹配 — 任一 _WRINKLE_VARIANTS 子串在 product_name 中出现。
-    轨 2:品类 code — DeepSeekEngine._classify_product(product_name) 返回值
-          在 _WRINKLE_CATEGORY_CODES 中。
+    返回 'form_nolines' / 'glare' / 'redstamp' / None。
 
-    行为:
-      - product_name 为空/None → False(不抛)
-      - 任一轨异常(DB 挂/解析失败)→ 该轨视为未命中, 继续下一轨
-      - 两轨都未命中 → False
-      - 命中任一轨 → True
+    轨 1:子串匹配(覆盖当前数据)——任一变体子串命中即返回其 kind。
+    轨 2:品类 code(覆盖未来未知变体)——仅映射 form_nolines。
+
+    防御:
+      - product_name 空/None → None(不抛)
+      - 任一轨异常(DB 挂/解析失败)→ 该轨视为未命中,继续下一轨
+      - 两轨都未命中 → None
     """
     if not product_name:
-        return False
+        return None
+
+    # 已知有表格线标签 — 显式排除所有 kind(2026-08-27)。
+    # 用 startswith 精确匹配: 避免「环保磅布三文治」误中「7P环保磅布三文治」
+    # (后者是真正无表格线标签, 应继续命中 form_nolines)。
+    for excl in _FORM_NOLINES_EXCLUDES:
+        if product_name.startswith(excl):
+            return None
 
     # 轨 1:子串匹配
-    try:
-        for v in _WRINKLE_VARIANTS:
-            if v in product_name:
-                return True
-    except Exception:
-        # 子串匹配本身不该抛, 防御性 catch 避免污染调用方
-        pass
+    for kind, variants in ((KIND_FORM_NOLINES, _FORM_NOLINES_VARIANTS),
+                           (KIND_GLARE, _GLARE_VARIANTS),
+                           (KIND_REDSTAMP, _REDSTAMP_VARIANTS)):
+        try:
+            for v in variants:
+                if v in product_name:
+                    return kind
+        except Exception:
+            # 子串匹配本身不该抛,防御性 catch 避免污染调用方
+            pass
 
     # 轨 2:DeepSeekEngine._classify_product 查品类 code
     try:
         code = DeepSeekEngine._classify_product(product_name)
         if code is not None and code in _WRINKLE_CATEGORY_CODES:
-            return True
+            return KIND_FORM_NOLINES
     except Exception:
-        # DB 异常 / 任何解析错误 → 视为未命中, 不阻塞主流程
+        # DB 异常 / 任何解析错误 → 视为未命中,不阻塞主流程
         pass
 
-    return False
+    return None
 
 
-def _clahe_on_gray(gray: np.ndarray) -> np.ndarray:
-    """对灰度图做 CLAHE(局部对比度受限自适应直方图均衡)。
+def is_wrinkle_label_category(product_name: Optional[str]) -> bool:
+    """[已废弃] 兼容别名:等价于 ocr_preprocess_kind(...) == 'form_nolines'。"""
+    return ocr_preprocess_kind(product_name) == KIND_FORM_NOLINES
 
-    算法:8x8 网格,直方图裁剪系数 2.0,256 bin,双线性插值 tile 边界。
-    输入输出 dtype:uint8,shape: (H, W)。
 
-    任何异常由调用方 try/except 包住,本函数不抛。
+def _text_roi(gray: np.ndarray, margin: int = 10) -> tuple:
+    """据文字暗像素投影估计标签文字区域,返回 (y0, y1, x0, x1)。
+
+    对无表格线表单,原图可能包含大面积背景(如整袋货物照片),导致
+    `_form_row_bands` 按整张图切分而错过标签。本函数用固定亮度阈值
+    (白底黑字标签的文字一般<80)把暗像素视为文字,再取水平和垂直投影
+    超过峰值 5% 的范围作为 ROI。若 ROI 过小(<5%)或过大(>95%)则返回全图,
+    避免误裁。异常时亦返回全图。
     """
-    h, w = gray.shape
-    tile_h = h // _CLAHE_TILE_SIZE
-    tile_w = w // _CLAHE_TILE_SIZE
+    try:
+        h, w = gray.shape
+        # 固定阈值:黑字印刷字亮度一般显著低于标签白底,80 是稳健经验值
+        text = (gray < 80).astype(np.uint8)
+        proj_y = text.sum(axis=1)
+        proj_x = text.sum(axis=0)
+        thy = max(proj_y.max() * 0.05, 1)
+        thx = max(proj_x.max() * 0.05, 1)
+        ys = np.where(proj_y > thy)[0]
+        xs = np.where(proj_x > thx)[0]
+        if len(ys) == 0 or len(xs) == 0:
+            return (0, h, 0, w)
+        y0 = max(0, int(ys.min()) - margin)
+        y1 = min(h, int(ys.max()) + 1 + margin)
+        x0 = max(0, int(xs.min()) - margin)
+        x1 = min(w, int(xs.max()) + 1 + margin)
+        area_ratio = (y1 - y0) * (x1 - x0) / (h * w)
+        if area_ratio < 0.05 or area_ratio > 0.95:
+            return (0, h, 0, w)
+        return (y0, y1, x0, x1)
+    except Exception:
+        return (0, gray.shape[0], 0, gray.shape[1])
 
-    # Pad 到 tile_size 整数倍
-    pad_h = _CLAHE_TILE_SIZE * tile_h - h
-    pad_w = _CLAHE_TILE_SIZE * tile_w - w
-    if pad_h < 0:
-        pad_h = 0
-    if pad_w < 0:
-        pad_w = 0
-    if pad_h > 0 or pad_w > 0:
-        gray_p = np.pad(gray, ((0, pad_h), (0, pad_w)), mode='reflect')
-    else:
-        gray_p = gray
 
-    # Reshape: (Ty, tile_h, Tx, tile_w) → (Ty, Tx, tile_h, tile_w)
-    tiles = gray_p.reshape(_CLAHE_TILE_SIZE, tile_h, _CLAHE_TILE_SIZE, tile_w)
-    tiles = tiles.transpose(0, 2, 1, 3)
+def _form_row_bands(gray: np.ndarray, nrows: int = _FORM_ROWS):
+    """2026-08-18 v2: 自适应行带切分 - 据文字行的真实 y 范围 + 间距自适应。
 
-    # 计算每 tile 的直方图
-    hist = np.zeros((_CLAHE_TILE_SIZE, _CLAHE_TILE_SIZE, _CLAHE_BINS), dtype=np.int32)
-    flat_tiles = tiles.reshape(_CLAHE_TILE_SIZE, _CLAHE_TILE_SIZE, -1)  # (Ty, Tx, pixels)
-    for v in range(_CLAHE_BINS):
-        hist[:, :, v] = (flat_tiles == v).sum(axis=-1)
+    v1 等分 nrows 段在小字右列紧贴场景下把'0.6mm'切成两段,导致行内字符丢失。
+    v2 算法:
+      1) 用 proj>0 检测实际文字行 y 范围 (run-length 合并 8px 内的小间断);
+      2) 取 run 数 >= nrows → 第 i 个 band 中心 = 第 i 个 run 的中心,
+         band 高度 = max(run 的相邻间距, 25) (-- 保证 OCR 不会切到字);
+      3) < nrows:回退 v1 等分行为;
+      4) > nrows:合并最近的相邻 run 直到 == nrows;
+      5) 任意异常:回退 v1 等分。
+    """
+    try:
+        h = gray.shape[0]
+        if h == 0:
+            return [(0, 0)]
+        text = (gray < np.percentile(gray, 55)).astype(np.uint8)
+        proj = text.sum(axis=1)
+        # proj > 0 标记有文字像素的行
+        in_text = proj > 0
+        # 合并间距 <= 8px 的相邻 in_text 段为一行 (允许跨字符 whitespace)
+        rows = []
+        cur_a = None
+        prev = -999
+        gap_merge = 8
+        for y, v in enumerate(in_text):
+            if v:
+                if cur_a is None:
+                    cur_a = y
+                if y - prev > gap_merge and prev >= 0:
+                    rows.append((cur_a, prev))
+                    cur_a = y
+                prev = y
+        if cur_a is not None:
+            rows.append((cur_a, prev))
 
-    # 直方图裁剪 + 重分配
-    pixels_per_tile = flat_tiles.shape[-1]
-    clip_value = int(_CLAHE_CLIP_LIMIT * pixels_per_tile / _CLAHE_BINS)
-    excess = np.maximum(hist - clip_value, 0).sum(axis=-1, keepdims=True)
-    hist = np.minimum(hist, clip_value)
-    hist += (excess // _CLAHE_BINS).astype(np.int32)
+        if len(rows) < nrows:
+            # 探测不到足够多行 -> v1 等分
+            ys = np.where(proj > proj.max() * _FORM_TEXT_PROJ_COEF)[0]
+            if len(ys) == 0:
+                return [(0, h)]
+            top = int(ys.min())
+            bot = int(ys.max())
+            bands = []
+            for k in range(nrows):
+                a = top + (bot - top) * k // nrows
+                b = top + (bot - top) * (k + 1) // nrows
+                bands.append((max(0, a - 3), min(h, b + 3)))
+            return bands
 
-    # CDF
-    cdf = hist.cumsum(axis=-1)
-    cdf_max = cdf[:, :, -1:]
-    cdf_max = np.where(cdf_max == 0, 1, cdf_max)  # 避免除零(空 tile)
-    cdf = (cdf / cdf_max * (_CLAHE_BINS - 1)).astype(np.float32)
+        # 取前 nrows 个 row 行 (多余 run 合并到最近的)
+        if len(rows) > nrows:
+            # 合并方法:合并间距最小的相邻两行,直到 == nrows
+            rows = list(rows)
+            while len(rows) > nrows:
+                gaps = [(rows[i + 1][0] - rows[i][1], i)
+                        for i in range(len(rows) - 1)]
+                gaps.sort()
+                mi = gaps[0][1]
+                rows = rows[:mi] + [(rows[mi][0], rows[mi + 1][1])] + rows[mi + 2:]
 
-    # 把每个像素映射到 CDF 值
-    # flat_tiles 当前 shape (Ty, Tx, pixels),值是 0..255
-    # 用 take_along_axis 在最后一维做 lookup
-    mapped = np.take_along_axis(cdf, flat_tiles.astype(np.int32), axis=-1)
-    mapped = mapped.reshape(_CLAHE_TILE_SIZE, _CLAHE_TILE_SIZE, tile_h, tile_w)
-    mapped = mapped.transpose(0, 2, 1, 3)  # (Ty, tile_h, Tx, tile_w)
+        centers = [(a + b) // 2 for (a, b) in rows]
+        # band 高度:相邻 center 间距最小值的 1.4 (覆盖 + padding),下限 25px
+        if len(centers) > 1:
+            cents_sorted = sorted(centers)
+            min_step = min(cents_sorted[i + 1] - cents_sorted[i]
+                           for i in range(len(cents_sorted) - 1))
+            band_h = max(int(min_step * 1.4), 25)
+        else:
+            band_h = max(int(h * 0.4), 25)
 
-    # Reshape 回全图
-    result_p = mapped.reshape(_CLAHE_TILE_SIZE * tile_h, _CLAHE_TILE_SIZE * tile_w)
+        bands = []
+        for c in centers:
+            bands.append((max(0, c - band_h // 2), min(h, c + band_h // 2)))
+        return [(max(0, a - 3), min(h, b + 3)) for (a, b) in bands]
+    except Exception:
+        h = gray.shape[0]
+        text = (gray < np.percentile(gray, 55)).astype(np.uint8)
+        proj = text.sum(axis=1)
+        ys = np.where(proj > proj.max() * _FORM_TEXT_PROJ_COEF)[0]
+        if len(ys) == 0:
+            return [(0, h)]
+        top = int(ys.min())
+        bot = int(ys.max())
+        bands = []
+        for k in range(nrows):
+            a = top + (bot - top) * k // nrows
+            b = top + (bot - top) * (k + 1) // nrows
+            bands.append((max(0, a - 3), min(h, b + 3)))
+        return bands
 
-    # 裁掉 padding
-    return result_p[:h, :w].astype(np.uint8)
+
+# ═══════════════════════════════════════════════════════════════════
+# 退化类型预处理管线(numpy 手写,不引入新依赖)
+#   form_nolines → 不在图级预处理(走 _extract_form_lines 分行 OCR)
+#   glare        → 无纺布透明膜反光:多尺度 Retinex 抑制大尺度非均匀光照
+#   redstamp     → 杂胶/纯胶红章污染:红域擦成白底,保留黑字
+# ═══════════════════════════════════════════════════════════════════
+
+def _gaussian_blur(img: np.ndarray, sigma: float) -> np.ndarray:
+    """可分离高斯模糊(numpy 手写,避免引入 cv2/scipy)。
+
+    img: (H, W) 或 (H, W, C) float64。返回同 shape。
+    注意:用自实现 same-mode 切片(而非 np.convolve 的 mode='same',
+    后者在核长 > 信号长时返回 max 长度,会撑破维度)。
+    """
+    if sigma <= 0:
+        return img
+    k = max(1, int(round(sigma * 3)))
+    x = np.arange(-k, k + 1, dtype=np.float64)
+    kernel = np.exp(-(x ** 2) / (2 * sigma ** 2))
+    kernel /= kernel.sum()
+    half = k  # kernel 长度 = 2k+1,中心偏移到 half
+
+    def _conv1d(arr):
+        # 沿行(水平)卷积,结果取与输入等长的一段
+        return np.apply_along_axis(
+            lambda row: np.convolve(row, kernel)[half:half + row.shape[0]],
+            axis=1, arr=arr)
+
+    def _conv1d_col(arr):
+        # 转置后沿行卷积 = 沿原列卷积
+        return np.apply_along_axis(
+            lambda row: np.convolve(row, kernel)[half:half + row.shape[0]],
+            axis=1, arr=arr.T).T
+
+    if img.ndim == 2:
+        out = _conv1d(img)
+        out = _conv1d_col(out)
+        return out
+    out = img.copy()
+    for c in range(img.shape[2]):
+        ch = _conv1d(img[..., c])
+        out[..., c] = _conv1d_col(ch)
+    return out
+
+
+def _suppress_glare(rgb: np.ndarray) -> np.ndarray:
+    """无纺布透明膜反光:抑制大尺度非均匀光照(MSRCR 简化版)。
+
+    做法:对亮度做多尺度 Retinex( log(I) - log(blur(I)) )得光照无关的反射分量,
+    再按亮度比例重拼回彩色。高光区域被拉回,黑字保留。
+    任何异常返回原图(设计硬约束:预处理不抛)。
+    """
+    try:
+        arr = rgb.astype(np.float64)
+        lum = (0.299 * arr[..., 0] + 0.587 * arr[..., 1] + 0.114 * arr[..., 2])
+        lum = np.clip(lum, 1.0, 255.0)
+        msr = np.zeros_like(lum)
+        for sigma in (15.0, 80.0, 200.0):
+            blur = np.clip(_gaussian_blur(lum, sigma), 1.0, 255.0)
+            msr += np.log(lum) - np.log(blur)
+        msr /= 3.0
+        msr -= msr.min()
+        if msr.max() > 0:
+            msr = msr / msr.max() * 255.0
+        lum_old = lum / 255.0
+        lum_new = msr / 255.0
+        # 原图按亮度比例映射到新亮度(保留色相,仅校正光照)
+        scale = np.where(lum_old > 0.05, lum_new / lum_old, 1.0)
+        scale = np.clip(scale, 0.2, 5.0)[:, :, None]
+        return np.clip(arr * scale, 0, 255).astype(np.uint8)
+    except Exception as e:
+        logger.warning('反光抑制失败,用原图: %s', e)
+        return rgb
+
+
+def _suppress_red_stamp(rgb: np.ndarray) -> np.ndarray:
+    """胶带/纯胶:红章污染 → 把红墨水(含淡红/粉红晕染)染成白底,保住黑字。
+
+    2026-08-21 改进:
+    TD-2026-08-21-002 案例:原阈值 S>60/V>100/R-G>30 太严,
+    导致红章晕染区域(浅粉墨)未被抹去,“1.0mm” 被 PaddleOCR 误识为 “10mm”。
+    现改为双通道:
+      - 强红(红章主色):H 在 [0,15] 或 [165,180],S>50,V>80,R-G>15
+      - 浅红/粉红(盖章晕染、淡墨):
+          H 在 [0,25] 或 [155,180],S>35(排除纯灰),
+          R-G>12 且 R>G+8,V>100(避免黑字被擦)
+    黑字(R≈G≈B 都低,V<100)天然排除;
+    白色/灰底(R≈G≈B,R-G<=12)天然排除。
+
+    任何异常回原图。
+    """
+    try:
+        import cv2
+        hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)  # H:0-179, S:0-255, V:0-255
+        H, S, V = hsv[..., 0], hsv[..., 1], hsv[..., 2]
+        arr = rgb.astype(np.int16)
+        r, g = arr[..., 0], arr[..., 1]
+        # 强红通道:H/S/V/R-G 阈值同步放宽,覆盖暗红/低饱和红
+        strong_red = (
+            ((H <= 15) | (H >= 165))   # 红色色相范围(原 0-10 / 170-180)
+            & (S > 50)                  # 饱和度(原 60)
+            & (V > 100)                 # 亮度(原 100,保持以排除红章下暗红/黑字)
+            & ((r - g) > 15)            # 红色差(原 30,放宽)
+        )
+        # 浅红/粉红通道:低饱和+明显红偏,排除米色背景
+        faded_red = (
+            ((H <= 15) | (H >= 165))   # 红章色相范围(对齐 strong_red,避免吃掉米色 H=20)
+            & ((r - g) > 12)            # R-G>12(米色背景 R-G≈10,白底=0)
+            & (r > g + 8)              # 双重保证
+            & (V > 100)                 # 排除纯黑文字(R≈G≈B 都低)
+        )
+        red_mask = strong_red | faded_red
+        out = rgb.copy()
+        out[red_mask] = 255
+        return out
+    except Exception as e:
+        logger.warning('去红处理失败中回原图: %s', e)
+        return rgb
+
+def _preprocess_for_kind(img_np: np.ndarray, kind: Optional[str]) -> np.ndarray:
+    """按退化类型返回预处理后的 RGB 图。form_nolines 不在图级预处理(走分行 OCR)。
+
+    异常由各函数内部捕获返回原图。
+    """
+    if kind == KIND_GLARE:
+        return _suppress_glare(img_np)
+    if kind == KIND_REDSTAMP:
+        return _suppress_red_stamp(img_np)
+    return img_np
+
 
 # ═══════════════════════════════════════════════════════════════════
 # 知识库：从数据库加载产品名（按长度降序，优先匹配长名）
@@ -183,6 +804,35 @@ def _load_product_names():
     except Exception:
         _product_names_cache = []
     return _product_names_cache
+
+
+_yard_product_names_cache = None
+
+
+def _load_yard_product_names():
+    """加载按码(y)计量的产品名(is_usingyardforcounting=1)。
+
+    用于在 LLM STRUCT_PROMPT 里注入码基产品清单,让 LLM 输出直接和
+    API/存储口径对齐:码基产品 quantity=码数、unit=y、remark=「N支」。
+    避免 LLM 把"45支"填进 quantity、码数填进 remark 造成字段错位。
+    """
+    global _yard_product_names_cache
+    if _yard_product_names_cache is not None:
+        return _yard_product_names_cache
+    try:
+        from models._db import get_db
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT DISTINCT product_name FROM product_units "
+            "WHERE is_usingyardforcounting=1 AND product_name IS NOT NULL AND product_name != '' "
+            "ORDER BY LENGTH(product_name) DESC"
+        )
+        _yard_product_names_cache = [row[0] for row in cur.fetchall()]
+        conn.close()
+    except Exception:
+        _yard_product_names_cache = []
+    return _yard_product_names_cache
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -242,10 +892,20 @@ def _extract_lines(ocr_result):
     return lines
 
 
-def _group_into_rows(lines, y_threshold=30):
-    """将同行的文本片段拼接。Y 坐标差距 < y_threshold 视为同行。"""
+def _group_into_rows(lines, y_threshold=None):
+    """将同行的文本片段拼接。Y 坐标差距 < y_threshold 视为同行。
+
+    Args:
+        lines: list[(text, y_center, x_min)] 已排序的 OCR 文本行
+        y_threshold: float | None — 显式数值 (>0) → 固定阈值 (与历史兼容,适合已知版面的回归测试)
+            * None 或 0/负数 → 调用 _adaptive_y_threshold() 自适应推断.
+              这是 2026-08-24 的默认行为:出货单/送货单的表格行距
+              会随图片缩放/字号变化,固定 30 经常把相邻表格行合并.
+    """
     if not lines:
         return []
+    if y_threshold is None or y_threshold <= 0:
+        y_threshold = _adaptive_y_threshold([l[1] for l in lines])
     rows = []
     current_row = [lines[0]]
     current_y = lines[0][1]
@@ -263,6 +923,60 @@ def _group_into_rows(lines, y_threshold=30):
     rows.append(' '.join(t[0] for t in current_row if t[0]))
     return rows
 
+
+def _adaptive_y_threshold(ys):
+    """根据相邻 Y 坐标的 gap 分布,自适应推断行分组阈值.
+
+    适用场景:带表格线的出货单/送货单/装车单 ——
+    文本行距可随图片缩放/字号变化,固定阈值 (原 30) 经常把相邻
+    表格行误合并。算法利用「行内 vs 行间」两类 gap 在数值上的双峰分布
+    找天然分界,比固定阈值稳定。
+
+    算法:
+        1. 把所有相邻 Y 坐标的差值排成有序序列 gaps (亚像素抖动已 round)。
+        2. 找相邻 gaps 之间的最大跳跃 (max_jump):
+           跳跃点左侧都是「行内 gap」(0~3 像素),
+           跳跃点右侧都是「行间 gap」(>= 15 像素) —— 这是表格行天然的边界。
+        3. 阈值 =「行间 gap 最小值」× 0.6 (留 40% 余量给图片缩放/抖动),
+           clamp 到 [10, 35] 区间。
+        4. 兜底:gap 分布均匀 (无明显跳跃) → 用中位数 × 0.6 推断;
+           数据极少 (< 2 个 Y) → 返回 18。
+
+    Args:
+        ys: list[float] — 来自 _extract_lines() 的 y_center 序列。
+
+    Returns:
+        float — 自适应阈值(像素)。
+    """
+    if len(ys) < 2:
+        return 18.0
+    # round(1) 把同一行的微小抖动 (亚像素) 合并,避免噪声产生假 gap。
+    ys_unique = sorted(set(round(float(y), 1) for y in ys))
+    if len(ys_unique) < 2:
+        return 18.0
+    gaps = sorted(
+        ys_unique[i + 1] - ys_unique[i] for i in range(len(ys_unique) - 1)
+    )
+    if not gaps:
+        return 18.0
+    if len(gaps) == 1:
+        # 仅有 2 条 Y,无法定位「行内/行间」边界,按其 60% 推断。
+        return max(10.0, min(gaps[0] * 0.6, 35.0))
+    # 找最大跳跃 —— 行内 → 行间 的天然分界点。
+    max_jump = 0.0
+    jump_idx = -1
+    for i in range(1, len(gaps)):
+        jump = gaps[i] - gaps[i - 1]
+        if jump > max_jump:
+            max_jump = jump
+            jump_idx = i
+    if jump_idx > 0 and jump_idx < len(gaps):
+        # 跳跃点之后的最小 gap =「行间下界」,这是最安全的阈值锚点。
+        threshold = gaps[jump_idx] * 0.6
+        return max(10.0, min(threshold, 35.0))
+    # 兜底:gap 分布均匀 → 用中位数 60% 推断。
+    threshold = gaps[len(gaps) // 2] * 0.6
+    return max(8.0, min(threshold, 35.0))
 
 def _parse_row(row_text):
     """解析单行文本：找数量+单位锚点 → 切三段。
@@ -600,6 +1314,22 @@ class MoonshotEngine(BaseOCREngine):
         data_url = self._image_to_data_url(image_bytes, filename)
 
         try:
+            # 注入码基产品清单,让 LLM 输出与 API/存储口径对齐(同 DeepSeek 引擎):
+            # 码基产品 quantity=码数、unit=y、remark=「N支」。
+            yard_names = _load_yard_product_names()
+            yard_rule = ''
+            if yard_names:
+                yard_rule = (
+                    '\n\n════════════════════════════════════════\n'
+                    '【关键规则 — 码基产品字段对齐(必须遵守)】\n'
+                    '════════════════════════════════════════\n'
+                    '以下产品按码(y)计量,字段必须这样填:\n'
+                    '  quantity = 码数(图片里的实际码长,数字,如 1642.5)\n'
+                    '  unit = "y"\n'
+                    '  remark = 支数(形如"45支")\n'
+                    '即:若图片同时出现"45支"和码数(如 1642.5),码数进 quantity、unit 填 y、"45支"进 remark。\n'
+                    '码基产品清单: ' + '、'.join(yard_names)
+                )
             client = openai.OpenAI(api_key=self.API_KEY, base_url=self.BASE_URL)
             response = client.chat.completions.create(
                 model=self.MODEL,
@@ -607,7 +1337,7 @@ class MoonshotEngine(BaseOCREngine):
                     'role': 'user',
                     'content': [
                         {'type': 'image_url', 'image_url': {'url': data_url}},
-                        {'type': 'text', 'text': self.PROMPT}
+                        {'type': 'text', 'text': self.PROMPT + yard_rule}
                     ]
                 }],
                 max_tokens=self.MAX_TOKENS,
@@ -721,8 +1451,8 @@ class PaddleOCREngine(BaseOCREngine):
                 det_db_box_thresh=0.4,  # 默认 0.6 — 关键:调低才能框出小字厚度
                 use_dilation=True,    # 连通断裂笔画,利好细小数字
             )
-        # 褶皱标签专用 OCR 实例:更激进的检测阈值(det_db_thresh=0.15 / det_db_box_thresh=0.30)
-        # 默认实例的阈值适合清晰印刷体;褶皱标签经 CLAHE 增强后,文字边缘弱,
+        # 无表格线表单专用 OCR 实例:更激进的检测阈值(det_db_thresh=0.15 / det_db_box_thresh=0.30)
+        # 默认实例的阈值适合清晰印刷体;表单标签经分行 OCR 后每行文字相对孤立,
         # 需降低阈值以避免漏检。use_dilation=True 让文字区域更"胖",便于粘连字符切分。
         # _wrinkle_ocr 加载失败时,extract_text 仍可路由回 _ocr(_ensure_model 用 try/except 保护)。
         if self._wrinkle_ocr is None:
@@ -731,6 +1461,7 @@ class PaddleOCREngine(BaseOCREngine):
                     lang='ch',
                     use_angle_cls=True,
                     show_log=False,
+                    # 2026-08-18 v2 reverted: 0.20/0.40 在小字右列召回率回归,先保持 0.15/0.30。
                     det_db_thresh=0.15,
                     det_db_box_thresh=0.30,
                     use_dilation=True,
@@ -759,75 +1490,375 @@ class PaddleOCREngine(BaseOCREngine):
             # 解码失败就退回原始 bytes,PaddleOCR 自行解码(至多损失小字召回)
             return image_bytes
 
-    def _enhance_wrinkle_label(self, image_np: np.ndarray) -> np.ndarray:
-        """褶皱标签专用 CLAHE 预处理。numpy RGB (H,W,3) uint8 → RGB (H,W,3) uint8。
+    def _extract_form_lines(self, image_np: np.ndarray, ocr, bg_color=None):
+        """无表格线表单分行 OCR:逐带识别,再按几何坐标把同一行的左列单字
+        与右列字段拼回成完整字段行。
 
-        任何异常 return 原图,不抛(防御性回退,见 spec 「错误处理」)。
+        无表格线表单典型结构:左列竖排单字前缀(品/厚/手/底)+ 右列字段
+        (名：磅布三文治 / 度：1.2mm / 感：加硬 / 布：磅布三文治)。逐带 OCR
+        时左列常被识别成一整个竖向块(如「品厚」),与右列字段失联。本函数收集
+        所有带坐标的 OCR 条目,把左列竖向块拆成单字后,按各自 y 坐标与右列字段
+        配对前置,从而拼回「品名：磅布三文治」这类完整字段。最后与整图单次
+        OCR 择优(字符更多者胜)。
+
+        image_np: numpy RGB (H,W,3) uint8。
+        ocr: PaddleOCR 实例(通常用低阈值的 _wrinkle_ocr)。
+        返回 (lines, confs):lines 为自上而下、每行已拼回的字段文本列表,
+                            confs 为对应置信度列表。异常时回退整图 OCR。
         """
         try:
-            if image_np is None or image_np.size == 0:
-                return image_np
-            if image_np.ndim != 3 or image_np.shape[-1] != 3:
-                return image_np
-            # 转 float32 算亮度,避免 uint8 下溢
-            img_f = image_np.astype(np.float32)
-            # 灰度化:ITU-R BT.601
-            gray = 0.299 * img_f[..., 0] + 0.587 * img_f[..., 1] + 0.114 * img_f[..., 2]
-            gray = np.clip(gray, 0, 255).astype(np.uint8)
-            # CLAHE
-            enhanced_gray = _clahe_on_gray(gray)
-            # 用原始 RGB 通道按灰度缩放比例同步增强
-            gray_f = gray.astype(np.float32)
-            enhanced_f = enhanced_gray.astype(np.float32)
-            # 比例:enhanced / gray(避开除零)
-            ratio = np.where(gray_f > 1.0, enhanced_f / np.maximum(gray_f, 1.0), 1.0)
-            result = np.clip(img_f * ratio[..., None], 0, 255).astype(np.uint8)
-            return result
+            if image_np is None or image_np.size == 0 or image_np.ndim != 3:
+                return [], []
+            img_h, img_w = image_np.shape[:2]
+            gray = (0.299 * image_np[..., 0] + 0.587 * image_np[..., 1]
+                    + 0.114 * image_np[..., 2]).astype(np.uint8)
+
+            # 先定位标签文字 ROI,避免整袋/整景大图导致分行切到背景。
+            y0, y1, x0, x1 = _text_roi(gray, margin=10)
+            # ROI 坐标统一加回到全局坐标,保证后续 _cluster_items_to_rows 可复用。
+            # 阈值 0.95:只要 ROI 不是几乎全图,就使用 ROI 进行分行。
+            if (y1 - y0) * (x1 - x0) < img_h * img_w * 0.95:
+                roi_np = image_np[y0:y1, x0:x1]
+                gray_roi = gray[y0:y1, x0:x1]
+            else:
+                roi_np = image_np
+                gray_roi = gray
+                x0 = y0 = 0
+
+            # 用两套 band 粒度(4 带 + 6 带)分别 OCR,合并后按 y 聚类成 4 行,
+            # 每行选最佳字段+最佳前缀拼回。4 带覆盖整行不易漏字段,6 带更细
+            # 不易把文字切在边界上,合并可互补不同图的切分偏好。
+            def _run_band_ocr(nrows_band):
+                bands = _form_row_bands(gray_roi, nrows_band)
+                band_items = []
+                for a, b in bands:
+                    res = ocr.ocr(roi_np[a:b], cls=True)
+                    if not res or not res[0]:
+                        continue
+                    for item in res[0]:
+                        if not item or len(item) < 2:
+                            continue
+                        box, payload = item[0], item[1]
+                        txt = payload[0] if payload else ''
+                        conf = payload[1] if len(payload) > 1 else 1.0
+                        if not txt or not txt.strip():
+                            continue
+                        pts = np.asarray(box, dtype=np.float64)
+                        xc = float(pts[:, 0].mean()) + x0
+                        yc = float(pts[:, 1].mean()) + a + y0   # 转回全局 y
+                        h_box = float(pts[:, 1].max() - pts[:, 1].min())
+                        w_box = float(pts[:, 0].max() - pts[:, 0].min())
+                        band_items.append((txt.strip(), float(conf), xc, yc, h_box, w_box))
+                return band_items
+
+            items = _run_band_ocr(_FORM_ROWS) + _run_band_ocr(_FORM_ROWS + 2)
+            row_lines, row_confs = self._cluster_items_to_rows(
+                items, _FORM_ROWS, gray_roi, roi_np.shape[1], roi_np.shape[0])
+
+            # 对照:在 ROI 上做整图单次 OCR(同一低阈值实例),仅在分行拼回无产出时兜底
+            full_res = ocr.ocr(roi_np, cls=True)
+            full_lines, full_confs = [], []
+            if full_res and full_res[0]:
+                for item in full_res[0]:
+                    if not item or len(item) < 2:
+                        continue
+                    payload = item[1]
+                    txt = payload[0] if payload else ''
+                    conf = payload[1] if len(payload) > 1 else 1.0
+                    if txt and txt.strip():
+                        full_lines.append(txt.strip())
+                        full_confs.append(float(conf))
+
+            # 2026-08-18 v2.3: 对每行应用字段规范化(方向 1)。
+            # 这种规范化在 _extract_form_lines 末尾应用,不改 cluster 内部逻辑。
+            row_lines = [_normalize_field_line(ln) for ln in row_lines]
+            full_lines = [_normalize_field_line(ln) for ln in full_lines]
+
+            # 2026-08-18 v2.4: Direction 2 - 行位置 + 值模式 感知纠错。
+            # D1 以右列首字为唯一信号, 对数字开头/无前缀/低相似度场景失明。
+            # D2 以「行位置(磅布三文治固定顺序品名/厚度/手感/底布) +
+            # 值模式」二级信号纠错。
+            row_lines = _normalize_row_by_position(row_lines, nrows=_FORM_ROWS)
+            full_lines = _normalize_row_by_position(full_lines, nrows=_FORM_ROWS)
+
+            # 2026-08-18 v2.5: Direction 3 - 值驱动行重排序。
+            # 2111 这类图中 OCR 把厚度值错放到品名行 (值串行), D2 按行位置纠错无能为力。
+            # D3 不依赖行位置, 而按值模式识别后按字段顺序输出。
+            row_lines = _reorder_by_value(row_lines, nrows=_FORM_ROWS)
+            full_lines = _reorder_by_value(full_lines, nrows=_FORM_ROWS)
+
+            # 2026-08-18 v2.6: Direction 4 - 业务词典补全 (针对 OCR 残缺输出)。
+            # 仅对品名行应用 (其他字段如厚度/手感/底布都是结构化数据, 不补全)。
+            row_lines = _apply_business_dict(row_lines)
+            full_lines = _apply_business_dict(full_lines)
+
+            # 2026-08-19: 移除 v2.6.1 (基于图片背景色加色字前缀)。
+            # 背景色由调用方 (ocr_pipeline.extract_ocr / 移动端上传端点) 单独检测,
+            # 并通过 [标签背景: 黑色|白色] 后缀写到 ocr_text 末尾 + image.bg_color 列;
+            # 不再污染 OCR 文本里的「品名」「底布」value.
+
+            # 分行拼回是专为无表格线表单设计的修复(解决漏行/行合并),
+            # 但切带边界仍可能截断字段。整图 OCR 负责补回这类字段。
+            if row_lines and full_lines:
+                return self._merge_form_candidates(
+                    row_lines, row_confs, full_lines, full_confs)
+            if row_lines:
+                return row_lines, row_confs
+            return full_lines, full_confs
         except Exception as e:
-            logger.warning('CLAHE 预处理失败,使用原图: %s', e)
-            return image_np
+            logger.warning('表单分行 OCR 失败,回退整图: %s', e)
+            try:
+                full_res = ocr.ocr(image_np, cls=True)
+                lines, confs = [], []
+                if full_res and full_res[0]:
+                    for item in full_res[0]:
+                        if not item or len(item) < 2:
+                            continue
+                        payload = item[1]
+                        txt = payload[0] if payload else ''
+                        conf = payload[1] if len(payload) > 1 else 1.0
+                        if txt and txt.strip():
+                            lines.append(txt.strip())
+                            confs.append(float(conf))
+                return lines, confs
+            except Exception:
+                return [], []
+
+    @staticmethod
+    def _merge_form_candidates(row_lines, row_confs, full_lines, full_confs):
+        """逐行合并分行与整图 OCR 结果，优先选择信息更完整的字段。"""
+        def score(line, confidence):
+            if not (line or '').strip():
+                return -1.0
+            value = line.strip()
+            score = float(confidence or 0.0)
+            if any(value.startswith(prefix + '：') or value.startswith(prefix + ':')
+                   for prefix in _FORM_ROW_PREFIXES):
+                score += 20.0
+            if re.search(r'\b\d+(?:\.\d+)?\s*m?m\b', value, re.IGNORECASE):
+                score += 8.0
+            score += min(len(value), 30) * 0.05
+            return score
+
+        merged_lines = []
+        merged_confs = []
+        length = max(len(row_lines), len(full_lines))
+        for index in range(length):
+            candidates = []
+            if index < len(row_lines):
+                candidates.append((row_lines[index],
+                                   row_confs[index] if index < len(row_confs) else 0.0))
+            if index < len(full_lines):
+                candidates.append((full_lines[index],
+                                   full_confs[index] if index < len(full_confs) else 0.0))
+            if not candidates:
+                merged_lines.append('')
+                merged_confs.append(1.0)
+                continue
+            best_line, best_conf = max(candidates, key=lambda item: score(*item))
+            merged_lines.append(best_line)
+            merged_confs.append(best_conf)
+        return merged_lines, merged_confs
+
+    def _cluster_items_to_rows(self, items, nrows, gray, img_w, img_h):
+        """无表格线表单拼回:合并去重 + 按 y 聚类成 nrows 行 + 每行选最佳字段+前缀。
+
+        多粒度 band OCR 后同一字段/前缀可能被多次识别,或左列单字被合并成
+        竖向块(如「品厚」「厚手底」)。本函数:
+          1) 拆分竖向多字块为单字;
+          2) 对 y 接近且文本相同/包含的条目去重,保留更长/更置信者;
+          3) 按 y 坐标找最大 gap 切分成 nrows 行;
+          4) 每行内选字符最多的含冒号条目作为字段,选最短靠左的无冒号条目
+             作为前缀,拼回完整字段行。
+        无含冒号字段时退化为 _simple_rows。返回 (lines, confs)。
+        """
+        if not items:
+            return [], []
+
+        # 1) 拆分竖向合并块
+        expanded = []
+        for txt, conf, xc, yc, hb, wb in items:
+            n = len(txt)
+            if n >= 2 and hb > 1.8 * max(wb, 1.0):
+                for i, ch in enumerate(txt):
+                    yy = (yc - hb / 2.0) + (i + 0.5) * (hb / n)
+                    expanded.append((ch, conf, xc, yy, hb / n, wb))
+            else:
+                expanded.append((txt, conf, xc, yc, hb, wb))
+
+        # 2) 去重:按 y 接近 + 文本相同/包含
+        expanded.sort(key=lambda t: t[3])
+        deduped = []
+        for it in expanded:
+            txt, conf, xc, yc, hb, wb = it
+            merged = False
+            for i, d in enumerate(deduped):
+                dtxt, dconf, dxc, dyc, dhb, dwb = d
+                y_overlap = abs(yc - dyc) < max(hb, dhb) * 0.7
+                text_same = (txt == dtxt or txt in dtxt or dtxt in txt)
+                if y_overlap and text_same:
+                    if len(txt) > len(dtxt) or (len(txt) == len(dtxt) and conf > dconf):
+                        deduped[i] = it
+                    merged = True
+                    break
+            if not merged:
+                deduped.append(it)
+
+        # 3) 按 y 最大 gap 切分 nrows 行
+        if len(deduped) < nrows:
+            return self._simple_rows(deduped)
+        ys = [t[3] for t in deduped]
+        gaps = [(ys[i + 1] - ys[i], i) for i in range(len(ys) - 1)]
+        gaps.sort(reverse=True)
+        split_indices = sorted([idx for _, idx in gaps[:nrows - 1]])
+        split_ys = [(ys[idx] + ys[idx + 1]) / 2.0 for idx in split_indices]
+
+        rows = [[] for _ in range(nrows)]
+        for it in deduped:
+            y = it[3]
+            r = 0
+            while r < nrows - 1 and y > split_ys[r]:
+                r += 1
+            rows[r].append(it)
+
+        # 4) 每行选最佳字段 + 最佳前缀
+        lines, confs = [], []
+        for r in rows:
+            if not r:
+                continue
+            fields = [t for t in r if ('：' in t[0] or ':' in t[0])]
+            prefixes = [t for t in r if ('：' not in t[0] and ':' not in t[0])]
+            if not fields:
+                # 无字段:行内按 x 拼接兜底
+                r.sort(key=lambda t: t[2])
+                lines.append(''.join(t[0] for t in r))
+                confs.append(sum(t[1] for t in r) / len(r))
+                continue
+
+            # 字段:字符最多(信息最完整)且置信度高
+            fields.sort(key=lambda t: (-len(t[0]), -t[1]))
+            field_txt, field_conf = fields[0][0], fields[0][1]
+
+            prefix = ''
+            if prefixes:
+                # 前缀:短(<=3 字)、靠左、置信度高
+                prefixes.sort(key=lambda t: (len(t[0]), t[2], -t[1]))
+                pre = prefixes[0][0]
+                if len(pre) <= 3:
+                    prefix = pre
+                    field_conf = (field_conf + prefixes[0][1]) / 2.0
+            lines.append(prefix + field_txt)
+            confs.append(field_conf)
+        return lines, confs
+
+    @staticmethod
+    def _simple_rows(items):
+        """非两栏退化:按 yc 聚类成行、行内按 x 从左到右拼接。"""
+        if not items:
+            return [], []
+        items_sorted = sorted(items, key=lambda t: t[3])
+        # 行距阈值取相邻 yc 差的中位数,避免把多行压成一行
+        ys = [t[3] for t in items_sorted]
+        gaps = [ys[i + 1] - ys[i] for i in range(len(ys) - 1)]
+        row_gap = max(8.0, float(np.median(gaps)) * 0.6) if gaps else 20.0
+        rows = []
+        for it in items_sorted:
+            txt, conf, xc, yc = it[0], it[1], it[2], it[3]
+            if rows and yc <= rows[-1]['max_yc'] + row_gap:
+                rows[-1]['items'].append(it)
+                rows[-1]['max_yc'] = max(rows[-1]['max_yc'], yc)
+            else:
+                rows.append({'items': [it], 'max_yc': yc})
+        lines, confs = [], []
+        for r in rows:
+            r['items'].sort(key=lambda t: t[2])
+            line = ''.join(t[0] for t in r['items'])
+            c = [t[1] for t in r['items']]
+            lines.append(line)
+            confs.append(sum(c) / len(c))
+        return lines, confs
+
+    @staticmethod
+    def _collect(result):
+        """从 PaddleOCR 的 ocr() 返回值收集合并行文本与置信度。
+
+        返回 (lines, confs):lines 为各非空文本(已 strip),confs 为对应 float。
+        """
+        lines, confs = [], []
+        if result and result[0]:
+            for item in result[0]:
+                if item and len(item) >= 2:
+                    t = item[1][0]
+                    if t and t.strip():
+                        lines.append(t.strip())
+                    try:
+                        confs.append(float(item[1][1]))
+                    except (TypeError, ValueError):
+                        pass
+        return lines, confs
+
+    def _resolve_kind(self, preprocess_kind, apply_wrinkle_enhance):
+        """统一 kind 入参:优先 preprocess_kind;旧参数 apply_wrinkle_enhance=True
+        等价于 'form_nolines'(向后兼容别名)。"""
+        if preprocess_kind:
+            return preprocess_kind
+        if apply_wrinkle_enhance:
+            return KIND_FORM_NOLINES
+        return None
 
     @log_ocr_call('ocr.paddle', evt='extract_text',
                   failed_if=lambda r: not r,          # 失败时吞异常返回空串
                   payload=image_payload, outcome=text_outcome)
-    def extract_text(self, image_bytes, apply_wrinkle_enhance: bool = False):
+    def extract_text(self, image_bytes, preprocess_kind=None,
+                     apply_wrinkle_enhance: bool = False):
         """只做 OCR 提取纯文本(换行拼接),供行级/整单匹配复用。
 
         Args:
             image_bytes: 图片字节流。
-            apply_wrinkle_enhance: 是否走褶皱标签专用通道。
-              True  → 先 CLAHE 增强 + 用 _wrinkle_ocr(更激进阈值)
-              False → 默认 _ocr(老路径,完全向后兼容)
+            preprocess_kind: 退化类型预处理开关,取值见 KIND_* 常量。
+              'form_nolines' → 分行 OCR(逐行识别避免行合并/漏行)
+              'glare'        → 反光抑制后 OCR(无纺布)
+              'redstamp'     → 红章擦除后 OCR(杂胶/纯胶)
+              None/其它      → 默认 _ocr(老路径,完全向后兼容)
+            apply_wrinkle_enhance: [已废弃] 兼容别名,True 等价于
+              preprocess_kind='form_nolines'。
 
         行为契约:
-          - apply_wrinkle_enhance 默认 False,老调用方零感知。
+          - 默认 None,老调用方零感知。
           - _wrinkle_ocr 加载失败时,_ensure_model 已 try/except 回退到 _ocr。
+          - 预处理异常由各 _suppress_* 内部捕获返回原图,不抛。
           - 异常路径与原版一致(吞错返回 '')。
         """
+        kind = self._resolve_kind(preprocess_kind, apply_wrinkle_enhance)
         try:
             self._ensure_model()
             resized = self._resize_if_needed(image_bytes)
-            if apply_wrinkle_enhance:
-                # _enhance_wrinkle_label 接收 numpy 数组(H,W,3 uint8)而非 bytes —
-                # 必须先把 bytes 解码成 numpy,否则会因 .ndim AttributeError 被吞掉,
-                # CLAHE 永远跑不起来。PaddleOCR.ocr 同时接受 numpy 和 bytes,
-                # 所以这里直接把 numpy 透传下去即可,不再编码回 bytes。
-                img_np = np.array(Image.open(io.BytesIO(resized)).convert('RGB'))
-                resized = self._enhance_wrinkle_label(img_np)
-            # 兜底:即便 _ensure_model 已经 try/except 保护,极端情况下
-            # _wrinkle_ocr 仍可能为 None(例如某条路径跳过 _ensure_model)。
-            # `or self._ocr` 保证路由到默认实例,而不是 NoneType.ocr 抛 AttributeError
-            # 再被外层 try/except 吞掉返回空串。
-            ocr = (self._wrinkle_ocr or self._ocr) if apply_wrinkle_enhance else self._ocr
-            result = ocr.ocr(resized, cls=True)
-            if not result or not result[0]:
+            if kind == KIND_FORM_NOLINES:
+                # 无表格线表单:分行 OCR(逐行识别,避免行合并/漏行),结果再与
+                # 整图 OCR 择优(字符更多者胜)。详见 _extract_form_lines。
+                # _resize_if_needed 已返回 numpy RGB 数组;解码失败时才回退 bytes。
+                if isinstance(resized, (bytes, bytearray)):
+                    img_np = np.array(Image.open(io.BytesIO(resized)).convert('RGB'))
+                else:
+                    img_np = resized
+                ocr = (self._wrinkle_ocr or self._ocr)
+                # 一次性算 bg_color, 传入分行 OCR 内部用于色字补全 (D5)。
+                bg_color = _detect_bg_color_from_np(img_np)
+                lines, _confs = self._extract_form_lines(img_np, ocr, bg_color=bg_color)
+            elif kind in (KIND_GLARE, KIND_REDSTAMP):
+                # 反光/红章:图级预处理(擦除退化)后走默认 _ocr。
+                if isinstance(resized, (bytes, bytearray)):
+                    img_np = np.array(Image.open(io.BytesIO(resized)).convert('RGB'))
+                else:
+                    img_np = resized
+                pre = _preprocess_for_kind(img_np, kind)
+                ocr = self._ocr
+                lines, _confs = self._collect(ocr.ocr(pre, cls=True))
+            else:
+                ocr = self._ocr
+                lines, _confs = self._collect(ocr.ocr(resized, cls=True))
+            if not lines:
                 return ''
-            lines = []
-            for item in result[0]:
-                if item and len(item) >= 2:
-                    text = item[1][0]
-                    if text and text.strip():
-                        lines.append(text.strip())
             text = '\n'.join(lines)
             # 2026-08-09 修复:小字「厚度：1.0mm」常被识别成「度：1.0mm」(缺"厚"),
             # 这里补回"厚"字,让下游 AI 判别的厚度规则能稳定命中。
@@ -839,7 +1870,8 @@ class PaddleOCREngine(BaseOCREngine):
             logger.exception('PaddleOCR extract_text failed: %s', e)
             return ''
 
-    def extract_text_with_conf(self, image_bytes, apply_wrinkle_enhance: bool = False):
+    def extract_text_with_conf(self, image_bytes, preprocess_kind=None,
+                               apply_wrinkle_enhance: bool = False):
         """与 extract_text 类似,但额外返回平均置信度 (0~1)。
 
         用途:移动端 Task 6,ocr 置信度低时(模糊图)在 reason 上追加提示,
@@ -847,37 +1879,38 @@ class PaddleOCREngine(BaseOCREngine):
 
         Args:
             image_bytes: 图片字节流。
-            apply_wrinkle_enhance: 是否走褶皱标签专用通道(同 extract_text)。
+            preprocess_kind: 退化类型预处理开关(同 extract_text)。
+            apply_wrinkle_enhance: [已废弃] 兼容别名。
 
         Returns:
             (text, avg_conf): text 为拼接后的 OCR 纯文本(与 extract_text 行为一致
             —— 含「厚度」字补回);avg_conf 为所有非空文本行的平均置信度。
             失败或无文字时 avg_conf=1.0(不触发模糊提示)。
         """
+        kind = self._resolve_kind(preprocess_kind, apply_wrinkle_enhance)
         try:
             self._ensure_model()
             resized = self._resize_if_needed(image_bytes)
-            if apply_wrinkle_enhance:
-                # 同 extract_text:bytes 先解码为 numpy,CLAHE 才能真正生效。
-                img_np = np.array(Image.open(io.BytesIO(resized)).convert('RGB'))
-                resized = self._enhance_wrinkle_label(img_np)
-            # 兜底:_wrinkle_ocr 为 None 时路由回 _ocr(参见 extract_text 注释)。
-            ocr = (self._wrinkle_ocr or self._ocr) if apply_wrinkle_enhance else self._ocr
-            result = ocr.ocr(resized, cls=True)
-            if not result or not result[0]:
-                return '', 1.0
-            lines = []
-            confs = []
-            for item in result[0]:
-                if item and len(item) >= 2:
-                    text = item[1][0]
-                    conf = item[1][1]
-                    if text and text.strip():
-                        lines.append(text.strip())
-                    try:
-                        confs.append(float(conf))
-                    except (TypeError, ValueError):
-                        pass
+            if kind == KIND_FORM_NOLINES:
+                # 同 extract_text:无表格线表单走分行 OCR,并带置信度。
+                if isinstance(resized, (bytes, bytearray)):
+                    img_np = np.array(Image.open(io.BytesIO(resized)).convert('RGB'))
+                else:
+                    img_np = resized
+                ocr = (self._wrinkle_ocr or self._ocr)
+                bg_color = _detect_bg_color_from_np(img_np)
+                lines, confs = self._extract_form_lines(img_np, ocr, bg_color=bg_color)
+            elif kind in (KIND_GLARE, KIND_REDSTAMP):
+                if isinstance(resized, (bytes, bytearray)):
+                    img_np = np.array(Image.open(io.BytesIO(resized)).convert('RGB'))
+                else:
+                    img_np = resized
+                pre = _preprocess_for_kind(img_np, kind)
+                ocr = self._ocr
+                lines, confs = self._collect(ocr.ocr(pre, cls=True))
+            else:
+                ocr = self._ocr
+                lines, confs = self._collect(ocr.ocr(resized, cls=True))
             text = '\n'.join(lines)
             # 2026-08-09 修复:小字「厚度：1.0mm」常被识别成「度：1.0mm」(缺"厚"),
             # 这里补回"厚"字,与 extract_text 行为保持一致。
@@ -974,6 +2007,13 @@ class DeepSeekEngine(BaseOCREngine):
         '  - unit: 单位（必须）\n'
         '  - remark: 备注（必须填写！仔细检查该行商品右侧、下方、括号内是否有手写备注、'
         '批次号、仓位号、特殊要求等文字。确实没有才填空字符串）\n\n'
+        '【不要遗漏 OCR 证据】\n'
+        '  - OCR 文字是唯一输入，必须按版面和语义把所有可识别的商品/字段都保留下来，不能因为某一行缺少完整品名、规格或数量就整行删除。\n'
+        '  - 标签的品名、厚度、手感、底布、规格、数量、单位、备注可能被分成多行或只识别出其中几行；要把属于同一标签/同一行的碎片合并后提取。\n'
+        '  - 如果不确定一个片段应放入哪个字段，优先保留原文到 remark 或 specification，不得静默丢弃；不要为了凑字段而虚构品名、规格或数量。\n'
+        '  - OCR 中存在多个候选结果时要合并互补信息，不要用较短的候选覆盖已经识别出的更长、更完整的候选。\n\n'
+        '  - 订单表格按【OCR行】提供；每一行的文字按图片从左到右排列，表格空白单元格仍要保留位置，不能把上一行或下一行的同名列串过来。\n'
+        '  - 单位、备注等单元格没有识别到文字时输出空字符串，不能根据上下文猜填；品名/规格/数量也必须按表头和行列位置分别提取。\n\n'
         '单位标准化规则：\n'
         '  "支"/"PCS"/"pc"/"个"/"只" → "支"\n'
         '  "码"/"y"/"Y"/"YDS" → "y"\n'
@@ -1000,7 +2040,7 @@ class DeepSeekEngine(BaseOCREngine):
         '  - 在数量+单位之后的数字或短文本（如"50支（其中30支蓝色）"→ remark填"其中30支蓝色"）\n'
         '提取时务必逐行检查 OCR 文字中数量+单位之后的剩余文本，那就是备注！\n'
         '如果 OCR 文字中某行的末尾还有多余文字，请填入 remark，不要丢弃。\n\n'
-        '只返回纯 JSON 对象，不要 markdown 代码块，不要解释文字。\n'
+        '════════════════════════════════════════\n【关键规则 — 字面保真(LLM 防止改字)】\n════════════════════════════════════════\n商品名称、规格、单位、备注 必须 OCR 原文逐字保留，严禁把 OCR 中的字替换为同音/形近字。常见错例(必须避免):“磅布三文治” → 误改成 “磷布三文治”(磅≠磷)、“皮革” → 误改成 “皮格”(革≠格)、“中性” → 误改成 “中” 等。OCR 文字是怎么写的，JSON 里就怎么写，即使看起来 “不合理” 也要保留原文；后续若有疑问由人工核对，LLM 不要主动改字。\n\n只返回纯 JSON 对象，不要 markdown 代码块，不要解释文字。\n'
         '示例（注意示例中的 remark 都是有值的）：\n'
         '{"doc_number":"SO20260701","customer_name":"AC公司","items":['
         '{"product_name":"PVC桌布","specification":"1.2×1.8m","quantity":"50","unit":"支","remark":"急单"},'
@@ -1008,7 +2048,8 @@ class DeepSeekEngine(BaseOCREngine):
         '{"product_name":"7P环保杂胶","specification":"","quantity":"100","unit":"y","remark":"每箱25y"}'
         ']}\n'
         '如果没有可识别的商品行，返回 {"doc_number":"","customer_name":"","items":[]}\n\n'
-        'OCR 识别的文字如下：\n'
+        # 注意:"OCR 识别的文字如下：\n" 这个尾巴挪到 recognize() 里拼,
+        # 以便在它前面插入动态的【码基产品字段对齐】规则(见 _load_yard_product_names)。
     )
 
     # ═══════════════════════════════════════════════════════════════════
@@ -1406,7 +2447,8 @@ class DeepSeekEngine(BaseOCREngine):
         except httpx.HTTPError as e:
             # 网络/连接问题
             raise openai.APIConnectionError(
-                f'无法连接 DeepSeek 服务: {type(e).__name__}: {e}') from e
+                message=f'无法连接 DeepSeek 服务: {type(e).__name__}: {e}',
+                request=e.request) from e
         raw = ''
         try:
             raw = data['choices'][0]['message']['content'].strip()
@@ -1426,19 +2468,25 @@ class DeepSeekEngine(BaseOCREngine):
         self._ocr_engine = PaddleOCREngine()
 
     def _ocr_image(self, image_bytes):
-        """调用 PaddleOCR 提取纯文本行。"""
+        """调用 PaddleOCR 提取纯文本行，并保留表格的行列顺序。"""
         self._ocr_engine._ensure_model()
         resized = self._ocr_engine._resize_if_needed(image_bytes)
         result = self._ocr_engine._ocr.ocr(resized, cls=True)
-        if not result or not result[0]:
-            return ''
-        lines = []
-        for item in result[0]:
-            if item and len(item) >= 2:
-                text = item[1][0]
-                if text and text.strip():
-                    lines.append(text.strip())
-        return '\n'.join(lines)
+        lines, _ = self._ocr_engine._collect(result)
+        return self._format_table_rows(result, lines)
+
+    def _format_table_rows(self, result, default_lines):
+        """有足够 OCR 文本时按 Y 聚类为行，保留从左到右的单元格顺序。"""
+        if not result or not result[0] or len(result[0]) < 4:
+            return '\n'.join(default_lines)
+        lines = _extract_lines(result)
+        if len(lines) < 4:
+            return '\n'.join(default_lines)
+        rows = _group_into_rows(lines)  # 2026-08-24: 自适应阈值,适配带表格线出货单
+        if len(rows) < 2:
+            return '\n'.join(default_lines)
+        return '\n'.join(
+            f'OCR第{index}行：{row}' for index, row in enumerate(rows, 1))
 
     @log_ocr_call('ocr.deepseek', evt='recognize',
                   failed_if=lambda r: not (r or {}).get('success'),
@@ -1456,12 +2504,29 @@ class DeepSeekEngine(BaseOCREngine):
             if not ocr_text:
                 return {'success': True, 'items': [], 'doc_number': ''}
 
+            # 注入码基产品清单,让 LLM 输出与 API/存储口径对齐:
+            # 码基产品 quantity=码数、unit=y、remark=「N支」(避免 LLM 把支数填进 quantity)。
+            yard_names = _load_yard_product_names()
+            yard_rule = ''
+            if yard_names:
+                yard_rule = (
+                    '\n════════════════════════════════════════\n'
+                    '【关键规则 — 码基产品字段对齐(必须遵守)】\n'
+                    '════════════════════════════════════════\n'
+                    '以下产品按码(y)计量,字段必须这样填:\n'
+                    '  quantity = 码数(图片里的实际码长,数字,如 1642.5)\n'
+                    '  unit = "y"\n'
+                    '  remark = 支数(形如"45支")\n'
+                    '即:若图片同时出现"45支"和码数(如 1642.5),码数进 quantity、unit 填 y、"45支"进 remark。\n'
+                    '码基产品清单: ' + '、'.join(yard_names) + '\n\n'
+                )
+            prompt = self.STRUCT_PROMPT + yard_rule + 'OCR 识别的文字如下：\n'
             client = openai.OpenAI(api_key=self.API_KEY, base_url=self.BASE_URL)
             response = client.chat.completions.create(
                 model=self.MODEL,
                 messages=[{
                     'role': 'user',
-                    'content': self.STRUCT_PROMPT + ocr_text
+                    'content': prompt + ocr_text
                 }],
                 max_tokens=self.MAX_TOKENS,
                 timeout=self.TIMEOUT,
