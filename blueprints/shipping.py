@@ -27,6 +27,7 @@ from blueprints._helpers import (
     validate_image_content, check_uploaded_image,
     match_label_to_row, detect_bg_color,
     apply_user_rotation,
+    compute_placement_expected_zhi,
 )
 from blueprints.ocr_engine import (
     PaddleOCREngine, get_ocr_engine, OCR_MATCH_PROMPT_VERSION,
@@ -202,11 +203,10 @@ def shipping_records():
                 group_list.append(current)
             loose_total = sum(p.get('loose_count', 0) for p in pimgs)
             remark = rec.get('remark') or ''
-            # 备注中分别解析「支」(N支之和)与「散码」(Ny之和,可多个累加),
-            # 与清点结果分开比较。例:「1支+2y+3y」→ 支=1, 散码=5
-            zhi_m = list(re.finditer(r'(\d+)\s*支', remark))
-            expected_zhi = sum(int(x.group(1)) for x in zhi_m)
-            has_zhi = len(zhi_m) > 0
+            # 2026-09-03:placement 期望值兜底 — unit='支' + 备注无支数 → 用 quantity
+            expected_zhi, has_zhi = compute_placement_expected_zhi(
+                remark, rec.get('quantity') or '', rec.get('unit') or ''
+            )
             san_m = list(SANMA_RE.finditer(remark))
             expected_sanma = sum(int(x.group(1)) for x in san_m)
             has_sanma = len(san_m) > 0
@@ -303,15 +303,18 @@ def shipping_records():
             _pm = False
             if _pimgs:
                 _remark = item.get('remark') or ''
+                _qty = item.get('quantity') or ''
+                _unit = item.get('unit') or ''
                 _total = sum(_eff_zhi(p) for p in _pimgs)
                 _loose = sum(p.get('loose_count', 0) for p in _pimgs)
-                _zhi_m = list(re.finditer(r'(\d+)\s*支', _remark))
-                _exp_zhi = sum(int(x.group(1)) for x in _zhi_m)
-                _has_zhi = len(_zhi_m) > 0
+                # 2026-09-03:placement 期望值兜底 — unit='支' + 备注无支数 → 用 quantity
+                _exp_zhi, _has_zhi = compute_placement_expected_zhi(_remark, _qty, _unit)
                 _san_m = list(SANMA_RE.finditer(_remark))
                 _exp_san = sum(int(x.group(1)) for x in _san_m)
                 _has_san = len(_san_m) > 0
-                if _has_zhi and _total == _exp_zhi and (not _has_san or _loose == _exp_san):
+                _matched_zhi = (not _has_zhi) or (abs(_total - _exp_zhi) <= 0.01)
+                _matched_san = (not _has_san) or (abs(_loose - _exp_san) <= 0.01)
+                if (_has_zhi or _has_san) and _matched_zhi and _matched_san:
                     _pm = True
             item['placement_match'] = _pm
         group.update(summarize_remarks(group['records']))
