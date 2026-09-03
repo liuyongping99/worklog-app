@@ -268,6 +268,46 @@ def summarize_remarks(records):
     }
 
 
+def compute_placement_expected_zhi(remark, quantity_str, unit):
+    """按 record 计算 placement 期望支数与是否有支目标。
+
+    规则(2026-09-03 placement 期望值兜底):
+      1. 先按 remark 解析所有「X支」之和。
+      2. 若 remark 无「X支」且 unit == '支':
+           用 float(quantity_str) 兜底作为 expected_zhi, has_zhi=True。
+           (quantity 解析失败或 ≤0 → 兜底失效, has_zhi=False。)
+      3. 否则沿用 remark 解析结果。
+
+    Returns:
+        (expected_zhi: float, has_zhi: bool)
+
+    Note:
+        - expected_zhi 始终以 float 返回(便于跨订单统一比较)
+        - 整数 expected_zhi 仍以 33.0 形式返回(数值本身是整数)
+        - 模板如需去小数点,用 `{{ '%g' % value }}` Jinja 格式符
+    """
+    remark = remark or ''
+    qty_str = (quantity_str or '').strip()
+
+    # 1. 按原口径解析 remark 中的「X支」
+    zhi_m = list(re.finditer(r'(\d+)\s*支', remark))
+    remark_zhi = sum(int(x.group(1)) for x in zhi_m)
+    has_remark_zhi = len(zhi_m) > 0
+
+    # 2. 兜底:unit='支' 且备注无支数 → 用 quantity
+    if not has_remark_zhi and (unit or '').strip() == '支':
+        try:
+            qty_val = float(qty_str)
+        except (ValueError, TypeError):
+            qty_val = 0.0
+        if qty_val > 0:
+            return float(qty_val), True
+        return 0.0, False
+
+    # 3. 沿用 remark 解析结果
+    return float(remark_zhi), has_remark_zhi
+
+
 # =====================================================================
 #  件数换算（件 → 张/只/令）
 # =====================================================================
