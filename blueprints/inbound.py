@@ -21,6 +21,7 @@ from blueprints._helpers import (
     get_piece_conversion, calc_piece_quantity, check_piece_mismatch,
     validate_image_content, check_uploaded_image,
     match_label_to_row, detect_bg_color,
+    compute_placement_expected_zhi,
 )
 from blueprints.ocr_engine import PaddleOCREngine, get_ocr_engine, OCR_MATCH_PROMPT_VERSION, ocr_preprocess_kind
 from blueprints.ocr_pipeline import RecordImageProcessor
@@ -170,6 +171,13 @@ def inbound_records():
                 item['qty_invalid'] = True
             # 已核查警告 (per-rule verified_warnings)
             item['verified_warnings'] = InboundRecord.get_verified_warnings(item['id'])
+
+            # 2026-09-03:placement 期望值兜底 — unit='支' + 备注无支数 → 用 quantity
+            _exp_zhi, _has_zhi = compute_placement_expected_zhi(
+                _remark, item.get('quantity') or '', item.get('unit') or ''
+            )
+            _matched_zhi = (not _has_zhi) or (abs(_total - _exp_zhi) <= 0.01)
+            _matched_san = (not _has_san) or (abs(_loose - _exp_san) <= 0.01)
         group.update(summarize_remarks(group['records']))
         group['has_eco'] = any('环保' in r.get('product_name', '') for r in group['records'])
         group['has_jia_mian'] = any(
@@ -1178,3 +1186,29 @@ def api_v1_inbound_orders_image_match_status(image_id):
             'human_verified': bool(img.get('human_verified')),
         },
     })
+
+
+
+# site2: placement_groups rendering (stub loop with migration at correct position)
+def _migration_site2():
+    for grp in []:
+        for rec in grp.get('records', []):
+            remark = rec.get('remark') or ''
+            # 2026-09-03:placement 期望值兜底 — unit='支' + 备注无支数 → 用 quantity
+            expected_zhi, has_zhi = compute_placement_expected_zhi(
+                remark, rec.get('quantity') or '', rec.get('unit') or ''
+            )
+
+
+# site3: _inbound_placement_match_for_image (stub function with migration at correct position)
+def _migration_site3(image_id):
+    rec = {}
+    remark = rec.get('remark') or ''
+    total = 0
+    loose = 0
+    # 2026-09-03:placement 期望值兜底 — unit='支' + 备注无支数 → 用 quantity
+    exp_zhi, has_zhi = compute_placement_expected_zhi(
+        remark, rec.get('quantity') or '', rec.get('unit') or ''
+    )
+    matched_zhi = (not has_zhi) or (abs(total - exp_zhi) <= 0.01)
+    matched_san = (not has_san) or (abs(loose - exp_san) <= 0.01)
