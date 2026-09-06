@@ -63,7 +63,7 @@ def _is_copy_paper_record(item: dict) -> bool:
 - `item.is_copy_paper: bool`
 - `item.copy_paper_images: list[dict]` — `{id, file_path, source, sheet_count, created_at}`
 - `item.copy_paper_total: int` — `sum(img.sheet_count for img in images if img.sheet_count is not None)`
-- `item.copy_paper_match: 'green' | 'yellow' | None`
+- `item.copy_paper_match: 'green' | 'yellow' | 'partial' | None`
 
 ### 期望值计算（`blueprints/_helpers.py` 新增）
 
@@ -85,13 +85,17 @@ def compute_copy_paper_expected_quantity(quantity, unit):
 
 ```python
 total = sum(img['sheet_count'] for img in images if img['sheet_count'] is not None)
+counted_images = sum(1 for img in images if img['source'] == 'count' and img['sheet_count'] is not None)
+total_count_images = sum(1 for img in images if img['source'] == 'count')
 expected, has_expected = compute_copy_paper_expected_quantity(item['quantity'], item['unit'])
 if not has_expected:
-    match = None        # 没填 quantity → 不出徽章
-elif total == int(expected):
-    match = 'green'     # 一致
+    match = None                          # 没填 quantity → 不出徽章
+elif total_count_images > 0 and counted_images < total_count_images:
+    match = 'partial'                     # 有图但部分还没录张数 → 黄灰徽章「未录完」
+elif total == expected:
+    match = 'green'                       # 一致（quantity 浮点会精确比较，拷贝纸/日本纸 通常整数）
 else:
-    match = 'yellow'    # 不一致
+    match = 'yellow'                      # 不一致
 ```
 
 ### 端点（4 个，全部 `blueprints/shipping.py`）
@@ -135,6 +139,8 @@ else:
       <span class="copy-paper-badge green">✓ 张数 {{ total }}/{{ expected }}</span>
     {% elif item.copy_paper_match == 'yellow' %}
       <span class="copy-paper-badge yellow">⚠ 张数不符 {{ total }}≠{{ expected }}</span>
+    {% elif item.copy_paper_match == 'partial' %}
+      <span class="copy-paper-badge partial">⊕ 部分已录 {{ total }}</span>
     {% endif %}
     {% for img in item.copy_paper_images %}
       <div class="copy-paper-thumb" data-image-id="{{ img.id }}">
@@ -210,6 +216,7 @@ else:
    - 拷贝纸 (q=5令) + 1 张图 sheet_count=4 → match='yellow'
    - 日本纸 (q=500张) + 无图 → match=None
    - 拷贝纸 (q=0) + 有图 → match=None
+   - 拷贝纸 (q=5令) + 2 张 count 图（1 张 sheet_count=2，1 张 sheet_count=NULL）→ match='partial'
 
 ## 风险 / 回滚
 
