@@ -147,6 +147,28 @@
 .shipping-page .record-table .record-image-btn.has-image {
     border: 2px solid #dc2626;
 }
+
+/* 2026-08-29: 订单锁定后,操作列 lock-show 状态标识 ("已核查" / "点数") */
+.shipping-page .record-table .actions-cell .status-badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.18rem 0.5rem;
+    border-radius: 8px;
+    line-height: 1.2;
+    margin-right: 0.2rem;
+    white-space: nowrap;
+}
+.shipping-page .record-table .actions-cell .verified-badge {
+    background: #55efc4;
+    color: #1e7e34;
+    border: 1px solid #27ae60;
+}
+.shipping-page .record-table .actions-cell .placement-badge {
+    background: #e6f9ec;
+    color: #1e7e34;
+    border: 1px solid #27ae60;
+}
 /* 商品图叠加文字（仅 record 级 🖼️ 上传的图片显示：商品名顶部 + 规格底部，红字） */
 .shipping-page .img-item-record .img-overlay-name {
     position: absolute;
@@ -250,7 +272,9 @@
 /* 2026-08-15: 摆放图(计数用) 相关样式 */
 .shipping-page .placement-add-btn {
     margin: 0 0 0 0.25rem; padding: 0.18rem 0.5rem; font-size: 0.72rem; vertical-align: middle;
-    background: #fdcb6e; color: #2d3436; border: none; border-radius: 5px; cursor: pointer;
+    background: #fdcb6e; color: #2d3436; border: 2px solid #b9770e; border-radius: 5px; cursor: pointer;
+    font-weight: 700;
+    box-shadow: 0 0 0 1px rgba(185, 119, 14, 0.25);
 }
 .shipping-page .placement-add-btn:hover { background: #f0b94e; }
 /* 2026-08-16:点数匹配(支/散码均对上备注)时,"点数"按钮加绿框 */
@@ -292,6 +316,10 @@
     position: absolute; left: 3px; bottom: 3px; background: rgba(225,112,85,0.92); color: #fff;
     font-size: 0.68rem; font-weight: 700; padding: 0 0.3rem; border-radius: 8px; pointer-events: none;
 }
+/* 2026-08-29: 卸载货物的缩略图:红底标识(区别于正常橙色) */
+.shipping-page .placement-thumb-count-unload {
+    background: rgba(214, 48, 49, 0.92);
+}
 .shipping-page .placement-thumb-loose {
     position: absolute; left: 3px; top: 3px; background: rgba(0,184,148,0.92); color: #fff;
     font-size: 0.66rem; font-weight: 700; padding: 0 0.3rem; border-radius: 8px; pointer-events: none;
@@ -303,56 +331,274 @@
 }
 /* 2026-08-16:点数图区块平铺(由 .placement-area flex 流式并排);窄屏自动堆叠 */
 /* (原 .placement-group-wrap 分组包裹已去除,结构与 JS 刷新一致) */
-/* 计数弹框 */
+/* 计数弹框 — v3 · KPI 卡片化三段式 (2026-08-30) */
 .placement-count-modal {
     display: none; position: fixed; inset: 0; z-index: 2100;
     background: rgba(0,0,0,0.7); align-items: center; justify-content: center;
 }
 .placement-count-modal.show { display: flex; }
 .placement-count-modal .pcm-inner {
-    background: #fff; border-radius: 10px; width: 94%; max-width: 720px; overflow: hidden;
-    display: flex; flex-direction: column; max-height: 92vh;
+    background: #fff; border-radius: 12px; width: 94%; max-width: 880px;
+    overflow: hidden; display: flex; flex-direction: column;
+    max-height: 92vh;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.45);
 }
-.placement-count-modal .pcm-head {
-    display: flex; align-items: center; gap: 0.8rem; padding: 0.6rem 0.9rem;
-    background: #2d3436; color: #fff;
+
+/* ① 身份条(暗色,顶部) */
+.placement-count-modal .pcm-identity {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0.65rem 1rem; background: #2d3436; color: #fff;
+    flex: 0 0 auto; gap: 0.8rem;
 }
-.placement-count-modal .pcm-title { font-weight: 700; }
-.placement-count-modal .pcm-count { font-weight: 700; color: #ffd479; }
-.placement-count-modal .pcm-undo-btn {
-    margin-left: auto; background: #e17055; color: #fff; border: none; border-radius: 6px;
-    padding: 0.3rem 0.8rem; cursor: pointer; font-weight: 600;
+.placement-count-modal .pcm-id-left {
+    display: flex; align-items: center; gap: 0.7rem; min-width: 0; flex: 1;
 }
-.placement-count-modal .pcm-undo-btn:disabled { background: #b2bec3; cursor: not-allowed; }
-.placement-count-modal .pcm-size-btn {
-    background: #0984e3; color: #fff; border: none; border-radius: 6px;
-    padding: 0.3rem 0.7rem; cursor: pointer; font-weight: 700; font-size: 0.82rem;
+.placement-count-modal .pcm-title { font-weight: 700; font-size: 1.15rem; white-space: nowrap; letter-spacing: 0.02em; }
+.placement-count-modal .pcm-id-record {
+    color: #dfe6e9; font-size: 0.95rem; font-weight: 500;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.placement-count-modal .pcm-size-btn:active { background: #0769b6; }
-.placement-count-modal .pcm-loose-btn {
-    background: #00b894; color: #fff; border: none; border-radius: 6px;
-    padding: 0.3rem 0.7rem; cursor: pointer; font-weight: 700; font-size: 0.82rem;
+.placement-count-modal .pcm-id-right {
+    display: flex; align-items: center; gap: 0.7rem; flex: 0 0 auto;
 }
-.placement-count-modal .pcm-loose-btn:active { background: #009e80; }
-.placement-count-modal .pcm-loose {
-    font-weight: 700; color: #55efc4; font-size: 0.85rem; margin-left: 0.1rem;
+.placement-count-modal .pcm-id-imgpos {
+    font-size: 0.82rem; color: #b2bec3; font-weight: 600;
+    padding: 0.18rem 0.55rem; background: rgba(255,255,255,0.08);
+    border-radius: 4px;
 }
-.placement-count-modal .pcm-close-btn { background: none; border: none; color: #fff; font-size: 1.2rem; cursor: pointer; }
+.placement-count-modal .pcm-close-btn {
+    background: none; border: none; color: #dfe6e9;
+    font-size: 1.55rem; line-height: 1; cursor: pointer;
+    padding: 0.15rem 0.5rem; border-radius: 4px; transition: background 0.15s;
+}
+.placement-count-modal .pcm-close-btn:hover { background: rgba(255,255,255,0.12); color: #fff; }
+
+/* ② KPI 三联卡片(白底) */
+.placement-count-modal .pcm-kpi {
+    display: grid; grid-template-columns: 1fr 1.6fr 1fr;
+    gap: 0.75rem; padding: 0.85rem 1rem 0.95rem;
+    background: #fff; flex: 0 0 auto;
+    border-bottom: 1px solid #e9ecef;
+}
+.placement-count-modal .pcm-kpi-card {
+    background: #fafbfc; border: 1px solid #e9ecef; border-radius: 8px;
+    padding: 0.55rem 0.7rem 0.6rem;
+    display: flex; flex-direction: column; gap: 0.3rem; min-width: 0;
+}
+.placement-count-modal .pcm-kpi-label {
+    font-size: 0.78rem; color: #868e96; font-weight: 700;
+    letter-spacing: 0.04em; text-transform: uppercase;
+}
+.placement-count-modal .pcm-kpi-value {
+    font-size: 1.95rem; font-weight: 800; color: #2d3436; line-height: 1.1;
+    display: flex; align-items: baseline; gap: 0.18rem;
+}
+.placement-count-modal .pcm-kpi-unit {
+    font-size: 0.95rem; font-weight: 600; color: #868e96;
+}
+.placement-count-modal .pcm-kpi-sub {
+    font-size: 0.8rem; color: #868e96; font-weight: 600;
+}
+.placement-count-modal .pcm-kpi-bar {
+    height: 5px; background: #e9ecef; border-radius: 3px; overflow: hidden;
+}
+.placement-count-modal .pcm-kpi-fill {
+    height: 100%; background: #fdcb6e; width: 0%; transition: width 0.25s ease;
+}
+.placement-count-modal .pcm-kpi-fill.ok { background: #00b894; }
+.placement-count-modal .pcm-kpi-fill.over { background: #fdcb6e; }
+
+/* ③ 图片区(暗底,垂直中段) */
 .placement-count-modal .pcm-body {
-    position: relative; overflow: auto; background: #1e272e; display: flex; justify-content: center;
-    max-height: 70vh; padding: 0.5rem;
+    position: relative; overflow: auto; background: #1e272e;
+    display: flex; justify-content: center; align-items: center;
+    min-height: 280px; flex: 1 1 auto; padding: 1rem;
 }
-.placement-count-modal .pcm-img-wrap { position: relative; display: inline-block; line-height: 0; align-self: flex-start; flex: 0 0 auto; }
-.placement-count-modal .pcm-img { max-width: 100%; max-height: calc(70vh - 1rem); width: auto; height: auto; display: block; cursor: crosshair; }
-.placement-count-modal .pcm-marks { position: absolute; left: 0; top: 0; right: 0; bottom: 0; pointer-events: none; z-index: 3; }
+.placement-count-modal .pcm-img-wrap {
+    position: relative; display: inline-block; line-height: 0;
+    align-self: center; flex: 0 0 auto;
+}
+.placement-count-modal .pcm-img {
+    max-width: 100%; max-height: calc(70vh - 1rem);
+    width: auto; height: auto; display: block; cursor: crosshair;
+    border-radius: 4px;
+}
+.placement-count-modal .pcm-marks {
+    position: absolute; left: 0; top: 0; right: 0; bottom: 0;
+    pointer-events: none; z-index: 3;
+}
 .placement-count-modal .pcm-mark {
     position: absolute; transform: translate(-50%, -50%);
     color: #ff3b30; font-weight: 700; text-align: center;
     text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 1px 2px rgba(0,0,0,0.6);
     white-space: nowrap; pointer-events: none;
 }
-.placement-count-modal .pcm-tip { padding: 0.5rem 0.9rem; font-size: 0.78rem; color: #868e96; background: #f8f9fa; }
-.placement-count-modal .pcm-tip b { color: #e17055; }
+
+/* ④ 操作工具栏(浅底,扁平按钮) */
+/* === 新布局: 主操作行(图片上方) + 左右黑色留白控件 ============================ */
+
+/* 主操作行(白底): 直输 / 散码 / 卸载 */
+.placement-count-modal .pcm-actions {
+    display: flex; align-items: center; gap: 0.6rem;
+    padding: 0.65rem 1rem; background: #fff;
+    border-bottom: 1px solid #e9ecef; flex: 0 0 auto;
+}
+.placement-count-modal .pcm-actions .pcm-tb-btn {
+    padding: 0.55rem 1.05rem; font-size: 0.95rem;
+}
+.placement-count-modal .pcm-actions .pcm-act-spacer { flex: 1; }
+.placement-count-modal .pcm-actions .pcm-act-hint {
+    font-size: 0.82rem; color: #868e96; font-weight: 500;
+}
+
+/* 公共:图片两侧的玻璃态黑色控件 */
+.placement-count-modal .pcm-side-zoom,
+.placement-count-modal .pcm-corner-undo {
+    position: absolute; z-index: 5;
+    background: rgba(0,0,0,0.55);
+    border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 10px; padding: 0.4rem;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+}
+
+/* 左侧: +/- (垂直堆叠) */
+.placement-count-modal .pcm-side-zoom {
+    left: 1rem; top: 1rem;
+    display: inline-flex; flex-direction: row; gap: 0.4rem;
+    /* 与右上角撤销按钮水平对齐(.pcm-corner-undo top:1rem) */
+}
+.placement-count-modal .pcm-side-zoom .pcm-tb-btn {
+    width: 40px; height: 40px;
+    padding: 0; font-size: 1.35rem; line-height: 1;
+    background: rgba(255,255,255,0.92);
+    border: 1px solid rgba(255,255,255,0.25);
+    border-radius: 8px; color: #2d3436;
+    display: inline-flex; align-items: center; justify-content: center;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+}
+.placement-count-modal .pcm-side-zoom .pcm-tb-btn:hover {
+    background: #fff; border-color: #ced4da;
+}
+.placement-count-modal .pcm-side-zoom .pcm-tb-key { display: none; }
+
+/* 右上角: 撤销(琥珀色填充) */
+.placement-count-modal .pcm-corner-undo {
+    right: 1rem; top: 1rem;
+    display: inline-flex; flex-direction: row; align-items: center;
+    gap: 0.4rem; padding: 0.5rem 0.85rem;
+    background: rgba(253,203,110,0.95);
+    border-color: rgba(185,119,14,0.5);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+}
+.placement-count-modal .pcm-corner-undo .pcm-tb-btn {
+    background: transparent; border: none; padding: 0;
+    font-size: 1rem; color: #2d3436; font-weight: 700;
+    display: inline-flex; align-items: center; gap: 0.4rem;
+}
+.placement-count-modal .pcm-corner-undo .pcm-tb-btn:hover { background: transparent; }
+.placement-count-modal .pcm-corner-undo .pcm-tb-btn:disabled {
+    color: #95a5a6; cursor: not-allowed;
+}
+.placement-count-modal .pcm-corner-undo .pcm-tb-key {
+    background: rgba(45,52,54,0.18); color: #2d3436;
+}
+
+/* === 原底部工具栏: 隐藏(已搬迁到主操作行 / 图片区) === */
+
+.placement-count-modal .pcm-toolbar { display: none; }
+.placement-count-modal .pcm-tb-btn {
+    background: #fff; border: 1px solid #e9ecef; color: #2d3436;
+    padding: 0.5rem 0.9rem; border-radius: 8px; cursor: pointer;
+    font-size: 0.95rem; font-weight: 600;
+    display: inline-flex; align-items: center; gap: 0.32rem;
+    transition: background 0.15s, border-color 0.15s;
+}
+.placement-count-modal .pcm-tb-btn:hover { background: #f1f3f5; border-color: #ced4da; }
+.placement-count-modal .pcm-tb-btn:active { background: #e9ecef; }
+.placement-count-modal .pcm-tb-key {
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 0.78rem; font-weight: 700;
+    background: rgba(45,52,54,0.08); color: #868e96;
+    padding: 0.05rem 0.3rem; border-radius: 3px;
+}
+/* 主操作:撤销(琥珀色填充) */
+.placement-count-modal .pcm-tb-btn.pcm-tb-undo {
+    background: #fdcb6e; border-color: #b9770e; color: #2d3436;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+}
+.placement-count-modal .pcm-tb-btn.pcm-tb-undo:hover { background: #f0b94e; }
+.placement-count-modal .pcm-tb-btn.pcm-tb-undo:disabled {
+    background: #f1f3f5; border-color: #e9ecef; color: #adb5bd;
+    cursor: not-allowed; box-shadow: none;
+}
+.placement-count-modal .pcm-tb-btn.pcm-tb-undo:disabled .pcm-tb-key {
+    background: rgba(0,0,0,0.04); color: #ced4da;
+}
+/* 次操作:散码 / 直输(彩色描边) */
+.placement-count-modal .pcm-tb-btn.pcm-tb-loose {
+    border-color: #00b894; color: #00b894;
+}
+.placement-count-modal .pcm-tb-btn.pcm-tb-loose:hover { background: rgba(0,184,148,0.06); }
+.placement-count-modal .pcm-tb-btn.pcm-tb-manual {
+    border-color: #74b9ff; color: #0769b6;
+}
+.placement-count-modal .pcm-tb-btn.pcm-tb-manual:hover { background: rgba(116,185,255,0.08); }
+/* 放大/缩小组合(segmented) */
+.placement-count-modal .pcm-tb-group {
+    display: inline-flex; border: 1px solid #e9ecef;
+    border-radius: 6px; overflow: hidden;
+}
+.placement-count-modal .pcm-tb-group .pcm-tb-btn {
+    border: none; border-radius: 0; padding: 0.35rem 0.6rem;
+}
+.placement-count-modal .pcm-tb-group .pcm-tb-btn + .pcm-tb-btn {
+    border-left: 1px solid #e9ecef;
+}
+/* 卸载切换(勾选后红底白字) */
+.placement-count-modal .pcm-tb-toggle {
+    display: inline-flex; align-items: center; gap: 0.32rem;
+    padding: 0.35rem 0.7rem; background: #fff;
+    border: 1px solid #e9ecef; border-radius: 6px; cursor: pointer;
+    font-size: 0.78rem; font-weight: 600; color: #2d3436;
+    transition: background 0.15s, border-color 0.15s;
+}
+.placement-count-modal .pcm-tb-toggle:hover { background: #f1f3f5; border-color: #ced4da; }
+.placement-count-modal .pcm-tb-toggle input { margin: 0; cursor: pointer; }
+.placement-count-modal .pcm-tb-toggle.checked {
+    background: #d63031; border-color: #d63031; color: #fff;
+}
+.placement-count-modal .pcm-tb-toggle.checked .pcm-tb-key {
+    background: rgba(255,255,255,0.2); color: #fff;
+}
+
+/* ⑤ 快捷键脚注 */
+.placement-count-modal .pcm-shortcuts {
+    padding: 0.45rem 1rem; font-size: 0.82rem; color: #636e72;
+    background: #f1f3f5; border-top: 1px solid #e9ecef;
+    text-align: center; font-family: ui-monospace, SFMono-Regular, monospace;
+    letter-spacing: 0.02em; flex: 0 0 auto;
+}
+.placement-count-modal .pcm-shortcuts b {
+    font-size: 0.88rem;
+    color: #2d3436; background: rgba(45,52,54,0.06);
+    padding: 0.05rem 0.32rem; border-radius: 3px; font-weight: 700;
+    margin: 0 0.05rem;
+}
+
+/* 2026-08-21: 直接输入支数弹框 */
+.manual-count-modal { display: none; position: fixed; inset: 0; z-index: 2300; background: rgba(0,0,0,0.5); align-items: center; justify-content: center; }
+.manual-count-modal.show { display: flex; }
+.manual-count-modal .mcm-inner { background: #fff; border-radius: 10px; width: 360px; max-width: 92vw; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,0.35); }
+.manual-count-modal .mcm-title { padding: 0.7rem 1rem; font-weight: 700; font-size: 1rem; background: #6c5ce7; color: #fff; }
+.manual-count-modal .mcm-body { padding: 1rem; }
+.manual-count-modal .mcm-body input { width: 100%; box-sizing: border-box; padding: 0.6rem 0.7rem; font-size: 1.05rem; border: 1px solid #dfe6e9; border-radius: 6px; }
+.manual-count-modal .mcm-hint { margin-top: 0.5rem; color: #868e96; font-size: 0.78rem; line-height: 1.4; }
+.manual-count-modal .mcm-actions { display: flex; gap: 0.5rem; padding: 0 1rem 1rem; justify-content: flex-end; }
+.manual-count-modal .mcm-actions button { padding: 0.5rem 0.95rem; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9rem; font-weight: 600; }
+.manual-count-modal .mcm-clear { background: #fab1a0; color: #b3392b; }
+.manual-count-modal .mcm-cancel { background: #dfe6e9; color: #2d3436; }
+.manual-count-modal .mcm-save { background: #6c5ce7; color: #fff; }
 
 /* 2026-08-16: 散码数量录入弹框 */
 .loose-count-modal {
@@ -670,9 +916,15 @@ document.getElementById('voiceInputBtn').addEventListener('click', function () {
                         <button type="button" class="btn btn-sm move-down-btn lock-hide" data-id="{{ item.id }}" title="下移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.1rem 0.35rem;font-size:0.75rem;">▼</button>
                         <button type="button" class="btn btn-primary btn-sm edit-record-btn lock-hide" data-id="{{ item.id }}">✏️</button>
                         <button type="button" class="btn btn-danger btn-sm delete-record-btn lock-hide" data-id="{{ item.id }}">🗑️</button>
-                        {% if '皮革木板' not in (item.product_name or '') %}<button type="button" class="btn btn-sm record-image-btn lock-hide{% if item.has_image %} has-image{% endif %}" data-record-id="{{ item.id }}" title="上传图片到此商品{% if item.has_image %}（已上传）{% endif %}" style="background:#74b9ff;color:#fff;">🖼️</button>{% endif %}
+                        {% if item.is_copy_paper %}
+                        <button type="button" class="btn btn-sm copy-paper-label-btn lock-hide" data-record-id="{{ item.id }}" data-order-id="{{ group.id }}" data-source="label" title="上传标签图（拷贝纸/日本纸，无需 OCR）" style="background:#74b9ff;color:#fff;">📷 标签</button>
+                        <button type="button" class="btn btn-sm copy-paper-count-btn lock-hide" data-record-id="{{ item.id }}" data-order-id="{{ group.id }}" data-source="count" title="上传点数图并录入张数" style="background:#fdcb6e;color:#222;">📊 张数</button>
+                        {% endif %}
+                        {% if not item.is_board %}<button type="button" class="btn btn-sm record-image-btn lock-hide{% if item.has_image %} has-image{% endif %}" data-record-id="{{ item.id }}" title="上传图片到此商品{% if item.has_image %}（已上传）{% endif %}" style="background:#74b9ff;color:#fff;">🖼️</button>{% endif %}
                         {% if '支' in (item.unit_hint or '') or '支' in (item.piece_hint or '') %}<button type="button" class="placement-add-btn lock-hide{% if item.placement_match %} placement-ok{% endif %}" data-record-id="{{ item.id }}" data-order-id="{{ group.id }}" title="添加点数图(供清点支数)" onclick="openPlacementImageModal('{{ item.id }}','{{ group.id }}')">点数</button>{% endif %}
                         <input type="file" class="record-image-input" data-record-id="{{ item.id }}" accept="image/*" multiple style="display:none;">
+                        {% if item.verified %}<span class="status-badge verified-badge lock-show" title="该行已核查">✓ 已核查</span>{% endif %}
+                        {% if '支' in (item.unit_hint or '') or '支' in (item.piece_hint or '') %}{% if item.placement_match %}<span class="status-badge placement-badge lock-show" title="该行已添加点数图">✓ 点数</span>{% endif %}{% endif %}
                     </td>
                 </tr>
                 {% endfor %}
@@ -778,7 +1030,13 @@ document.getElementById('voiceInputBtn').addEventListener('click', function () {
             {% set _groups = placement_groups.get(group.id, []) %}
             {% for _grp in _groups %}
                 {% for _item in _grp['items'] %}
-                <div class="placement-record-block" data-record-id="{{ _item.record_id }}">
+                <div class="placement-record-block"
+                     data-record-id="{{ _item.record_id }}"
+                     data-total="{{ _item.total }}"
+                     data-expected-zhi="{{ _item.expected_zhi }}"
+                     data-has-zhi="{{ '1' if _item.has_zhi else '0' }}"
+                     data-img-count="{{ _item.images | length }}"
+                     data-loose-total="{{ _item.loose_total }}">
                     <div class="placement-record-head">
                         <span class="placement-record-name">{{ _grp.product_name }}{% if _item.specification %} · {{ _item.specification }}{% endif %}</span>
                         <span class="placement-count-badge" data-total="{{ _item.total }}">已点 {{ _item.total }} 支</span>
@@ -811,7 +1069,11 @@ document.getElementById('voiceInputBtn').addEventListener('click', function () {
                         {% for pimg in _item.images %}
                         <div class="placement-thumb-wrap" data-image-id="{{ pimg.id }}" data-record-id="{{ _item.record_id }}">
                             <img class="placement-thumb" src="/upload/{{ pimg.relative_path }}" data-image-id="{{ pimg.id }}" alt="点数图">
-                            <span class="placement-thumb-count">{{ pimg.n_marks }} 支</span>
+                            {% if pimg.is_unload %}
+                            <span class="placement-thumb-count placement-thumb-count-unload" title="卸载货物,本图支数从总数扣减">卸 -{{ pimg.effective_zhi }} 支</span>
+                            {% else %}
+                            <span class="placement-thumb-count">{{ pimg.effective_zhi }} 支</span>
+                            {% endif %}
                             {% if pimg.loose_count %}<span class="placement-thumb-loose">散码 {{ pimg.loose_count }} y</span>{% endif %}
                             <button type="button" class="placement-del-btn lock-hide" data-image-id="{{ pimg.id }}" title="删除此点数图">×</button>
                         </div>
@@ -859,26 +1121,75 @@ document.getElementById('voiceInputBtn').addEventListener('click', function () {
 {% with smart_add_api="/api/v1/shipping-orders" %}{% include "_smart_add_modal.html" %}{% endwith %}
 {% with image_api="/api/v1/shipping-orders" %}{% include "_image_upload_modal.html" %}{% endwith %}
 
-{# 2026-08-15: 摆放图计数弹框(点击任意位置加计数点 + 连续撤销) #}
+{# 2026-08-15 + v3 (2026-08-30): 摆放图计数弹框(点击任意位置加计数点 + 连续撤销) #}
 <div id="placementCountModal" class="placement-count-modal">
     <div class="pcm-inner">
-        <div class="pcm-head">
-            <span class="pcm-title">🧮 清点支数</span>
-            <span class="pcm-count" id="pcmCount">已点 0 支</span>
-            <button type="button" id="pcmBigger" class="pcm-size-btn" title="增大数字">A＋ 放大</button>
-            <button type="button" id="pcmSmaller" class="pcm-size-btn" title="缩小数字">A－ 缩小</button>
-            <button type="button" id="pcmLoose" class="pcm-loose-btn" title="录入散码数量">散码</button>
-            <span class="pcm-loose" id="pcmLooseVal" style="display:none;"></span>
-            <button type="button" id="pcmUndo" class="pcm-undo-btn" title="撤销最近一次点击">↩ 撤销</button>
-            <button type="button" id="pcmClose" class="pcm-close-btn" title="关闭">✕</button>
+        {# ① 身份条(暗色)— 标题 + 记录名 + 图序号 + 关闭 #}
+        <div class="pcm-identity">
+            <div class="pcm-id-left">
+                <span class="pcm-title">🧮 清点支数</span>
+                <span class="pcm-id-record" id="pcmRecordName">—</span>
+            </div>
+            <div class="pcm-id-right">
+                <span class="pcm-id-imgpos" id="pcmImgPosLabel">本图第 -/- 张</span>
+                <button type="button" id="pcmClose" class="pcm-close-btn" title="关闭 (Esc)">✕</button>
+            </div>
         </div>
+
+        {# ② KPI 三联卡片 — 本图 / 累计·目标 / 散码 #}
+        <div class="pcm-kpi">
+            <div class="pcm-kpi-card pcm-kpi-cur">
+                <div class="pcm-kpi-label">本图</div>
+                <div class="pcm-kpi-value"><span id="pcmCount">0</span><span class="pcm-kpi-unit">支</span></div>
+            </div>
+            <div class="pcm-kpi-card pcm-kpi-cum">
+                <div class="pcm-kpi-label">累计 / 目标</div>
+                <div class="pcm-kpi-value"><span id="pcmCumulative">0 / —</span><span class="pcm-kpi-unit">支</span></div>
+                <div class="pcm-kpi-sub" id="pcmProgText">本记录累计 0 / 目标 — · 共 0 张</div>
+                <div class="pcm-kpi-bar"><div class="pcm-kpi-fill" id="pcmProgBar"></div></div>
+            </div>
+            <div class="pcm-kpi-card pcm-kpi-loose">
+                <div class="pcm-kpi-label">散码</div>
+                <div class="pcm-kpi-value"><span id="pcmLooseVal">0</span><span class="pcm-kpi-unit">y</span></div>
+            </div>
+        </div>
+
+        {# ③ 图片区(暗底)— 摆放图 + 红色支数标记 #}
+        <div class="pcm-actions" id="pcmActions">
+            <button type="button" id="pcmManual" class="pcm-tb-btn pcm-tb-manual" title="直接输入支数 (M) — 与点击计数等效">
+                <span>✎ 直输</span><span class="pcm-tb-key">M</span>
+            </button>
+            <button type="button" id="pcmLoose" class="pcm-tb-btn pcm-tb-loose" title="录入散码数量 (L)">
+                <span>散码</span><span class="pcm-tb-key">L</span>
+            </button>
+            <label class="pcm-tb-toggle" id="pcmUnloadWrap" title="勾选后,本图清点支数以负数计入累计(卸载/退货) (U)">
+                <input type="checkbox" id="pcmUnload"><span>⬇ 卸载</span><span class="pcm-tb-key">U</span>
+            </label>
+            <span class="pcm-act-spacer"></span>
+            <span class="pcm-act-hint">点击图个位置计 1 支、数字键 1–9 直输</span>
+        </div>
+
         <div class="pcm-body" id="pcmBody">
+            <div class="pcm-side-zoom" id="pcmSideZoom" aria-label="调节手动输入数字">
+                <button type="button" id="pcmBigger" class="pcm-tb-btn" title="数字 +1 (+)" aria-label="加一">+</button>
+                <button type="button" id="pcmSmaller" class="pcm-tb-btn" title="数字 -1 (−)" aria-label="减一">−</button>
+            </div>
+            <div class="pcm-corner-undo" id="pcmCornerUndo">
+                <button type="button" id="pcmUndo" class="pcm-tb-btn pcm-tb-undo" title="撤销最近一次点击 (Z)">
+                    <span>↩</span><span>撤销</span><span class="pcm-tb-key">Z</span>
+                </button>
+            </div>
             <div class="pcm-img-wrap" id="pcmImgWrap">
                 <img id="pcmImg" class="pcm-img" src="" alt="摆放图">
                 <div id="pcmMarks" class="pcm-marks"></div>
             </div>
         </div>
-        <div class="pcm-tip">点击图中<b>任意位置</b>计 1 支，数字为固定可读尺寸。「撤销」可连续撤销。</div>
+
+        {# ④ 操作工具栏 — 撤销 / 放大·缩小 / 散码 / 直输 / 卸载切换 #}
+
+
+        {# ⑤ 快捷键脚注 #}
+        <div class="pcm-shortcuts"><b>Z</b> 撤销 · <b>U</b> 卸载 · <b>L</b> 散码 · <b>M</b> 直输 · <b>+/−</b> 字号 · <b>1-9</b> 直输 · <b>Esc</b> 关闭</div>
     </div>
 </div>
 
@@ -895,6 +1206,23 @@ document.getElementById('voiceInputBtn').addEventListener('click', function () {
         </div>
     </div>
 </div>
+
+
+<div id="manualCountModal" class="manual-count-modal">
+    <div class="mcm-inner">
+        <div class="mcm-title">🖊️ 直接输入支数</div>
+        <div class="mcm-body">
+            <input type="number" id="manualCountInput" min="0" step="1" placeholder="请输入支数" inputmode="numeric">
+            <div class="mcm-hint">直接输入会清空这张图的点击计数点,二者互斥。「清空」可恢复点击计数。</div>
+        </div>
+        <div class="mcm-actions">
+            <button type="button" id="manualCountClear" class="mcm-clear">清空</button>
+            <button type="button" id="manualCountCancel" class="mcm-cancel">取消</button>
+            <button type="button" id="manualCountSave" class="mcm-save">保存</button>
+        </div>
+    </div>
+</div>
+
 
 <script>
     // ── 行级 OCR 匹配徽章（任务流 OCR-Match 前端） ──
