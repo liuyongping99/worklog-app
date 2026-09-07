@@ -1083,6 +1083,36 @@ document.getElementById('voiceInputBtn').addEventListener('click', function () {
                 {% endfor %}
             {% endfor %}
             </div>
+            {# 2026-09-06: 拷贝纸/日本纸 行级图 - 紧跟 placement-area,放在日期组结束前
+                placement-area 是按订单聚合的 flex 容器,而 copy-paper 按 record 渲染,
+                所以这里起一个新 for 循环让 item 进入作用域(placement-area 内只有 _item,来源不同) #}
+            {% for item in group.records %}
+                {% if item.is_copy_paper and item.copy_paper_images %}
+                <div class="copy-paper-area">
+                    <div class="copy-paper-header">
+                        {% if item.copy_paper_match == 'green' %}
+                            <span class="copy-paper-badge green">✓ 张数 {{ item.copy_paper_total }}/{{ item.copy_paper_expected }}</span>
+                        {% elif item.copy_paper_match == 'yellow' %}
+                            <span class="copy-paper-badge yellow">⚠ 张数不符 {{ item.copy_paper_total }}≠{{ item.copy_paper_expected }}</span>
+                        {% elif item.copy_paper_match == 'partial' %}
+                            <span class="copy-paper-badge partial">⊕ 部分已录 {{ item.copy_paper_total }}</span>
+                        {% endif %}
+                    </div>
+                    <div class="copy-paper-thumb-list">
+                        {% for img in item.copy_paper_images %}
+                        <div class="copy-paper-thumb" data-image-id="{{ img.id }}">
+                            <img src="/upload/{{ img.file_path }}" alt="copy paper {{ img.source }}">
+                            <span class="copy-paper-tag tag-{{ img.source }}">{{ '标签' if img.source == 'label' else '点数' }}</span>
+                            {% if img.source == 'count' %}
+                            <input class="copy-paper-count-input" type="number" min="0" value="{{ img.sheet_count if img.sheet_count is not none else '' }}" data-image-id="{{ img.id }}" placeholder="张数">
+                            {% endif %}
+                            <button type="button" class="copy-paper-delete-btn" data-image-id="{{ img.id }}" title="删除">×</button>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+            {% endfor %}
         </div><!-- end date-group -->
         {% endfor %}
     {% else %}

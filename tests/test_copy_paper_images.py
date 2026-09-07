@@ -330,3 +330,21 @@ def test_enrich_non_copy_paper_item(fresh_record):
     _enrich_copy_paper_for_item(item)
     assert item['is_copy_paper'] is False
     assert item['copy_paper_match'] is None
+
+
+def test_enrich_sets_expected_field(fresh_record):
+    """Task 6: copy_paper_expected 字段写入(模板徽章文案依赖)。"""
+    rid = fresh_record
+    item = _make_item(rid, 5, '令')
+    _enrich_copy_paper_for_item(item)
+    assert item['copy_paper_expected'] == 5.0
+
+    # 非法 unit 期望值算不出 → None
+    item = _make_item(rid, 5, '支')
+    _enrich_copy_paper_for_item(item)
+    assert item['copy_paper_expected'] is None
+
+    # 非 copy-paper 商品 → 仍写 None(模板安全)
+    item = _make_item(rid, 5, '支', name='杂胶袋')
+    _enrich_copy_paper_for_item(item)
+    assert item['copy_paper_expected'] is None

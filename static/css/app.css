@@ -783,3 +783,79 @@ dialog[open] button:last-child { background: #e8e8e8; color: #333; }
 /* 钻入明细表悬停高亮(沿用全局表格规范,只调背景) */
 .audit-page #records_table tr:hover td { background: #f8fafc; }
 .audit-page #aggregate_table tr:hover td { background: #f8fafc; }
+
+/* ========== 拷贝纸/日本纸 行级图 (2026-09-06) ========== */
+.copy-paper-area {
+    margin-top: 8px;
+    padding: 8px;
+    background: #f8f9fa;
+    border: 1px dashed #ced4da;
+    border-radius: 4px;
+}
+.copy-paper-header {
+    margin-bottom: 6px;
+    font-size: 13px;
+}
+.copy-paper-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 600;
+}
+.copy-paper-badge.green { background: #d3f9d8; color: #2b8a3e; }
+.copy-paper-badge.yellow { background: #fff3bf; color: #b8860b; }
+.copy-paper-badge.partial { background: #e9ecef; color: #495057; }
+.copy-paper-thumb-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.copy-paper-thumb {
+    position: relative;
+    width: 110px;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    padding: 4px;
+    background: #fff;
+}
+.copy-paper-thumb img {
+    width: 100%;
+    height: 80px;
+    object-fit: cover;
+    border-radius: 2px;
+    display: block;
+}
+.copy-paper-tag {
+    display: inline-block;
+    margin-top: 4px;
+    font-size: 11px;
+    padding: 1px 6px;
+    border-radius: 8px;
+}
+.copy-paper-tag.tag-label { background: #d0ebff; color: #1864ab; }
+.copy-paper-tag.tag-count { background: #fff3bf; color: #b8860b; }
+.copy-paper-count-input {
+    width: 100%;
+    margin-top: 4px;
+    padding: 2px 4px;
+    border: 1px solid #ced4da;
+    border-radius: 3px;
+    font-size: 12px;
+    box-sizing: border-box;
+}
+.copy-paper-delete-btn {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 20px;
+    height: 20px;
+    border: none;
+    border-radius: 50%;
+    background: #fa5252;
+    color: #fff;
+    font-size: 12px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+}
+.copy-paper-delete-btn:hover { background: #c92a2a; }

@@ -2052,6 +2052,7 @@ def _enrich_copy_paper_for_item(item: dict) -> None:
 
     写入字段:
       is_copy_paper / copy_paper_images / copy_paper_total / copy_paper_match
+      copy_paper_expected (float 或 None;qty/unit 算不出时为 None)
 
     copy_paper_match 四态:
       - None      → 期望值算不出来(qty=0 / unit 非法)
@@ -2064,6 +2065,7 @@ def _enrich_copy_paper_for_item(item: dict) -> None:
         item['copy_paper_images'] = []
         item['copy_paper_total'] = 0
         item['copy_paper_match'] = None
+        item['copy_paper_expected'] = None
         return
 
     images = CopyPaperImage.list_by_record(item['id'])
@@ -2079,6 +2081,8 @@ def _enrich_copy_paper_for_item(item: dict) -> None:
 
     expected, has_expected = compute_copy_paper_expected_quantity(
         item.get('quantity'), item.get('unit'))
+    # Task 6 (2026-09-06): 模板要用 expected 渲染徽章文案,Task 4 漏写,这里补上。
+    item['copy_paper_expected'] = expected if has_expected else None
     if not has_expected:
         item['copy_paper_match'] = None
     elif total_count_imgs > 0 and counted_imgs < total_count_imgs:
