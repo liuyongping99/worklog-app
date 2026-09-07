@@ -263,3 +263,70 @@ def test_http_locked_blocked(client, fresh_record):
     assert resp.status_code == 403, resp.get_data(as_text=True)
     j = resp.get_json()
     assert j['success'] is False
+
+
+# ─────────────────────────────────────────────────────────
+# Task 4 (2026-09-06): record 级别富化函数测试
+# ─────────────────────────────────────────────────────────
+
+from blueprints.shipping import _enrich_copy_paper_for_item, _is_copy_paper_item
+
+
+def _make_item(rid, qty, unit, name='拷贝纸A'):
+    return {'id': rid, 'product_name': name, 'specification': '',
+            'quantity': qty, 'unit': unit, 'remark': ''}
+
+
+def test_enrich_green_ling(fresh_record):
+    """拷贝纸 q=5令 + sheet_count=2+3 → match='green'."""
+    rid = fresh_record
+    iid1 = CopyPaperImage.create(rid, 'p1.jpg', 'p1.jpg', 'count')
+    iid2 = CopyPaperImage.create(rid, 'p2.jpg', 'p2.jpg', 'count')
+    CopyPaperImage.update_count(iid1, 2)
+    CopyPaperImage.update_count(iid2, 3)
+    item = _make_item(rid, 5, '令')
+    _enrich_copy_paper_for_item(item)
+    assert item['is_copy_paper'] is True
+    assert item['copy_paper_total'] == 5
+    assert item['copy_paper_match'] == 'green'
+
+
+def test_enrich_yellow_ling(fresh_record):
+    """q=5令 + sheet_count=4 → match='yellow'."""
+    rid = fresh_record
+    iid = CopyPaperImage.create(rid, 'p.jpg', 'p.jpg', 'count')
+    CopyPaperImage.update_count(iid, 4)
+    item = _make_item(rid, 5, '令')
+    _enrich_copy_paper_for_item(item)
+    assert item['copy_paper_match'] == 'yellow'
+
+
+def test_enrich_partial(fresh_record):
+    """q=5令 + 2 张图,1 张未录 → match='partial'."""
+    rid = fresh_record
+    CopyPaperImage.create(rid, 'p1.jpg', 'p1.jpg', 'count')
+    CopyPaperImage.create(rid, 'p2.jpg', 'p2.jpg', 'count')
+    iid = CopyPaperImage.list_by_record(rid)[0]['id']
+    CopyPaperImage.update_count(iid, 2)
+    item = _make_item(rid, 5, '令')
+    _enrich_copy_paper_for_item(item)
+    assert item['copy_paper_match'] == 'partial'
+    assert item['copy_paper_total'] == 2
+
+
+def test_enrich_no_match_when_no_quantity(fresh_record):
+    """q=0 → match=None."""
+    rid = fresh_record
+    CopyPaperImage.create(rid, 'p.jpg', 'p.jpg', 'count')
+    item = _make_item(rid, 0, '令')
+    _enrich_copy_paper_for_item(item)
+    assert item['copy_paper_match'] is None
+
+
+def test_enrich_non_copy_paper_item(fresh_record):
+    """杂胶袋 → is_copy_paper=False."""
+    rid = fresh_record
+    item = _make_item(rid, 5, '支', name='杂胶袋')
+    _enrich_copy_paper_for_item(item)
+    assert item['is_copy_paper'] is False
+    assert item['copy_paper_match'] is None

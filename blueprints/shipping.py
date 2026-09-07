@@ -28,6 +28,7 @@ from blueprints._helpers import (
     match_label_to_row, detect_bg_color,
     apply_user_rotation,
     compute_placement_expected_zhi,
+    compute_copy_paper_expected_quantity,
 )
 from blueprints.ocr_engine import (
     PaddleOCREngine, get_ocr_engine, OCR_MATCH_PROMPT_VERSION,
@@ -317,6 +318,9 @@ def shipping_records():
                 if (_has_zhi or _has_san) and _matched_zhi and _matched_san:
                     _pm = True
             item['placement_match'] = _pm
+
+            # 2026-09-06: 拷贝纸/日本纸 行级图片 + 张数比对
+            _enrich_copy_paper_for_item(item)
         group.update(summarize_remarks(group['records']))
         group['has_eco'] = any('环保' in r.get('product_name', '') for r in group['records'])
         group['has_jia_mian'] = any(
@@ -2015,3 +2019,71 @@ def api_v1_shipping_orders_copy_paper_sheet_count(img_id):
                  order['id'] if order else None,
                  detail={'image_id': img_id, 'sheet_count': val})
     return jsonify({'success': True, 'sheet_count': val})
+
+
+# ─────────────────────────────────────────────────────────
+# Task 4 (2026-09-06): record 级别拷贝纸/日本纸 富化
+# ─────────────────────────────────────────────────────────
+
+def _is_copy_paper_item(item: dict) -> bool:
+    """判断 record 是否属于拷贝纸/日本纸类别。
+
+    双兜底:
+    1. 关键词匹配(product_name 含 '拷贝' 或 '日本纸')
+    2. classify_record 查 product_categories 拿到 category_code,
+       是 '0105'(日本纸)或 '0107'(拷贝纸)时返回 True
+    """
+    name = (item.get('product_name') or '').strip()
+    # 关键词兜底
+    if '拷贝' in name or '日本纸' in name:
+        return True
+    # JOIN category_code(若 helper 已存在)
+    try:
+        from models.category_prompt import classify_record
+        result = classify_record(name, item.get('specification') or '')
+        code = result.get('category_code') if isinstance(result, dict) else None
+        return code in ('0105', '0107')
+    except Exception:
+        return False
+
+
+def _enrich_copy_paper_for_item(item: dict) -> None:
+    """对单条 record 原地写入 copy-paper 字段。
+
+    写入字段:
+      is_copy_paper / copy_paper_images / copy_paper_total / copy_paper_match
+
+    copy_paper_match 四态:
+      - None      → 期望值算不出来(qty=0 / unit 非法)
+      - 'partial' → 有 count 图但 sheet_count 未全部录入
+      - 'green'   → 录入合计 == 期望值
+      - 'yellow'  → 录入合计 != 期望值
+    """
+    item['is_copy_paper'] = _is_copy_paper_item(item)
+    if not item['is_copy_paper']:
+        item['copy_paper_images'] = []
+        item['copy_paper_total'] = 0
+        item['copy_paper_match'] = None
+        return
+
+    images = CopyPaperImage.list_by_record(item['id'])
+    item['copy_paper_images'] = images
+
+    counts = [img['sheet_count'] for img in images if img['sheet_count'] is not None]
+    total = sum(counts)
+    item['copy_paper_total'] = total
+
+    count_imgs = [img for img in images if img['source'] == 'count']
+    total_count_imgs = len(count_imgs)
+    counted_imgs = sum(1 for img in count_imgs if img['sheet_count'] is not None)
+
+    expected, has_expected = compute_copy_paper_expected_quantity(
+        item.get('quantity'), item.get('unit'))
+    if not has_expected:
+        item['copy_paper_match'] = None
+    elif total_count_imgs > 0 and counted_imgs < total_count_imgs:
+        item['copy_paper_match'] = 'partial'
+    elif total == expected:
+        item['copy_paper_match'] = 'green'
+    else:
+        item['copy_paper_match'] = 'yellow'
