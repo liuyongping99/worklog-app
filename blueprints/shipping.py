@@ -1,4 +1,4 @@
-"""出货记录蓝图。
+﻿"""出货记录蓝图。
 
 包含：
 - /shipping-records 页面（带日期过滤、商品单位提示计算）
@@ -17,12 +17,12 @@ from datetime import date as date_cls, timedelta, datetime
 from flask import Blueprint, render_template, request, jsonify, current_app, session
 from models import (
     ShippingOrder, ShippingRecord, ShippingImage, ProductUnit, PieceConversion, AuditLog,
-    OcrMatchEvent, PlacementImage,
+    OcrMatchEvent, PlacementImage, CopyPaperImage,
     classify_record, CategoryPrompt,
 )
 from blueprints._helpers import (
     get_upload_dir as get_helpers_upload_dir,
-    get_ypp, calc_hint, check_remark, summarize_remarks,
+    get_ypp, calc_hint, check_remark, summarize_remarks, find_ypp_mismatches,
     get_piece_conversion, calc_piece_quantity, check_piece_mismatch,
     validate_image_content, check_uploaded_image,
     match_label_to_row, detect_bg_color,
@@ -352,6 +352,61 @@ def shipping_records():
     )
 
 
+
+
+# ── YPP 规则冲突核查页 ─────────────────────────────────────
+@bp.route('/shipping-ypp-review')
+def shipping_ypp_review_page():
+    """YPP 规则冲突核查页(单页手动扫描,不受日期过滤影响)。
+
+    顶部展示已配置 YPP 的品名数(供用户判断"是不是漏配了"),
+    下方点击"开始扫描"按钮触发 POST /api/v1/shipping-orders/ypp-review/scan
+    返回所有按 YPP 规则核验出的冲突项。
+    """
+    try:
+        all_units = ProductUnit.get_all() or []
+    except Exception:
+        all_units = []
+    ypp_config_count = sum(
+        1 for u in all_units
+        if u.get('is_usingyardforcounting') and (u.get('yards_per_piece') or 0) > 0
+    )
+    return render_template('shipping_ypp_review.html', ypp_config_count=ypp_config_count)
+
+
+@bp.route('/api/v1/shipping-orders/ypp-review/scan', methods=['POST'])
+def api_v1_shipping_orders_ypp_review_scan():
+    """扫全表所有出货明细,找出 YPP 规则冲突项。
+
+    Returns:
+        {
+          'success': True,
+          'scanned_total': N,        # 扫了多少条(参与校验的明细)
+          'items': [                 # 冲突项,按 warn→info,日期倒序
+            {record_id, order_id, date, customer, product_name, specification,
+             quantity, unit, remark, pieces, per_piece_yards, loose_yards, ypp,
+             expected, actual, diff, severity}
+          ]
+        }
+    """
+    try:
+        records = ShippingRecord.get_all()
+    except Exception as e:
+        current_app.logger.exception('ypp-review scan: failed to load records')
+        return jsonify({'success': False, 'error': f'加载明细失败: {e}'}), 500
+    try:
+        items = find_ypp_mismatches(records) or []
+    except Exception as e:
+        current_app.logger.exception('ypp-review scan: failed to compute mismatches')
+        return jsonify({'success': False, 'error': f'扫描失败: {e}'}), 500
+    return jsonify({
+        'success': True,
+        'scanned_total': len(records),
+        'items': items,
+    })
+
+
+# ── 订单 CRUD ──────────────────────────────────────────────
 # ── 订单 CRUD ──────────────────────────────────────────────
 @bp.route('/api/v1/shipping-orders', methods=['POST'])
 def api_v1_shipping_orders_create():
@@ -1825,3 +1880,138 @@ def api_v1_category_prompts_delete(prompt_id):
         AuditLog.log('archive_category_prompt', 'category_prompt', prompt_id)
         return jsonify({'success': True})
     return jsonify({'success': False, 'error': '提示词不存在或已被归档'}), 404
+
+
+# ────────────────────────────────────────────────────────────
+# 拷贝纸/日本纸 行级图片(2026-09-06)
+# 与 OCR/AI 比对图彻底隔离:不进 pipeline、不进 match-col;
+# 仅供人工参考 + 行级 total 比对用。
+# 4 端点:POST 上传、GET 列表、DELETE 删、PATCH 录入张数
+# ────────────────────────────────────────────────────────────
+
+@bp.route('/api/v1/shipping-orders/records/<int:rid>/copy-paper-images', methods=['POST'])
+def api_v1_shipping_orders_record_copy_paper_upload(rid):
+    """上传拷贝纸/日本纸 行级图(标签照/张数照)。完全跳过 OCR pipeline。
+
+    支持 multipart(字段名 `image`)与 JSON base64(`image` 字段)。
+    source ∈ {'label','count'};锁单 → 403;记录不存在 → 404;无图 → 400。
+    """
+    set_log_context(biz='shipping', record_id=rid, evt_src='copy_paper_upload')
+    record = ShippingRecord.get_by_id(rid)
+    if not record:
+        return jsonify({'success': False, 'error': '记录不存在'}), 404
+    order = ShippingOrder.get_by_id(record['order_pk'])
+    if order and order.get('is_locked'):
+        return jsonify({'success': False, 'error': '该订单已锁定,无法上传拷贝纸/日本纸'}), 403
+
+    upload_dir, _month_str = _get_upload_dir()
+
+    # 解析 source
+    if request.is_json:
+        _payload = request.get_json(silent=True) or {}
+        source = (_payload.get('source') or '').strip()
+    else:
+        source = (request.form.get('source') or '').strip()
+    if source not in ('label', 'count'):
+        return jsonify({'success': False, 'error': 'source 必须为 label 或 count'}), 400
+
+    # 两种格式都支持:multipart 多个 `image` 字段,或 JSON 单 base64
+    files = request.files.getlist('image')
+    if files:
+        try:
+            filepath, original_name = _save_one_uploaded_file(files[0], upload_dir)
+        except ValueError as e:
+            return jsonify({'success': False, 'error': str(e)}), 400
+    elif request.is_json:
+        _payload = request.get_json(silent=True) or {}
+        try:
+            filepath, original_name = _save_one_base64_image(
+                _payload.get('image', ''), upload_dir)
+        except ValueError as e:
+            return jsonify({'success': False, 'error': str(e)}), 400
+    else:
+        return jsonify({'success': False, 'error': '未提供图片(image)'}), 400
+
+    new_id = CopyPaperImage.create(rid, filepath, original_name, source)
+    img = CopyPaperImage.get_by_id(new_id)
+    rel_path = os.path.join(_month_str, os.path.basename(filepath)).replace('\\', '/')
+    img['file_path'] = filepath  # 全路径(与 PlacementImage 一致)
+    img['relative_path'] = rel_path
+    AuditLog.log('upload_copy_paper_image', 'shipping_order', record['order_pk'],
+                 detail={'filename': rel_path, 'source': source, 'record_id': rid})
+    return jsonify({'success': True, 'image': img})
+
+
+@bp.route('/api/v1/shipping-orders/records/<int:rid>/copy-paper-images', methods=['GET'])
+def api_v1_shipping_orders_record_copy_paper_list(rid):
+    """列出某 record 下所有拷贝纸/日本纸行级图。"""
+    images = CopyPaperImage.list_by_record(rid)
+    # 补上 relative_path,便于前端直接展示
+    for img in images:
+        if img.get('file_path'):
+            img['relative_path'] = os.path.basename(img['file_path'])
+    return jsonify({'success': True, 'images': images})
+
+
+@bp.route('/api/v1/shipping-orders/copy-paper-images/<int:img_id>', methods=['DELETE'])
+def api_v1_shipping_orders_copy_paper_delete(img_id):
+    """删除一张拷贝纸/日本纸行级图(连带物理文件)。"""
+    img = CopyPaperImage.get_by_id(img_id)
+    if not img:
+        return jsonify({'success': False, 'error': '拷贝纸/日本纸图片不存在'}), 404
+
+    # 锁单防御:沿 record → order 查 is_locked
+    rec = ShippingRecord.get_by_id(img['record_pk']) if img.get('record_pk') else None
+    order = ShippingOrder.get_by_id(rec['order_pk']) if rec else None
+    if order and order.get('is_locked'):
+        return jsonify({'success': False, 'error': '该订单已锁定,无法删除'}), 403
+
+    # 删磁盘文件(找不到不报错,避免脏数据卡住流程)
+    try:
+        if img.get('file_path') and os.path.exists(img['file_path']):
+            os.remove(img['file_path'])
+    except Exception:
+        current_app.logger.exception('删拷贝纸/日本纸图片文件失败: %s', img.get('file_path'))
+
+    CopyPaperImage.delete(img_id)
+    AuditLog.log('delete_copy_paper_image', 'shipping_order',
+                 order['id'] if order else None,
+                 detail={'image_id': img_id, 'record_id': img.get('record_pk')})
+    return jsonify({'success': True})
+
+
+@bp.route('/api/v1/shipping-orders/copy-paper-images/<int:img_id>/sheet-count', methods=['PATCH'])
+def api_v1_shipping_orders_copy_paper_sheet_count(img_id):
+    """录入/清空 拷贝纸/日本纸 张数。
+
+    body: `{sheet_count: int | null}`
+    - 正数(含 0) → 写入
+    - null       → 清空
+    - 负数       → 400
+    """
+    img = CopyPaperImage.get_by_id(img_id)
+    if not img:
+        return jsonify({'success': False, 'error': '拷贝纸/日本纸图片不存在'}), 404
+
+    rec = ShippingRecord.get_by_id(img['record_pk']) if img.get('record_pk') else None
+    order = ShippingOrder.get_by_id(rec['order_pk']) if rec else None
+    if order and order.get('is_locked'):
+        return jsonify({'success': False, 'error': '该订单已锁定,无法修改'}), 403
+
+    body = request.get_json(silent=True) or {}
+    raw = body.get('sheet_count', None)
+    if raw is None:
+        val = None
+    else:
+        try:
+            val = int(raw)
+        except (TypeError, ValueError):
+            return jsonify({'success': False, 'error': 'sheet_count 必须为整数或 null'}), 400
+        if val < 0:
+            return jsonify({'success': False, 'error': 'sheet_count 不能为负'}), 400
+
+    CopyPaperImage.update_count(img_id, val)
+    AuditLog.log('update_copy_paper_sheet_count', 'shipping_order',
+                 order['id'] if order else None,
+                 detail={'image_id': img_id, 'sheet_count': val})
+    return jsonify({'success': True, 'sheet_count': val})

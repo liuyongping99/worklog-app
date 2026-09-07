@@ -5,6 +5,7 @@ Task 1 of 2026-09-06-copy-paper-row-buttons:
 - Model: CopyPaperImage (create / list_by_record / get_by_id / update_count / delete)
 - 不进 OCR pipeline,不进 match-col,仅供人工参考 + 行级 total 比对
 """
+import io
 import os
 import pytest
 from models._db import get_db, DB_PATH
@@ -117,3 +118,148 @@ def test_helper_invalid_quantity():
     assert compute_copy_paper_expected_quantity('', '张') == (0.0, False)
     assert compute_copy_paper_expected_quantity('abc', '张') == (0.0, False)
     assert compute_copy_paper_expected_quantity(-3, '令') == (0.0, False)
+
+
+# ─────────────────────────────────────────────────────────
+# Task 3 (2026-09-06): 4 REST endpoints HTTP tests
+# ─────────────────────────────────────────────────────────
+
+def _png_bytes():
+    """最小有效 PNG 字节(用 Pillow)。"""
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new('RGB', (10, 10), 'white').save(buf, format='PNG')
+    return buf.getvalue()
+
+
+def test_http_upload_label(client, fresh_record):
+    """POST label 图 → 200 + DB 落盘 + GET 能查到。"""
+    rid = fresh_record
+    data = {
+        'source': 'label',
+        'image': (io.BytesIO(_png_bytes()), 'test.png'),
+    }
+    resp = client.post(
+        f'/api/v1/shipping-orders/records/{rid}/copy-paper-images',
+        data=data,
+        content_type='multipart/form-data',
+    )
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    j = resp.get_json()
+    assert j['success'] is True
+    assert j['image']['source'] == 'label'
+    assert j['image']['sheet_count'] is None
+    assert j['image']['original_name'] == 'test.png'
+    assert 'file_path' in j['image'] and j['image']['file_path']
+    assert 'relative_path' in j['image'] and j['image']['relative_path']
+
+    # list 应能查到
+    resp = client.get(f'/api/v1/shipping-orders/records/{rid}/copy-paper-images')
+    j = resp.get_json()
+    assert j['success'] is True and len(j['images']) == 1
+    assert j['images'][0]['source'] == 'label'
+
+
+def test_http_upload_count(client, fresh_record):
+    """POST count 图 → 200,返 iid 给后续测试复用。"""
+    rid = fresh_record
+    data = {
+        'source': 'count',
+        'image': (io.BytesIO(_png_bytes()), 'c.png'),
+    }
+    resp = client.post(
+        f'/api/v1/shipping-orders/records/{rid}/copy-paper-images',
+        data=data,
+        content_type='multipart/form-data',
+    )
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    j = resp.get_json()
+    assert j['success'] is True
+    assert j['image']['source'] == 'count'
+    return j['image']['id']
+
+
+def test_http_patch_sheet_count(client, fresh_record):
+    """PATCH sheet_count: 正数 → 200, null 清空 → 200, 负数 → 400。"""
+    iid = test_http_upload_count(client, fresh_record)
+
+    # 正数
+    resp = client.patch(
+        f'/api/v1/shipping-orders/copy-paper-images/{iid}/sheet-count',
+        json={'sheet_count': 250},
+    )
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    j = resp.get_json()
+    assert j['success'] is True
+    assert j['sheet_count'] == 250
+    assert CopyPaperImage.get_by_id(iid)['sheet_count'] == 250
+
+    # null 清空
+    resp = client.patch(
+        f'/api/v1/shipping-orders/copy-paper-images/{iid}/sheet-count',
+        json={'sheet_count': None},
+    )
+    assert resp.status_code == 200
+    assert resp.get_json()['sheet_count'] is None
+    assert CopyPaperImage.get_by_id(iid)['sheet_count'] is None
+
+    # 负值 400
+    resp = client.patch(
+        f'/api/v1/shipping-orders/copy-paper-images/{iid}/sheet-count',
+        json={'sheet_count': -1},
+    )
+    assert resp.status_code == 400
+
+
+def test_http_delete(client, fresh_record):
+    """DELETE: 200,二次删 404。"""
+    rid = fresh_record
+    data = {
+        'source': 'label',
+        'image': (io.BytesIO(_png_bytes()), 'd.png'),
+    }
+    resp = client.post(
+        f'/api/v1/shipping-orders/records/{rid}/copy-paper-images',
+        data=data,
+        content_type='multipart/form-data',
+    )
+    iid = resp.get_json()['image']['id']
+
+    # 第一次删 200
+    resp = client.delete(f'/api/v1/shipping-orders/copy-paper-images/{iid}')
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert resp.get_json()['success'] is True
+
+    # DB 中已无此 id
+    assert CopyPaperImage.get_by_id(iid) is None
+
+    # 二次删 404
+    resp = client.delete(f'/api/v1/shipping-orders/copy-paper-images/{iid}')
+    assert resp.status_code == 404
+
+
+def test_http_locked_blocked(client, fresh_record):
+    """锁单后上传应 403。"""
+    rid = fresh_record
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE shipping_orders SET is_locked = 1 "
+        "WHERE id = (SELECT order_pk FROM shipping_records WHERE id = ?)",
+        (rid,),
+    )
+    conn.commit()
+    conn.close()
+
+    data = {
+        'source': 'label',
+        'image': (io.BytesIO(_png_bytes()), 'l.png'),
+    }
+    resp = client.post(
+        f'/api/v1/shipping-orders/records/{rid}/copy-paper-images',
+        data=data,
+        content_type='multipart/form-data',
+    )
+    assert resp.status_code == 403, resp.get_data(as_text=True)
+    j = resp.get_json()
+    assert j['success'] is False
