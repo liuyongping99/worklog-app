@@ -577,6 +577,15 @@ class InboundOrder:
         return order_id
 
     @staticmethod
+    def count_by_date(date: str) -> int:
+        """指定日期的入库单条数(用于「今天入库N单」展示)。"""
+        conn = get_db()
+        cursor = conn.cursor()
+        n = cursor.execute('SELECT COUNT(*) FROM inbound_orders WHERE date = ?', (date,)).fetchone()[0]
+        conn.close()
+        return n
+
+    @staticmethod
     def get_all(start_date=None, end_date=None):
         conn = get_db()
         cursor = conn.cursor()
@@ -1388,6 +1397,12 @@ class PlacementImage:
             item['circles'] = PlacementImage._parse_circles(item.get('circles'))
             item['mark_scale'] = item.get('mark_scale') or 1
             item['loose_count'] = item.get('loose_count') or 0
+            item['manual_count'] = item.get('manual_count')
+            item['is_unload'] = bool(item.get('is_unload'))
+            # 有符号支数:直接输入优先,否则点击计数点;卸载时取负(从总数扣减)
+            eff = item['manual_count'] if item['manual_count'] is not None else item['n_marks']
+            item['effective_zhi'] = eff
+            item['signed_count'] = -eff if item['is_unload'] else eff
             result.append(item)
         return result
 
@@ -1407,6 +1422,11 @@ class PlacementImage:
         item['circles'] = PlacementImage._parse_circles(item.get('circles'))
         item['mark_scale'] = item.get('mark_scale') or 1
         item['loose_count'] = item.get('loose_count') or 0
+        item['manual_count'] = item.get('manual_count')
+        item['is_unload'] = bool(item.get('is_unload'))
+        eff = item['manual_count'] if item['manual_count'] is not None else item['n_marks']
+        item['effective_zhi'] = eff
+        item['signed_count'] = -eff if item['is_unload'] else eff
         return item
 
     @staticmethod
@@ -1438,10 +1458,10 @@ class PlacementImage:
         return scale
 
     @staticmethod
-    def set_loose_count(image_id: int, count: int):
-        """写入该摆放图的散码数量(点数弹框内「散码」按钮录入)。负数按 0 处理。"""
+    def set_loose_count(image_id: int, count):
+        """写入该摆放图的散码数量(点数弹框内「散码」按钮录入,支持小数 0.5/1.2)。负数按 0 处理。"""
         try:
-            count = int(round(float(count)))
+            count = round(float(count), 1)
         except (TypeError, ValueError):
             count = 0
         if count < 0:
@@ -1452,6 +1472,48 @@ class PlacementImage:
         conn.commit()
         conn.close()
         return count
+
+    @staticmethod
+    def set_manual_count(image_id: int, count):
+        """写入该摆放图直接输入的支数(点数弹框内「输入支数」按钮录入)。
+
+        - count 为 None / 空 → 置 NULL,回退到点击计数点(n_marks),保留已有 marks
+        - count 为整数(含 0) → 写入该值,并清空点击计数点(直接输入与点击计数互斥,
+          避免两种计数同时存在导致比对口径不一致)
+        """
+        conn = get_db()
+        cursor = conn.cursor()
+        if count is None or count == '':
+            count = None
+        else:
+            try:
+                count = int(round(float(count)))
+            except (TypeError, ValueError):
+                count = 0
+            if count < 0:
+                count = 0
+        if count is None:
+            cursor.execute('UPDATE shipping_images SET manual_count = NULL WHERE id = ?', (image_id,))
+        else:
+            cursor.execute('UPDATE shipping_images SET manual_count = ? WHERE id = ?', (count, image_id))
+            cursor.execute('DELETE FROM placement_marks WHERE image_id = ?', (image_id,))
+        conn.commit()
+        conn.close()
+        return count
+
+    @staticmethod
+    def set_unload(image_id: int, unload: bool):
+        """设置该摆放图是否「卸载货物」。勾上时其清点支数以负数计入记录总数(从总数扣减)。
+
+        返回值即写入后的 is_unload(0/1)。
+        """
+        flag = 1 if unload else 0
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('UPDATE shipping_images SET is_unload = ? WHERE id = ?', (flag, image_id))
+        conn.commit()
+        conn.close()
+        return flag
 
     @staticmethod
     def delete(image_id: int):
@@ -1525,6 +1587,496 @@ class PlacementImage:
         conn.commit()
         conn.close()
         return n
+
+
+class LoadingPlacementImage:
+    """装柜摆放图 + 计数点(对齐出货页「交互式点数清点」)。
+
+    复用 loading_order_images 表,标记 source='placement',与装柜 OCR/AI 比对图隔离。
+    计数点存独立的 loading_placement_marks 表(避免与 shipping 主键冲突串图)。
+    口径与出货 PlacementImage 完全一致:直接输入支数(manual_count)优先,无则回退点击
+    计数点(n_marks);勾选「卸载货物」(is_unload)时取负,从记录总数扣减。
+    """
+
+    PLACEMENT_SOURCE = 'placement'
+
+    @staticmethod
+    def create(order_pk: int, record_pk: int, file_path: str, original_name: str = '', sort_order: int = None):
+        conn = get_db()
+        cursor = conn.cursor()
+        if sort_order is None:
+            cursor.execute(
+                'SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM loading_order_images '
+                'WHERE order_pk = ? AND source = ?',
+                (order_pk, LoadingPlacementImage.PLACEMENT_SOURCE))
+            sort_order = cursor.fetchone()['next']
+        cursor.execute(
+            'INSERT INTO loading_order_images '
+            '(order_pk, record_pk, file_path, original_name, source, sort_order, created_at) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?)',
+            (order_pk, record_pk, file_path, original_name,
+             LoadingPlacementImage.PLACEMENT_SOURCE, sort_order,
+             datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+        conn.commit()
+        image_id = cursor.lastrowid
+        conn.close()
+        return image_id
+
+    @staticmethod
+    def _parse_circles(raw):
+        if not raw:
+            return []
+        if isinstance(raw, (list, tuple)):
+            return list(raw)
+        try:
+            val = _json.loads(raw)
+            return val if isinstance(val, list) else []
+        except Exception:
+            return []
+
+    @staticmethod
+    def get_by_record(record_pk: int):
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM loading_order_images WHERE record_pk = ? AND source = 'placement' ORDER BY sort_order ASC, id ASC",
+            (record_pk,))
+        rows = cursor.fetchall()
+        conn.close()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item['relative_path'] = LoadingOrderImage.get_relative_path(item['file_path'])
+            item['marks'] = LoadingPlacementImage.get_marks(item['id'])
+            item['n_marks'] = len(item['marks'])
+            item['circles'] = LoadingPlacementImage._parse_circles(item.get('circles'))
+            item['mark_scale'] = item.get('mark_scale') or 1
+            item['loose_count'] = item.get('loose_count') or 0
+            item['manual_count'] = item.get('manual_count')
+            item['is_unload'] = bool(item.get('is_unload'))
+            eff = item['manual_count'] if item['manual_count'] is not None else item['n_marks']
+            item['effective_zhi'] = eff
+            item['signed_count'] = -eff if item['is_unload'] else eff
+            result.append(item)
+        return result
+
+    @staticmethod
+    def get_by_id(image_id: int):
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM loading_order_images WHERE id = ? AND source = 'placement'", (image_id,))
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        item = dict(row)
+        item['relative_path'] = LoadingOrderImage.get_relative_path(item['file_path'])
+        item['marks'] = LoadingPlacementImage.get_marks(item['id'])
+        item['n_marks'] = len(item['marks'])
+        item['circles'] = LoadingPlacementImage._parse_circles(item.get('circles'))
+        item['mark_scale'] = item.get('mark_scale') or 1
+        item['loose_count'] = item.get('loose_count') or 0
+        item['manual_count'] = item.get('manual_count')
+        item['is_unload'] = bool(item.get('is_unload'))
+        eff = item['manual_count'] if item['manual_count'] is not None else item['n_marks']
+        item['effective_zhi'] = eff
+        item['signed_count'] = -eff if item['is_unload'] else eff
+        return item
+
+    @staticmethod
+    def set_circles(image_id: int, circles):
+        import json as _json2
+        conn = get_db()
+        cursor = conn.cursor()
+        raw = _json2.dumps(circles, ensure_ascii=False) if circles else None
+        cursor.execute('UPDATE loading_order_images SET circles = ? WHERE id = ?', (raw, image_id))
+        conn.commit()
+        conn.close()
+
+    @staticmethod
+    def set_mark_scale(image_id: int, scale: float):
+        try:
+            scale = float(scale)
+        except (TypeError, ValueError):
+            scale = 1.0
+        if scale <= 0:
+            scale = 1.0
+        scale = max(0.3, min(4.0, scale))
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('UPDATE loading_order_images SET mark_scale = ? WHERE id = ?', (scale, image_id))
+        conn.commit()
+        conn.close()
+        return scale
+
+    @staticmethod
+    def set_loose_count(image_id: int, count):
+        try:
+            count = round(float(count), 1)
+        except (TypeError, ValueError):
+            count = 0
+        if count < 0:
+            count = 0
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('UPDATE loading_order_images SET loose_count = ? WHERE id = ?', (count, image_id))
+        conn.commit()
+        conn.close()
+        return count
+
+    @staticmethod
+    def set_manual_count(image_id: int, count):
+        conn = get_db()
+        cursor = conn.cursor()
+        if count is None or count == '':
+            count = None
+        else:
+            try:
+                count = int(round(float(count)))
+            except (TypeError, ValueError):
+                count = 0
+            if count < 0:
+                count = 0
+        if count is None:
+            cursor.execute('UPDATE loading_order_images SET manual_count = NULL WHERE id = ?', (image_id,))
+        else:
+            cursor.execute('UPDATE loading_order_images SET manual_count = ? WHERE id = ?', (count, image_id))
+            cursor.execute('DELETE FROM loading_placement_marks WHERE image_id = ?', (image_id,))
+        conn.commit()
+        conn.close()
+        return count
+
+    @staticmethod
+    def set_unload(image_id: int, unload: bool):
+        flag = 1 if unload else 0
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('UPDATE loading_order_images SET is_unload = ? WHERE id = ?', (flag, image_id))
+        conn.commit()
+        conn.close()
+        return flag
+
+    @staticmethod
+    def delete(image_id: int):
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('SELECT file_path FROM loading_order_images WHERE id = ? AND source = ?',
+                       (image_id, LoadingPlacementImage.PLACEMENT_SOURCE))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return False
+        file_path = row['file_path']
+        cursor.execute('DELETE FROM loading_placement_marks WHERE image_id = ?', (image_id,))
+        cursor.execute('DELETE FROM loading_order_images WHERE id = ?', (image_id,))
+        conn.commit()
+        conn.close()
+        _safe_remove_file(file_path)
+        return True
+
+    @staticmethod
+    def add_mark(image_id: int, x_ratio: float, y_ratio: float, mark_r: float = 0.0) -> int:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('SELECT COALESCE(MAX(seq), 0) + 1 FROM loading_placement_marks WHERE image_id = ?', (image_id,))
+        seq = cursor.fetchone()[0]
+        cursor.execute(
+            'INSERT INTO loading_placement_marks (image_id, seq, x_ratio, y_ratio, mark_r, created_at) '
+            'VALUES (?, ?, ?, ?, ?, ?)',
+            (image_id, seq, x_ratio, y_ratio, mark_r, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+        conn.commit()
+        conn.close()
+        return seq
+
+    @staticmethod
+    def get_marks(image_id: int):
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM loading_placement_marks WHERE image_id = ? ORDER BY seq ASC', (image_id,))
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+
+    @staticmethod
+    def delete_last_mark(image_id: int):
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('SELECT MAX(seq) FROM loading_placement_marks WHERE image_id = ?', (image_id,))
+        max_seq = cursor.fetchone()[0]
+        if max_seq is None:
+            conn.close()
+            return []
+        cursor.execute('DELETE FROM loading_placement_marks WHERE image_id = ? AND seq = ?', (image_id, max_seq))
+        conn.commit()
+        conn.close()
+        return LoadingPlacementImage.get_marks(image_id)
+
+    @staticmethod
+    def delete_by_record(record_pk: int):
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('SELECT id, file_path FROM loading_order_images WHERE record_pk = ? AND source = ?',
+                       (record_pk, LoadingPlacementImage.PLACEMENT_SOURCE))
+        rows = cursor.fetchall()
+        for row in rows:
+            cursor.execute('DELETE FROM loading_placement_marks WHERE image_id = ?', (row['id'],))
+            _safe_remove_file(row['file_path'])
+        n = len(rows)
+        if n:
+            cursor.execute('DELETE FROM loading_order_images WHERE record_pk = ? AND source = ?',
+                           (record_pk, LoadingPlacementImage.PLACEMENT_SOURCE))
+        conn.commit()
+        conn.close()
+        return n
+
+
+class InboundPlacementImage:
+    """inbound page placement image + click count marks (align shipping / loading).
+
+    Reuses inbound_images table with source='placement', isolated from OCR / AI match.
+    Count marks stored in inbound_placement_marks table (separate FK to inbound_images).
+    API surface mirrors PlacementImage / LoadingPlacementImage so front-end can share
+    placement_count.js via configurable API base.
+    """
+
+    PLACEMENT_SOURCE = 'placement'
+
+    @staticmethod
+    def create(order_pk: int, record_pk: int, file_path: str, original_name: str = '', sort_order: int = None):
+        conn = get_db()
+        cursor = conn.cursor()
+        if sort_order is None:
+            cursor.execute(
+                'SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM inbound_images '
+                'WHERE order_pk = ? AND source = ?',
+                (order_pk, InboundPlacementImage.PLACEMENT_SOURCE))
+            sort_order = cursor.fetchone()['next']
+        cursor.execute(
+            'INSERT INTO inbound_images '
+            '(order_pk, record_pk, file_path, original_name, source, sort_order, created_at) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?)',
+            (order_pk, record_pk, file_path, original_name,
+             InboundPlacementImage.PLACEMENT_SOURCE, sort_order,
+             datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+        conn.commit()
+        image_id = cursor.lastrowid
+        conn.close()
+        return image_id
+
+    @staticmethod
+    def _parse_circles(raw):
+        if not raw:
+            return []
+        if isinstance(raw, (list, tuple)):
+            return list(raw)
+        try:
+            val = _json.loads(raw)
+            return val if isinstance(val, list) else []
+        except Exception:
+            return []
+
+    @staticmethod
+    def get_by_record(record_pk: int):
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM inbound_images WHERE record_pk = ? AND source = 'placement' ORDER BY sort_order ASC, id ASC",
+            (record_pk,))
+        rows = cursor.fetchall()
+        conn.close()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item['relative_path'] = InboundImage.get_relative_path(item['file_path'])
+            item['marks'] = InboundPlacementImage.get_marks(item['id'])
+            item['n_marks'] = len(item['marks'])
+            item['circles'] = InboundPlacementImage._parse_circles(item.get('circles'))
+            item['mark_scale'] = item.get('mark_scale') or 1
+            item['loose_count'] = item.get('loose_count') or 0
+            item['manual_count'] = item.get('manual_count')
+            item['is_unload'] = bool(item.get('is_unload'))
+            eff = item['manual_count'] if item['manual_count'] is not None else item['n_marks']
+            item['effective_zhi'] = eff
+            item['signed_count'] = -eff if item['is_unload'] else eff
+            result.append(item)
+        return result
+
+    @staticmethod
+    def get_by_id(image_id: int):
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM inbound_images WHERE id = ? AND source = 'placement'", (image_id,))
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        item = dict(row)
+        item['relative_path'] = InboundImage.get_relative_path(item['file_path'])
+        item['marks'] = InboundPlacementImage.get_marks(item['id'])
+        item['n_marks'] = len(item['marks'])
+        item['circles'] = InboundPlacementImage._parse_circles(item.get('circles'))
+        item['mark_scale'] = item.get('mark_scale') or 1
+        item['loose_count'] = item.get('loose_count') or 0
+        item['manual_count'] = item.get('manual_count')
+        item['is_unload'] = bool(item.get('is_unload'))
+        eff = item['manual_count'] if item['manual_count'] is not None else item['n_marks']
+        item['effective_zhi'] = eff
+        item['signed_count'] = -eff if item['is_unload'] else eff
+        return item
+
+    @staticmethod
+    def set_circles(image_id: int, circles):
+        raw = _json.dumps(circles, ensure_ascii=False) if circles else None
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('UPDATE inbound_images SET circles = ? WHERE id = ?', (raw, image_id))
+        conn.commit()
+        conn.close()
+
+    @staticmethod
+    def set_mark_scale(image_id: int, scale: float):
+        try:
+            scale = float(scale)
+        except (TypeError, ValueError):
+            scale = 1.0
+        if scale <= 0:
+            scale = 1.0
+        scale = max(0.3, min(4.0, scale))
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('UPDATE inbound_images SET mark_scale = ? WHERE id = ?', (scale, image_id))
+        conn.commit()
+        conn.close()
+        return scale
+
+    @staticmethod
+    def set_loose_count(image_id: int, count):
+        try:
+            count = round(float(count), 1)
+        except (TypeError, ValueError):
+            count = 0
+        if count < 0:
+            count = 0
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('UPDATE inbound_images SET loose_count = ? WHERE id = ?', (count, image_id))
+        conn.commit()
+        conn.close()
+        return count
+
+    @staticmethod
+    def set_manual_count(image_id: int, count):
+        conn = get_db()
+        cursor = conn.cursor()
+        if count is None or count == '':
+            count = None
+        else:
+            try:
+                count = int(round(float(count)))
+            except (TypeError, ValueError):
+                count = 0
+            if count < 0:
+                count = 0
+        if count is None:
+            cursor.execute('UPDATE inbound_images SET manual_count = NULL WHERE id = ?', (image_id,))
+        else:
+            cursor.execute('UPDATE inbound_images SET manual_count = ? WHERE id = ?', (count, image_id))
+            cursor.execute('DELETE FROM inbound_placement_marks WHERE image_id = ?', (image_id,))
+        conn.commit()
+        conn.close()
+        return count
+
+    @staticmethod
+    def set_unload(image_id: int, unload: bool):
+        flag = 1 if unload else 0
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('UPDATE inbound_images SET is_unload = ? WHERE id = ?', (flag, image_id))
+        conn.commit()
+        conn.close()
+        return flag
+
+    @staticmethod
+    def delete(image_id: int):
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            'SELECT file_path FROM inbound_images WHERE id = ? AND source = ?',
+            (image_id, InboundPlacementImage.PLACEMENT_SOURCE))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return False
+        file_path = row['file_path']
+        cursor.execute('DELETE FROM inbound_placement_marks WHERE image_id = ?', (image_id,))
+        cursor.execute('DELETE FROM inbound_images WHERE id = ?', (image_id,))
+        conn.commit()
+        conn.close()
+        _safe_remove_file(file_path)
+        return True
+
+    @staticmethod
+    def add_mark(image_id: int, x_ratio: float, y_ratio: float, mark_r: float = 0.0) -> int:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('SELECT COALESCE(MAX(seq), 0) + 1 FROM inbound_placement_marks WHERE image_id = ?', (image_id,))
+        seq = cursor.fetchone()[0]
+        cursor.execute(
+            'INSERT INTO inbound_placement_marks (image_id, seq, x_ratio, y_ratio, mark_r, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+            (image_id, seq, x_ratio, y_ratio, mark_r, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+        conn.commit()
+        conn.close()
+        return seq
+
+    @staticmethod
+    def get_marks(image_id: int):
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            'SELECT id, seq, x_ratio, y_ratio, mark_r FROM inbound_placement_marks WHERE image_id = ? ORDER BY seq ASC',
+            (image_id,))
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+
+    @staticmethod
+    def delete_last_mark(image_id: int):
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            'SELECT id FROM inbound_placement_marks WHERE image_id = ? ORDER BY seq DESC LIMIT 1',
+            (image_id,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return []
+        cursor.execute('DELETE FROM inbound_placement_marks WHERE id = ?', (row['id'],))
+        conn.commit()
+        conn.close()
+        return InboundPlacementImage.get_marks(image_id)
+
+    @staticmethod
+    def delete_by_record(record_pk: int):
+        """delete all placement images for a record (cleanup on record delete)."""
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, file_path FROM inbound_images WHERE record_pk = ? AND source = 'placement'",
+            (record_pk,))
+        rows = cursor.fetchall()
+        file_paths = [r['file_path'] for r in rows]
+        ids = [r['id'] for r in rows]
+        if ids:
+            qmarks = ','.join('?' * len(ids))
+            cursor.execute(f'DELETE FROM inbound_placement_marks WHERE image_id IN ({qmarks})', ids)
+        cursor.execute(
+            "DELETE FROM inbound_images WHERE record_pk = ? AND source = 'placement'",
+            (record_pk,))
+        conn.commit()
+        conn.close()
+        for fp in file_paths:
+            _safe_remove_file(fp)
+        return file_paths
 
 
 class OcrMatchEvent:
@@ -2332,5 +2884,79 @@ class UnifiedSearch:
         )
         return results
 
+
+class CopyPaperImage:
+    """拷贝纸/日本纸 行级图片 + 人工录入张数。
+
+    与 ShippingImage / PlacementImage 隔离:
+    - 不进 OCR pipeline
+    - 不进 match-col / 整体图区
+    - 仅用于人工参考 + 行级 total 比对
+    """
+
+    @staticmethod
+    def create(record_pk: int, file_path: str, original_name: str, source: str):
+        if source not in ('label', 'count'):
+            raise ValueError(f"source must be 'label' or 'count', got {source!r}")
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO copy_paper_images (record_pk, file_path, original_name, source) "
+            "VALUES (?, ?, ?, ?)",
+            (record_pk, file_path, original_name or '', source))
+        new_id = cur.lastrowid
+        conn.commit()
+        conn.close()
+        return new_id
+
+    @staticmethod
+    def list_by_record(record_pk: int):
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT * FROM copy_paper_images WHERE record_pk = ? "
+            "ORDER BY source ASC, created_at ASC, id ASC",
+            (record_pk,))
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+        return rows
+
+    @staticmethod
+    def get_by_id(image_id: int):
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM copy_paper_images WHERE id = ?", (image_id,))
+        row = cur.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    @staticmethod
+    def update_count(image_id: int, sheet_count):
+        if sheet_count is not None:
+            try:
+                sheet_count = int(sheet_count)
+            except (TypeError, ValueError):
+                raise ValueError(f"sheet_count must be int or None, got {sheet_count!r}")
+            if sheet_count < 0:
+                raise ValueError(f"sheet_count must be >= 0, got {sheet_count}")
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE copy_paper_images SET sheet_count = ? WHERE id = ?",
+            (sheet_count, image_id))
+        changed = cur.rowcount > 0
+        conn.commit()
+        conn.close()
+        return changed
+
+    @staticmethod
+    def delete(image_id: int) -> bool:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM copy_paper_images WHERE id = ?", (image_id,))
+        changed = cur.rowcount > 0
+        conn.commit()
+        conn.close()
+        return changed
 
 

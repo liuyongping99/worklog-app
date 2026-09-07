@@ -308,6 +308,24 @@ def init_db():
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_placement_marks_image_id ON placement_marks(image_id)')
     except Exception:
         pass
+
+    # 2026-08-26:inbound placement_marks table (separate FK to inbound_images)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS inbound_placement_marks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            image_id INTEGER NOT NULL,
+            seq INTEGER NOT NULL,
+            x_ratio REAL NOT NULL,
+            y_ratio REAL NOT NULL,
+            mark_r REAL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (image_id) REFERENCES inbound_images(id)
+        )
+    ''')
+    try:
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_inbound_placement_marks_image_id ON inbound_placement_marks(image_id)')
+    except Exception:
+        pass
     # 2026-07-30: 老表增量加 match_source 列(若已存在则 skip)
     for tbl in ('shipping_images', 'loading_order_images'):
         try:
@@ -456,7 +474,13 @@ def init_db():
             human_verified INTEGER DEFAULT 0,
             match_source TEXT DEFAULT NULL,
             bg_color TEXT DEFAULT NULL,
-            source_tag TEXT DEFAULT NULL,
+                        source_tag TEXT DEFAULT NULL,
+            -- 2026-08-26:inbound enable placement (align shipping)
+            circles TEXT DEFAULT NULL,
+            mark_scale REAL DEFAULT 1,
+            loose_count INTEGER DEFAULT 0,
+            manual_count INTEGER DEFAULT NULL,
+            is_unload INTEGER DEFAULT 0,
             created_at TEXT NOT NULL,
             FOREIGN KEY (order_pk) REFERENCES inbound_orders(id)
         )
@@ -467,6 +491,19 @@ def init_db():
         cursor.execute('ALTER TABLE inbound_images ADD COLUMN source_tag TEXT')
     except Exception:
         pass  # 列已存在
+
+    # 2026-08-26:inbound placement cols migration (for existing dbs)
+    for col, default in [
+        ('circles', 'TEXT DEFAULT NULL'),
+        ('mark_scale', 'REAL DEFAULT 1'),
+        ('loose_count', 'INTEGER DEFAULT 0'),
+        ('manual_count', 'INTEGER DEFAULT NULL'),
+        ('is_unload', 'INTEGER DEFAULT 0'),
+    ]:
+        try:
+            cursor.execute(f'ALTER TABLE inbound_images ADD COLUMN {col} {default}')
+        except Exception:
+            pass  # column already exists
 
     # ── inbound_records（入库订单明细） ──
     cursor.execute('''
@@ -900,6 +937,20 @@ def init_db():
     ''')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_voice_phrase ON voice_phrase_mapping(phrase)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_voice_status ON voice_phrase_mapping(status)')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS copy_paper_images (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            record_pk     INTEGER NOT NULL,
+            file_path     TEXT NOT NULL,
+            original_name TEXT,
+            source        TEXT NOT NULL CHECK (source IN ('label','count')),
+            sheet_count   INTEGER,
+            created_at    TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (record_pk) REFERENCES shipping_records(id) ON DELETE CASCADE
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_copy_paper_record ON copy_paper_images(record_pk)')
 
     # ── 启动 seed:为管理页要列出的分类节点占位空白提示词 ─────────
     # 2026-08-08 新增:不再依赖 classify_record 自动分类精度,

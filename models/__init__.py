@@ -9,9 +9,10 @@ from .basic import WorkLog, ErrorLog, TodoItem, VehicleMaintenance
 from .notice import Notice, NoticeImage
 from .orders import (
     ShippingOrder, ShippingRecord, ShippingImage, PlacementImage,
-    InboundOrder, InboundRecord, InboundImage,
-    LoadingOrder, LoadingOrderRecord, LoadingOrderImage,
+    InboundOrder, InboundRecord, InboundImage, InboundPlacementImage,
+    LoadingOrder, LoadingOrderRecord, LoadingOrderImage, LoadingPlacementImage,
     UnifiedSearch, OcrMatchEvent,
+    CopyPaperImage,
 )
 from .point_count import PointCountSession, PointCountImage
 from .stock import StockOutItem
@@ -27,9 +28,10 @@ __all__ = [
     'WorkLog', 'ErrorLog', 'TodoItem', 'VehicleMaintenance',
     'Notice', 'NoticeImage',
     'ShippingOrder', 'ShippingRecord', 'ShippingImage', 'PlacementImage',
-    'InboundOrder', 'InboundRecord', 'InboundImage',
-    'LoadingOrder', 'LoadingOrderRecord', 'LoadingOrderImage',
+    'InboundOrder', 'InboundRecord', 'InboundImage', 'InboundPlacementImage',
+    'LoadingOrder', 'LoadingOrderRecord', 'LoadingOrderImage', 'LoadingPlacementImage',
     'UnifiedSearch', 'OcrMatchEvent',
+    'CopyPaperImage',
     'PointCountSession', 'PointCountImage',
     'StockOutItem',
     'ProductUnit', 'ProductCategory', 'Product',
