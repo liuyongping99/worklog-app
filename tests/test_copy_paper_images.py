@@ -9,6 +9,7 @@ import os
 import pytest
 from models._db import get_db, DB_PATH
 from models.orders import CopyPaperImage
+from blueprints._helpers import compute_copy_paper_expected_quantity
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -92,3 +93,27 @@ def test_get_by_id_and_delete(fresh_record):
     assert CopyPaperImage.get_by_id(iid) is None
     # 二次删应返回 False
     assert CopyPaperImage.delete(iid) is False
+
+
+def test_helper_ling_positive():
+    assert compute_copy_paper_expected_quantity(5, '令') == (5.0, True)
+    assert compute_copy_paper_expected_quantity('3', '令') == (3.0, True)
+    assert compute_copy_paper_expected_quantity('2.5', '令') == (2.5, True)
+
+
+def test_helper_zhang_positive():
+    assert compute_copy_paper_expected_quantity(500, '张') == (500.0, True)
+
+
+def test_helper_unsupported_unit():
+    assert compute_copy_paper_expected_quantity(5, '支') == (0.0, False)
+    assert compute_copy_paper_expected_quantity(5, '码') == (0.0, False)
+    assert compute_copy_paper_expected_quantity(5, None) == (0.0, False)
+
+
+def test_helper_invalid_quantity():
+    assert compute_copy_paper_expected_quantity(0, '令') == (0.0, False)
+    assert compute_copy_paper_expected_quantity(None, '张') == (0.0, False)
+    assert compute_copy_paper_expected_quantity('', '张') == (0.0, False)
+    assert compute_copy_paper_expected_quantity('abc', '张') == (0.0, False)
+    assert compute_copy_paper_expected_quantity(-3, '令') == (0.0, False)

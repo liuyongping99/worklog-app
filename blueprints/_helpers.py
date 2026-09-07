@@ -122,7 +122,7 @@ def get_ypp(product_name, spec, units_cache=None):
 def _match_unit_in_cache(product_name, spec, units_cache):
     """在预加载的 units 列表里找匹配项。先找 spec_keyword 匹配的，未命中则取默认行。
 
-    与 ProductUnit.get_match 和 JS 端 findInboundUnit 行为一致：两轮匹配，
+    与 ProductUnit.get_match 和 JS 端 ProductRowUtils.findUnit 行为一致：两轮匹配，
     避免默认行（无 spec_keyword）排在前面时抢在精确匹配之前返回。
     """
     spec_lower = (spec or '').lower()
@@ -159,6 +159,24 @@ def calc_hint(quantity_str, ypp, unit=None, remark=None):
         qty = float(quantity_str)
     except (ValueError, TypeError):
         return ''
+    # 优先级 0:备注里有 *Yy(per_piece) → 用 per_piece 算(与 check_remark 同构)
+    # 见 :182-229 check_remark 的 per_piece 抽取规则
+    if remark:
+        m_mul1 = re.search(r'(\d+(?:\.\d+)?)\s*[yY码]\s*\*\s*(\d+)支', remark)
+        if m_mul1:
+            per_piece = float(m_mul1.group(1))
+        else:
+            m_mul2 = re.search(r'(\d+)支\s*\*\s*(\d+(?:\.\d+)?)\s*[yY码]', remark)
+            if m_mul2:
+                per_piece = float(m_mul2.group(2))
+            else:
+                per_piece = None
+        if per_piece is not None and per_piece > 0:
+            pieces = int(qty / per_piece)
+            remainder = qty - (pieces * per_piece)
+            if remainder < 0.01:
+                return f'{pieces}支'
+            return f'{pieces}支+{round(remainder, 2)}码'
     # 单位已经是支：直接以数量作为支数提示（无需 YPP 配置）
     if unit == '支':
         if qty == int(qty):
@@ -229,6 +247,130 @@ def check_remark(remark, quantity_str, ypp):
     return 'info' if pieces == 1 else 'warn'
 
 
+def find_ypp_mismatches(records, units_cache=None):
+    """扫一批明细,找出所有 YPP 规则冲突项(数量与备注支数+码数不匹配)。
+
+    判定规则与 check_remark 一致:
+      - 没 YPP 配置(is_usingyardforcounting=0 或 yards_per_piece<=0)→ 跳过
+      - 备注里没有 "X支" → 跳过(无 YPP 校验对象)
+      - check_remark 返回 '' → 一致,跳过
+      - 返回 'info'/'warn' → 列入结果
+
+    Args:
+        records: 明细列表,每条需含 product_name/specification/quantity/unit/remark
+                 可选含 order_pk/date/customer 用于结果展示
+        units_cache: 预加载的 product_units 列表(避免循环查 DB),
+                     元素需含 product_name/spec_keyword/yards_per_piece/is_usingyardforcounting
+                     None 时内部查一次 DB。
+
+    Returns:
+        list[dict] 不匹配项明细,按 (severity desc, date desc, record_id) 排序
+        每条:
+          record_id, order_id, date, customer,
+          product_name, specification, quantity, unit, remark,
+          pieces, per_piece_yards (或 None), loose_yards, ypp,
+          expected (round 2), actual (float|None), diff (round 2|None),
+          severity ('info' / 'warn')
+    """
+    if units_cache is None:
+        from models import ProductUnit  # 延迟导入避免循环
+        units_cache = ProductUnit.get_all() or []
+
+    def _ypp(pn, sp):
+        sl = (sp or '').lower()
+        if sl:
+            for u in units_cache:
+                if u['product_name'] != pn:
+                    continue
+                kw = u['spec_keyword']
+                if kw and kw.lower() in sl:
+                    if u['is_usingyardforcounting'] and u['yards_per_piece'] > 0:
+                        return u['yards_per_piece'] / 100.0
+                    return 0
+        for u in units_cache:
+            if u['product_name'] != pn:
+                continue
+            if not u['spec_keyword']:
+                if u['is_usingyardforcounting'] and u['yards_per_piece'] > 0:
+                    return u['yards_per_piece'] / 100.0
+                return 0
+        return 0
+
+    mismatches = []
+    for r in records:
+        pn = r.get('product_name') or ''
+        sp = r.get('specification') or ''
+        qt = r.get('quantity') or ''
+        rk = r.get('remark') or ''
+
+        # 备注里没有 "X支" → 无 YPP 校验对象,跳过
+        if not re.search(r'\d+支', rk):
+            continue
+
+        ypp = _ypp(pn, sp)
+        if ypp <= 0:
+            continue
+
+        severity = check_remark(rk, qt, ypp)
+        if severity == '':
+            continue
+
+        # 拆解期望值的组成,便于前端展示
+        m_pieces = re.search(r'(\d+)支', rk)
+        pieces = int(m_pieces.group(1))
+        per_piece = None
+        m1 = re.search(r'(\d+(?:\.\d+)?)\s*[yY码]\s*\*\s*(\d+)支', rk)
+        if m1:
+            per_piece = float(m1.group(1))
+        else:
+            m2 = re.search(r'(\d+)支\s*\*\s*(\d+(?:\.\d+)?)\s*[yY码]', rk)
+            if m2:
+                per_piece = float(m2.group(2))
+        no_mul = re.sub(r'(\d+(?:\.\d+)?)\s*[yY码]\s*\*\s*(\d+)支', '', rk)
+        no_mul = re.sub(r'(\d+)支\s*\*\s*(\d+(?:\.\d+)?)\s*[yY码]', '', no_mul)
+        loose = sum(float(x) for x in re.findall(r'(\d+(?:\.\d+)?)[yY码]', no_mul))
+        ypp_eff = per_piece if per_piece is not None else ypp
+        expected = pieces * ypp_eff + loose
+
+        try:
+            actual = float(qt)
+        except (TypeError, ValueError):
+            actual = None
+        diff = (actual - expected) if actual is not None else None
+
+        mismatches.append({
+            'record_id': r.get('id'),
+            'order_id': r.get('order_pk'),
+            'date': r.get('date') or '',
+            'customer': r.get('customer') or '',
+            'product_name': pn,
+            'specification': sp,
+            'quantity': qt,
+            'unit': r.get('unit') or '',
+            'remark': rk,
+            'pieces': pieces,
+            'per_piece_yards': per_piece,
+            'loose_yards': loose,
+            'ypp': ypp,
+            'expected': round(expected, 2),
+            'actual': actual,
+            'diff': round(diff, 2) if diff is not None else None,
+            'severity': severity,
+        })
+
+    # warn 排前,info 排后;同 severity 内日期倒序,再按 record_id
+    sev_rank = {'warn': 0, 'info': 1}
+
+    def _sort_key(m):
+        sev = sev_rank.get(m['severity'], 9)
+        # 日期 'YYYY-MM-DD' → int 比较,无日期当 0 排最后
+        d_int = int(m['date'].replace('-', '')) if m['date'] else 0
+        return (sev, -d_int, m['record_id'] or 0)
+
+    mismatches.sort(key=_sort_key)
+    return mismatches
+
+
 def summarize_remarks(records):
     """从一组明细里汇总备注支数、散码支数，以及辅助单位提示中的总支数。
 
@@ -251,7 +393,15 @@ def summarize_remarks(records):
             m_pieces = re.search(r'(\d+)支', remark)
             if m_pieces:
                 total_pieces += int(m_pieces.group(1))
-            total_loose += len(re.findall(r'\d+(?:\.\d+)?[yY码]', remark))
+            # 先抠掉 *Yy 形式(per_piece 码数,不是散码),再数剩下的 [Yy/码] 才是真散码
+            # 与 check_remark 的 per_piece 提取规则同构,见 :182-229
+            remark_no_mul = re.sub(
+                r'(\d+(?:\.\d+)?)\s*[yY码]\s*\*\s*(\d+)支', '', remark
+            )
+            remark_no_mul = re.sub(
+                r'(\d+)支\s*\*\s*(\d+(?:\.\d+)?)\s*[yY码]', '', remark_no_mul
+            )
+            total_loose += len(re.findall(r'\d+(?:\.\d+)?[yY码]', remark_no_mul))
         # 从辅助单位提示中提取支数（涵盖 unit=支 直接显示 + unit=y 换算后的结果）
         hint = item.get('unit_hint', '')
         if hint:
@@ -306,6 +456,30 @@ def compute_placement_expected_zhi(remark, quantity_str, unit):
 
     # 3. 沿用 remark 解析结果
     return float(remark_zhi), has_remark_zhi
+
+
+def compute_copy_paper_expected_quantity(quantity, unit):
+    """拷贝纸/日本纸 期望张/令数,直接从 quantity 字段取。
+
+    语义:对拷贝纸(令)/日本纸(张)而言,quantity 本身就是期望值。
+    与 compute_placement_expected_zhi 的区别:
+    - placement:解析备注「X支」 + unit='支' 时回退 quantity
+    - copy_paper:不解析备注,直接用 quantity;unit 必须是 '令'|'张'
+
+    Returns:
+        (expected: float, has_expected: bool)
+        - unit 合法且 quantity > 0 → (float(q), True)
+        - 其他 → (0.0, False)
+    """
+    if unit not in ('令', '张'):
+        return (0.0, False)
+    try:
+        q = float(quantity)
+    except (TypeError, ValueError):
+        return (0.0, False)
+    if q <= 0:
+        return (0.0, False)
+    return (q, True)
 
 
 # =====================================================================
@@ -542,17 +716,21 @@ def _normalize_for_match(text):
 
 
 def detect_bg_color(filepath):
-    """检测商品标签图片的背景色(整图分块采样,取最暗区域判断)。
+    """检测商品标签图片的背景色(4 边角采样,取最暗角判断)。
 
     用于"黑磅布三文治""白磅布三文治"等标签上不写颜色的品类:
-    从图片背景推断实物颜色,补充到 OCR 文字中供比对。
+    从图片 4 角塑料布区域推断实物颜色,作为元数据供下游比对使用
+    (ocr_pipeline 末尾 append "[标签背景: 黑色/白色]" 后缀,不直接污染 OCR 文本)。
 
-    实现细节:
-      - 把图等分 4×4 网格,采样每个网格的平均灰度
-      - 取最暗 25% 样本的均值(避开白色标签纸/塑料反光)
-      - < 70 → black(明显深色背景)
-      - > 100 → white(浅色背景,白磅布实拍浅灰蓝)
-      - 70-100 → None(中性灰,放弃推断避免误判)
+    实现细节 (2026-08-19 改进):
+      - 4 角采样:左上 / 右上 / 左下 / 右下,每角取边长 1/8 的矩形 (避开中心标签)
+      - 用灰度图, 每角算 ImageStat 均值
+      - 取 4 角的 min 作为整体判定输入 (任一角为深色即偏向 black)
+      - 黑色塑料布 (min < 70)  -> 'black'   → 实物是"黑磅布三文治"
+      - 白色塑料布 (min > 100) -> 'white'   → 实物是"白磅布三文治"
+      - 中性灰 (70-100)        -> None      → 放弃推断避免误判
+
+    阈值与原 4×4 网格算法保持一致 (70 / 100), 保证现有 image.bg_color 不漂移。
 
     Returns:
         'black', 'white', 或 None.
@@ -561,26 +739,21 @@ def detect_bg_color(filepath):
         from PIL import Image, ImageStat
         img = Image.open(filepath).convert('L')
         w, h = img.size
-        samples = []
-        for i in range(4):
-            for j in range(4):
-                x0 = i * w // 4
-                y0 = j * h // 4
-                x1 = min((i + 1) * w // 4, w)
-                y1 = min((j + 1) * h // 4, h)
-                if x1 - x0 < 2 or y1 - y0 < 2:
-                    continue
-                tile = img.crop((x0, y0, x1, y1))
-                samples.append(ImageStat.Stat(tile).mean[0])
-        if not samples:
-            return None
-        samples.sort()
-        # 取最暗 25% 样本(避开白色标签/反光)
-        dark_n = max(1, len(samples) // 4)
-        dark_avg = sum(samples[:dark_n]) / dark_n
-        if dark_avg < 70:
+        # 4 角采样区域大小:边长的 1/8 (小一些更"纯",但太小易采到边)
+        size_x = max(8, w // 8)
+        size_y = max(8, h // 8)
+        corners = [
+            (0, 0, size_x, size_y),                          # 左上
+            (w - size_x, 0, w, size_y),                      # 右上
+            (0, h - size_y, size_x, h),                      # 左下
+            (w - size_x, h - size_y, w, h),                  # 右下
+        ]
+        samples = [ImageStat.Stat(img.crop(c)).mean[0] for c in corners]
+        # 取最暗角 (4 角中, 最暗那角更代表深色塑料布; 任一角深即偏 black)
+        dark = min(samples)
+        if dark < 70:
             return 'black'
-        if dark_avg > 100:
+        if dark > 100:
             return 'white'
         return None
     except Exception:
