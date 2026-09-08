@@ -348,3 +348,55 @@ def test_enrich_sets_expected_field(fresh_record):
     item = _make_item(rid, 5, '支', name='杂胶袋')
     _enrich_copy_paper_for_item(item)
     assert item['copy_paper_expected'] is None
+
+
+# ─────────────────────────────────────────────────────────
+# Task 9 (2026-09-06): 端到端 流程测试
+# ─────────────────────────────────────────────────────────
+
+def test_e2e_full_flow(client, fresh_record):
+    """端到端: 上传 label + 上传 count + 录入张数 → match green。
+
+    覆盖:
+    - POST 上传 label 图 (multipart)
+    - POST 上传 count 图 (multipart)
+    - PATCH sheet_count=5
+    - _enrich_copy_paper_for_item 计算 match='green' / total=5 / images=2
+    """
+    rid = fresh_record
+
+    # 1. 上传 label 图
+    data = {'source': 'label',
+            'image': (io.BytesIO(_png_bytes()), 'lbl.png')}
+    resp = client.post(f'/api/v1/shipping-orders/records/{rid}/copy-paper-images',
+                       data=data, content_type='multipart/form-data')
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    j = resp.get_json()
+    assert j['success'] is True
+    assert j['image']['source'] == 'label'
+
+    # 2. 上传 count 图
+    data = {'source': 'count',
+            'image': (io.BytesIO(_png_bytes()), 'cnt.png')}
+    resp = client.post(f'/api/v1/shipping-orders/records/{rid}/copy-paper-images',
+                       data=data, content_type='multipart/form-data')
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    j = resp.get_json()
+    assert j['success'] is True
+    iid = j['image']['id']
+    assert iid and iid > 0
+
+    # 3. 录入张数 5
+    resp = client.patch(f'/api/v1/shipping-orders/copy-paper-images/{iid}/sheet-count',
+                        json={'sheet_count': 5})
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert resp.get_json()['sheet_count'] == 5
+
+    # 4. enrichment 应为 green (quantity=5 令)
+    item = _make_item(rid, 5, '令')
+    _enrich_copy_paper_for_item(item)
+    assert item['is_copy_paper'] is True
+    assert item['copy_paper_match'] == 'green'
+    assert item['copy_paper_total'] == 5
+    assert item['copy_paper_expected'] == 5.0
+    assert len(item['copy_paper_images']) == 2
