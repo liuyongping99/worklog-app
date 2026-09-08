@@ -28,24 +28,43 @@
 .m-place h2 { margin:6px 0 0; }
 .mobile-order .subtitle,
 .m-place .subtitle { margin:2px 0 0; opacity:.85; font-size:12px; }
+.mobile-order .head-row { display:flex; align-items:flex-end; justify-content:space-between; gap:10px; margin-top:10px; }
+.mobile-order .head-main { min-width:0; flex:1; }
+.mobile-order .head-main h2 { margin:0; }
+.mobile-order .head-stat { background:rgba(255,255,255,.22); border-radius:99px; padding:5px 11px; font-size:12px; font-weight:700; white-space:nowrap; flex:0 0 auto; }
 
-.mobile-order .overall { background:#f1f8f4; border:1px dashed #8ec8b1; border-radius:12px; padding:11px; margin:11px 0; }
-.mobile-order .overall-title { display:flex; justify-content:space-between; align-items:center; font-size:13px; font-weight:800; color:#155f49; }
-.mobile-order .overall-pill { background:#fff; border:1px solid #b9ddcf; border-radius:99px; padding:3px 8px; font-size:10px; }
-.mobile-order .overall-buttons { display:flex; gap:6px; margin-top:8px; }
-.mobile-order .overall-buttons button { flex:1; border-radius:10px; padding:9px 6px; color:#fff; font-weight:800; font-size:12px; border:0; }
+.mobile-order .overall { background:#fff; border:1px solid #e6f0ea; border-radius:14px; padding:13px; margin:12px 0; box-shadow:0 2px 8px rgba(15,23,42,.06); }
+.mobile-order .overall-title { display:flex; align-items:center; gap:7px; font-size:13.5px; font-weight:800; color:#155f49; }
+.mobile-order .overall-title .ot-icon { width:26px; height:26px; display:grid; place-items:center; background:#e7f6ef; border-radius:8px; font-size:14px; }
+.mobile-order .overall-title .ot-text { flex:1; }
+.mobile-order .overall-title .ot-text em { font-style:normal; font-size:10px; font-weight:700; color:#805700; background:#fff1c2; border-radius:99px; padding:2px 7px; margin-left:6px; vertical-align:1px; }
+.mobile-order .overall-pill { background:#e7f6ef; border:1px solid #b9ddcf; border-radius:99px; padding:3px 9px; font-size:11px; font-weight:700; color:#17664f; }
+.mobile-order .overall-buttons { display:flex; gap:6px; margin-top:10px; }
+.mobile-order .overall-buttons button { flex:1; border-radius:10px; padding:10px 6px; color:#fff; font-weight:800; font-size:12px; border:0; box-shadow:0 2px 5px rgba(15,23,42,.10); }
 .mobile-order .overall-buttons button:nth-child(1) { background:#14664d; }
 .mobile-order .overall-buttons button:nth-child(2) { background:#7c4dba; }
 .mobile-order .overall-buttons button:nth-child(3) { background:#a4561b; }
-.mobile-order .overall-thumbs { display:flex; gap:6px; margin-top:7px; }
-.mobile-order .overall-thumb { background:#fff; border-radius:8px; height:54px; flex:1; display:grid; place-items:center; color:#4a5a55; font-size:10px; border:1px solid #d6e4dd; }
-.mobile-order .overall-thumb.filled { background:#d8f1e2; color:#17664f; border:0; }
+.mobile-order .overall-buttons button:active { transform:scale(.97); }
+.mobile-order .overall-thumbs { display:flex; gap:6px; margin-top:8px; }
+.mobile-order .overall-thumb { background:#f6faf8; border-radius:9px; height:52px; flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; border:1px solid #e1ece6; }
+.mobile-order .overall-thumb .ot-tag { font-size:11px; font-weight:700; color:#4a5a55; }
+.mobile-order .overall-thumb .ot-state { font-size:10px; color:#94a3b8; }
+.mobile-order .overall-thumb.filled { background:#d8f1e2; border-color:#b9ddcf; }
+.mobile-order .overall-thumb.filled .ot-tag { color:#17664f; }
+.mobile-order .overall-thumb.filled .ot-state { color:#16835f; font-weight:700; }
 
-.mobile-order .product-card { background:#fff; border-radius:12px; padding:12px; margin:10px 0; box-shadow:0 2px 6px rgba(15,23,42,.08); }
-.mobile-order .row { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
-.mobile-order .product-name { font-weight:800; font-size:15px; }
-.mobile-order .spec { margin-top:3px; font-size:12px; color:#475569; }
-.mobile-order .badge { font-size:10px; font-weight:700; border-radius:99px; padding:4px 7px; white-space:nowrap; }
+.mobile-order .product-card { background:#fff; border-radius:14px; padding:13px; margin:11px 0; box-shadow:0 2px 8px rgba(15,23,42,.07); }
+.mobile-order .pc-head { display:flex; align-items:flex-start; gap:9px; }
+.mobile-order .pc-idx { flex:0 0 auto; width:24px; height:24px; border-radius:7px; background:#e7f6ef; color:#17664f; font-size:12px; font-weight:800; display:grid; place-items:center; margin-top:1px; }
+.mobile-order .pc-main { flex:1; min-width:0; }
+.mobile-order .product-name { font-weight:800; font-size:15px; line-height:1.3; word-break:break-word; }
+.mobile-order .pc-attrs { display:flex; flex-wrap:wrap; gap:5px; margin-top:6px; }
+.mobile-order .chip { font-size:11px; font-weight:600; border-radius:7px; padding:3px 8px; line-height:1.4; }
+.mobile-order .chip-spec { background:#eef2f7; color:#475569; }
+.mobile-order .chip-qty { background:#e7f6ef; color:#14664d; }
+.mobile-order .chip-qty b { font-size:13px; }
+.mobile-order .pc-remark { margin-top:8px; padding:7px 9px; background:#f8fafc; border-radius:8px; font-size:11.5px; color:#5b6b65; line-height:1.4; word-break:break-word; }
+.mobile-order .badge { font-size:10px; font-weight:700; border-radius:99px; padding:4px 8px; white-space:nowrap; flex:0 0 auto; }
 .mobile-order .badge.todo { background:#fff1c2; color:#805700; }
 .mobile-order .badge.done { background:#dbf6e6; color:#146745; }
 .mobile-order .badge.warn { background:#fde6e6; color:#a8201a; }
@@ -62,7 +81,8 @@
 .mobile-order .status-line { display:flex; align-items:center; gap:7px; margin-top:8px; padding:7px 9px; border-radius:9px; font-size:11px; line-height:1.4; background:#e3f8ec; color:#146745; }
 .mobile-order .status-line .color-note { background:#d8e5df; color:#155f49; border-radius:6px; padding:2px 6px; font-size:10px; font-weight:600; }
 .mobile-order .status-line.warn { background:#fde6e6; color:#a8201a; }
-.mobile-order .status-line .dot { width:8px; height:8px; border-radius:99px; background:#16835f; }
+.mobile-order .status-line .dot { width:8px; height:8px; border-radius:99px; background:#16835f; flex:0 0 auto; }
+.mobile-order .status-line .status-text { flex:1; min-width:0; }
 .mobile-order .status-line.warn .dot { background:#c5342c; }
 .mobile-order .status-line a { color:inherit; text-decoration:underline; margin-left:auto; font-weight:700; }
 
@@ -73,7 +93,9 @@
 .mobile-order .upload-progress[hidden] { display:none; }
 .mobile-order .overall .upload-progress { background:#f3f0ff; color:#4a3a7a; }
 
-.mobile-order .record-images { display:grid; grid-template-columns:repeat(3, 1fr); gap:4px; margin-top:9px; }
+.mobile-order .order-images { background:#fff; border-radius:14px; padding:13px; margin:12px 0; box-shadow:0 2px 8px rgba(15,23,42,.07); }
+.mobile-order .order-images h3 { margin:0 0 10px; font-size:13.5px; font-weight:800; color:#155f49; }
+.mobile-order .record-images { display:grid; grid-template-columns:repeat(3, 1fr); gap:5px; }
 .mobile-order .record-image-cell { position:relative; }
 .mobile-order .record-images img { width:100%; aspect-ratio:1; object-fit:cover; border-radius:6px; cursor:pointer; border:1px solid #e1e9e5; display:block; }
 .mobile-order .record-image-cell .img-source-tag { position:absolute; left:0; right:0; bottom:0; padding:3px 4px; background:linear-gradient(to top, rgba(0,0,0,.7), rgba(0,0,0,0)); color:#fff; font-size:10px; font-weight:700; text-align:center; border-radius:0 0 6px 6px; pointer-events:none; }
@@ -93,23 +115,59 @@
 .photo-preview-actions .photo-retake { background:#fff; color:#a8201a; border:1px solid #f0c9c6; }
 
 /* ── 移动端 OCR/AI 识别详情弹窗（不含提示词,省屏幕） ── */
-/* 识别详情：从右滑入的整页（替代弹窗） */
-.ocr-detail-mask { position:fixed; inset:0; z-index:1000; background:#fff; color:#1d2b27; display:flex; flex-direction:column; transform:translateX(100%); transition:transform .28s ease; will-change:transform; }
+/* ── 识别详情页 — 底部弹起 sheet(480 居中,对齐今日订单页宽度) ──
+   遮罩 + 圆角顶 sheet 从底部滑入;顶部 grab 手柄 + ‹ 返回,内容用卡片展示 OCR/AI/人工确认。 */
+.ocr-detail-mask { position:fixed; inset:0; z-index:1000; background:rgba(15,23,42,.45); display:flex; align-items:flex-end; justify-content:center; opacity:0; transition:opacity .25s ease; }
 .ocr-detail-mask[hidden] { display:none; }
-.ocr-detail-mask.open { transform:translateX(0); }
-.ocr-detail-page-head { display:flex; align-items:center; gap:6px; padding:calc(8px + env(safe-area-inset-top)) 10px 8px; background:linear-gradient(140deg,#14664d,#21956c); color:#fff; flex:0 0 auto; }
-.ocr-detail-back { width:46px; height:46px; flex:0 0 auto; margin-left:-6px; border:0; border-radius:50%; background:rgba(255,255,255,.18); color:#fff; font-size:34px; line-height:1; font-weight:700; display:grid; place-items:center; cursor:pointer; }
-.ocr-detail-back:active { background:rgba(255,255,255,.34); }
-.ocr-detail-page-title { font-weight:800; font-size:15px; line-height:1.3; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.ocr-detail-body { flex:1 1 auto; padding:14px 16px calc(20px + env(safe-area-inset-bottom)); overflow-y:auto; -webkit-overflow-scrolling:touch; font-size:13px; line-height:1.55; }
-.ocr-detail-sec { margin-bottom:14px; }
+.ocr-detail-mask.open { opacity:1; }
+.ocr-detail-shell { width:100%; max-width:480px; background:#fff; color:#1A2233; border-radius:18px 18px 0 0; max-height:92vh; display:flex; flex-direction:column; overflow:hidden; transform:translateY(100%); transition:transform .32s cubic-bezier(.2,.8,.2,1); box-shadow:0 -8px 30px rgba(0,0,0,.18); }
+.ocr-detail-mask.open .ocr-detail-shell { transform:translateY(0); }
+.ocr-detail-grab { width:38px; height:4px; background:#cbd5e1; border-radius:2px; margin:8px auto 0; flex:0 0 auto; }
+
+/* sheet header */
+.ocr-detail-page-head { display:flex; align-items:center; gap:8px; padding:6px 14px 12px; background:#fff; border-bottom:1px solid #E5E8EE; flex:0 0 auto; }
+.ocr-detail-back { width:40px; height:40px; flex:0 0 auto; border:0; border-radius:12px; background:#F2F4F7; color:#1A2233; font-size:24px; font-weight:700; line-height:1; display:grid; place-items:center; cursor:pointer; font-family:inherit; padding:0; }
+.ocr-detail-back:active { background:#E5E8EE; }
+.ocr-detail-page-title { font-weight:700; font-size:16px; line-height:1.3; color:#1A2233; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; letter-spacing:-.01em; }
+
+/* sheet body — 浅绿渐变 + 卡片 */
+.ocr-detail-body { flex:1 1 auto; padding:14px 14px calc(20px + env(safe-area-inset-bottom)); overflow-y:auto; -webkit-overflow-scrolling:touch; background:linear-gradient(180deg,#ECFDF5 0%,#F8FAFC 32%); font-size:14px; line-height:1.55; }
+
+/* OCR 键值对卡(把 ocr_text 按 品名:/规格:/标签背景: 拆成分行键值) */
+.ocr-detail-kv { display:flex; flex-direction:column; background:#f8fafc; border-radius:10px; overflow:hidden; border:1px solid #eef2f1; }
+.ocr-detail-kv .kv-row { display:flex; align-items:baseline; gap:10px; padding:9px 12px; }
+.ocr-detail-kv .kv-row + .kv-row { border-top:1px solid #eef2f1; }
+.ocr-detail-kv .kv-key { flex:0 0 68px; font-size:11px; font-weight:700; color:#64748b; }
+.ocr-detail-kv .kv-val { flex:1; min-width:0; font-size:13.5px; color:#1A2233; word-break:break-word; font-weight:600; }
+.ocr-detail-kv .kv-val.hl { color:#14664d; }
+
+/* AI 推理文本(自然语言句子,普通字体非等宽) */
+.ocr-detail-reason { white-space:pre-wrap; word-break:break-word; color:#1A2233; background:#f8fafc; border-radius:10px; padding:12px 14px; font-size:13.5px; line-height:1.6; }
+
+/* Hero 卡:商品品名 + 规格 + 状态 pill(顶部主视觉锚点) */
+.ocr-detail-hero { background:linear-gradient(135deg,#14664d 0%,#21956c 50%,#16835f 100%); color:#FFFFFF; border-radius:18px; padding:20px 22px; margin-bottom:14px; box-shadow:0 8px 24px rgba(22,131,95,.28); position:relative; overflow:hidden; }
+.ocr-detail-hero::after { content:""; position:absolute; top:-40px; right:-40px; width:140px; height:140px; background:radial-gradient(circle,rgba(255,255,255,.18) 0%,transparent 70%); pointer-events:none; }
+.ocr-detail-hero-label { font-size:11px; font-weight:600; opacity:.85; letter-spacing:.06em; text-transform:uppercase; margin-bottom:6px; }
+.ocr-detail-hero-name { font-size:20px; font-weight:800; letter-spacing:-.01em; line-height:1.25; word-break:break-word; }
+.ocr-detail-hero-spec { font-size:13px; opacity:.88; margin-top:6px; }
+.ocr-detail-hero-status { display:inline-flex; align-items:center; gap:5px; margin-top:14px; padding:5px 12px; border-radius:999px; font-size:12px; font-weight:700; background:rgba(255,255,255,.22); backdrop-filter:blur(8px); }
+.ocr-detail-hero-status.green { background:rgba(255,255,255,.95); color:#047857; }
+.ocr-detail-hero-status.yellow { background:rgba(254,243,199,.95); color:#B45309; }
+.ocr-detail-hero-status.red { background:rgba(254,226,226,.95); color:#B91C1C; }
+.ocr-detail-hero-remark { font-size:12.5px; opacity:.88; margin-top:8px; padding-top:8px; border-top:1px solid rgba(255,255,255,.18); }
+
+.ocr-detail-sec { background:#FFFFFF; border-radius:14px; padding:14px 16px; margin-bottom:10px; box-shadow:0 1px 3px rgba(15,23,42,.06); }
 .ocr-detail-sec:last-child { margin-bottom:0; }
-.ocr-detail-sec-h { font-weight:800; font-size:12px; color:#16835f; margin-bottom:5px; letter-spacing:.3px; }
-.ocr-detail-text { white-space:pre-wrap; word-break:break-word; color:#1d2b27; background:#f6f9f8; border-radius:8px; padding:9px 10px; font-size:12.5px; }
-.ocr-detail-ai-status { font-weight:800; font-size:13px; margin-bottom:5px; }
-.ocr-detail-ai-status.green { color:#16835f; }
-.ocr-detail-ai-status.yellow, .ocr-detail-ai-status.red { color:#c0392b; }
-.ocr-detail-loading, .ocr-detail-err, .muted { color:#8aa39a; }
+.ocr-detail-sec-h { display:flex; align-items:center; gap:10px; font-weight:700; font-size:13px; color:#475569; letter-spacing:.02em; margin-bottom:12px; }
+.ocr-detail-sec-h-icon { width:28px; height:28px; display:inline-flex; align-items:center; justify-content:center; background:#E7F6EF; border-radius:8px; font-size:14px; line-height:1; flex-shrink:0; }
+.ocr-detail-sec-h-text { flex:1; }
+.ocr-detail-text { white-space:pre-wrap; word-break:break-word; color:#1A2233; background:#F8FAFC; border-radius:10px; padding:12px 14px; font-size:13.5px; line-height:1.6; font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace; }
+.ocr-detail-ai-status { display:inline-flex; align-items:center; gap:4px; font-weight:700; font-size:13px; padding:5px 12px; border-radius:999px; margin-bottom:10px; }
+.ocr-detail-ai-status.green { background:#ECFDF5; color:#047857; }
+.ocr-detail-ai-status.yellow { background:#FEF3C7; color:#B45309; }
+.ocr-detail-ai-status.red { background:#FEE2E2; color:#B91C1C; }
+.ocr-detail-loading, .ocr-detail-err, .muted { color:#94A3B8; }
+.ocr-detail-loading, .ocr-detail-err { padding:32px 16px; text-align:center; font-style:italic; }
 
 /* ── 移动端点数清点页 ── */
 .m-place { max-width: 480px; margin: 0 auto; padding: 12px 10px calc(20px + env(safe-area-inset-bottom)); }
@@ -170,4 +228,51 @@
 .place-result.ok { background:#e6f6ee; border-color:#16835f; }
 .place-result.ok .pr-row b { color:#16835f; }
 .place-result.bad { background:#fdecea; border-color:#c0392b; }
+
+/* 拷贝纸/日本纸 (2026-09-06) */
+.m-copy-paper-label-btn, .m-copy-paper-count-btn {
+    margin: 4px 4px 0 0;
+    padding: 6px 10px;
+    border-radius: 4px;
+    border: 1px solid #ced4da;
+    background: #fff;
+    font-size: 14px;
+}
+.m-copy-paper-label-btn { background: #74b9ff; color: #fff; }
+.m-copy-paper-count-btn { background: #fdcb6e; color: #222; }
+.m-copy-paper-area {
+    margin-top: 8px;
+    padding: 8px;
+    background: #f8f9fa;
+    border-radius: 4px;
+}
+.m-copy-paper-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 12px;
+    margin-right: 6px;
+}
+.m-copy-paper-badge.green { background: #d3f9d8; color: #2b8a3e; }
+.m-copy-paper-badge.yellow { background: #fff3bf; color: #b8860b; }
+.m-copy-paper-badge.partial { background: #e9ecef; color: #495057; }
+.m-copy-paper-thumb {
+    display: inline-block;
+    width: 80px;
+    margin: 4px;
+    text-align: center;
+}
+.m-copy-paper-thumb img { width: 80px; height: 60px; object-fit: cover; border-radius: 2px; }
+.m-copy-paper-tag { display: block; font-size: 11px; margin-top: 2px; }
+.m-copy-paper-tag.tag-label { color: #1864ab; }
+.m-copy-paper-tag.tag-count { color: #b8860b; }
+.m-copy-paper-count-input {
+    width: 100%;
+    margin-top: 2px;
+    padding: 2px;
+    border: 1px solid #ced4da;
+    border-radius: 2px;
+    font-size: 12px;
+    box-sizing: border-box;
+}
 .place-result.bad .pr-row b { color:#c0392b; }

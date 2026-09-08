@@ -7,6 +7,7 @@ from flask import Blueprint, render_template
 
 from models.orders import ShippingOrder, ShippingRecord, ShippingImage, PlacementImage, OcrMatchEvent
 from blueprints.ocr_log import set_log_context
+from blueprints.shipping import _enrich_copy_paper_for_item
 
 bp = Blueprint("mobile_shipping", __name__)
 
@@ -64,9 +65,16 @@ def _status_badge(status) -> "tuple[str, str]":
 
 
 def _placement_compare(rec: dict) -> dict:
-    """摆放图清点结果:支合计/散码合计 与 备注 分开比较,供移动端订单页点数按钮下方展示。"""
+    """摆放图清点结果:支合计/散码合计 与 备注 分开比较,供移动端订单页点数按钮下方展示。
+    2026-08-19:与 PC 端 _eff_zhi 保持一致——直接输入的 manual_count 优先于点击计数 n_marks,
+    避免「点数弹框里输入了 X 支,但订单页却按 n_marks 对不上备注」的割裂。
+    """
     pimgs = PlacementImage.get_by_record(rec["id"])
-    zhi_actual = sum(p.get("n_marks", 0) for p in pimgs)
+    # 摆放图"支数"口径:manual_count 优先,无则回退点击计数点(n_marks)
+    def _eff_zhi(p):
+        mc = p.get("manual_count")
+        return mc if mc is not None else (p.get("n_marks") or 0)
+    zhi_actual = sum(_eff_zhi(p) for p in pimgs)
     loose_actual = sum(p.get("loose_count", 0) for p in pimgs)
     remark = rec.get("remark") or ""
     zhi_m = list(re.finditer(r"(\d+)\s*支", remark))
@@ -145,8 +153,21 @@ def shipping_order_detail(oid: int):
     }
     # 整单所有图片(共享 + record),展示一次。_with_rel 已在 record_images 块内复用
     order_images = _with_rel(ShippingImage.get_by_order(oid))
+    # 2026-08-30: enrich placement 图的 n_marks / signed_count(本单图片网格显示支数/散码 overlay 用),
+    # get_by_order 不像 get_by_record 那样 enrich,这里补齐
+    for _img in order_images:
+        if _img.get("source") == "placement":
+            _marks = PlacementImage.get_marks(_img["id"])
+            _n = len(_marks)
+            _mc = _img.get("manual_count")
+            _eff = _mc if _mc is not None else _n
+            _img["n_marks"] = _n
+            _img["effective_zhi"] = _eff
+            _img["signed_count"] = -_eff if _img.get("is_unload") else _eff
     record_states = {}
     for rec in records:
+        # 2026-09-06: enrich copy-paper 字段(同步 PC shipping-records 的 _enrich_copy_paper_for_item)
+        _enrich_copy_paper_for_item(rec)
         imgs = record_images[rec["id"]]
         ocr_imgs = [i for i in imgs if i.get("source") != "placement"]
         last_ocr = ocr_imgs[-1] if ocr_imgs else None

@@ -7,15 +7,29 @@
 {% block navbar %}{% endblock %}
 {% block content %}
 <div class="mobile-order" data-order-id="{{ order['id'] }}">
+  {% set ns = namespace(total=0, done=0) %}
+  {% for rec in records %}
+    {% set st = record_states.get(rec['id']) %}
+    {% if st and not st.is_board %}
+      {% set ns.total = ns.total + 1 %}
+      {% if st.status %}{% set ns.done = ns.done + 1 %}{% endif %}
+    {% endif %}
+  {% endfor %}
   <header class="app-head">
     <a class="back" href="{{ url_for('mobile_shipping.shipping_today') }}">‹ 今日订单</a>
-    <h2>{{ order['customer'] }}</h2>
-    <p class="subtitle">第{{ order['order_num'] }}单</p>
+    <div class="head-row">
+      <div class="head-main">
+        <h2>{{ order['customer'] }}</h2>
+        <p class="subtitle">第{{ order['order_num'] }}单 · {{ order['date'] }}</p>
+      </div>
+      <span class="head-stat">{{ ns.done }}/{{ ns.total }} 已拍</span>
+    </div>
   </header>
 
   <section class="overall" data-order-id="{{ order['id'] }}">
     <div class="overall-title">
-      <span>🖼 整体图（必拍）</span>
+      <span class="ot-icon">🖼</span>
+      <span class="ot-text">整体图<em>必拍</em></span>
       <span class="overall-pill" data-role="overall-count">0 / 1</span>
     </div>
     <div class="overall-buttons">
@@ -27,13 +41,16 @@
     <div class="upload-progress" data-role="overall-progress" hidden></div>
     <div class="overall-thumbs">
       <div class="overall-thumb {% if thumb_states['备货照']['taken'] %}filled{% endif %}" data-thumb-source="备货照">
-        备货照　{% if thumb_states['备货照']['taken'] %}✓ {{ thumb_states['备货照']['time_text'] }}{% else %}未拍{% endif %}
+        <span class="ot-tag">备货照</span>
+        <span class="ot-state">{% if thumb_states['备货照']['taken'] %}✓ {{ thumb_states['备货照']['time_text'] }}{% else %}未拍{% endif %}</span>
       </div>
       <div class="overall-thumb {% if thumb_states['装车照']['taken'] %}filled{% endif %}" data-thumb-source="装车照">
-        装车照　{% if thumb_states['装车照']['taken'] %}✓ {{ thumb_states['装车照']['time_text'] }}{% else %}未拍{% endif %}
+        <span class="ot-tag">装车照</span>
+        <span class="ot-state">{% if thumb_states['装车照']['taken'] %}✓ {{ thumb_states['装车照']['time_text'] }}{% else %}未拍{% endif %}</span>
       </div>
       <div class="overall-thumb {% if thumb_states['归仓照']['taken'] %}filled{% endif %}" data-thumb-source="归仓照">
-        归仓照　{% if thumb_states['归仓照']['taken'] %}✓ {{ thumb_states['归仓照']['time_text'] }}{% else %}未拍{% endif %}
+        <span class="ot-tag">归仓照</span>
+        <span class="ot-state">{% if thumb_states['归仓照']['taken'] %}✓ {{ thumb_states['归仓照']['time_text'] }}{% else %}未拍{% endif %}</span>
       </div>
     </div>
   </section>
@@ -68,13 +85,18 @@
       {% set confirm_hidden = state.status in (None, 'green') %}
     {% endif %}
     <div class="product-card" data-record-id="{{ rec['id'] }}" {% if state.is_board %}data-role="board"{% endif %}>
-      <div class="row">
-        <div>
-          <div class="product-name">{{ loop.index }}. {{ rec['product_name'] }}</div>
-          <div class="spec">{{ rec['specification'] }} · <b>{{ rec['quantity'] }}{% if state.is_board %}块{% else %}{{ rec['unit'] }}{% endif %}</b>{% if rec['remark'] %} · 备注：{{ rec['remark'] }}{% endif %}</div>
+      <div class="pc-head">
+        <span class="pc-idx">{{ loop.index }}</span>
+        <div class="pc-main">
+          <div class="product-name">{{ rec['product_name'] }}</div>
+          <div class="pc-attrs">
+            {% if rec['specification'] %}<span class="chip chip-spec">{{ rec['specification'] }}</span>{% endif %}
+            <span class="chip chip-qty"><b>{{ rec['quantity'] }}</b>{% if state.is_board %}块{% else %}{{ rec['unit'] }}{% endif %}</span>
+          </div>
         </div>
         <span class="badge {{ badge_cls }}" data-role="badge">{{ badge_text }}</span>
       </div>
+      {% if rec['remark'] %}<div class="pc-remark">📝 {{ rec['remark'] }}</div>{% endif %}
       {% if not state.is_board %}
       <div class="photo-row">
         <button class="primary" data-action="capture">📷 拍照识别</button>
@@ -82,8 +104,28 @@
       </div>
       <input type="file" accept="image/*" capture="environment" data-role="record-input" hidden>
       {% endif %}
+      {% if rec.is_copy_paper %}
+      <button type="button" class="m-copy-paper-label-btn" data-record-id="{{ rec.id }}" data-source="label">📷 标签</button>
+      <button type="button" class="m-copy-paper-count-btn" data-record-id="{{ rec.id }}" data-source="count">📊 张数</button>
+      {% endif %}
+      {% if rec.is_copy_paper and rec.copy_paper_images %}
+      <div class="m-copy-paper-area">
+        {% if rec.copy_paper_match == 'green' %}<span class="m-copy-paper-badge green">✓ {{ rec.copy_paper_total }}/{{ rec.copy_paper_expected }}</span>
+        {% elif rec.copy_paper_match == 'yellow' %}<span class="m-copy-paper-badge yellow">⚠ {{ rec.copy_paper_total }}≠{{ rec.copy_paper_expected }}</span>
+        {% elif rec.copy_paper_match == 'partial' %}<span class="m-copy-paper-badge partial">⊕ 部分已录</span>{% endif %}
+        {% for img in rec.copy_paper_images %}
+        <div class="m-copy-paper-thumb">
+          <img src="/upload/{{ img.file_path }}">
+          <span class="m-copy-paper-tag tag-{{ img.source }}">{{ '标签' if img.source == 'label' else '点数' }}</span>
+          {% if img.source == 'count' %}
+          <input class="m-copy-paper-count-input" type="number" min="0" data-image-id="{{ img.id }}" value="{{ img.sheet_count if img.sheet_count is not none else '' }}">
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
       <div class="status-line {{ status_cls }}" data-role="status" data-initial-status="{{ state.status or '' }}">
-        {{ status_text }}{% if state.color_note %} <span class="color-note" data-role="color-note">· 标签背景:{{ state.color_note }}</span>{% endif %}{% if not state.is_board and state.status in ('green','yellow','red') and state.ocr_images %} <a href="#" data-role="detail" data-image-id="{{ state.ocr_images[-1]['id'] }}">详情</a>{% endif %}
+        <span class="dot"></span><span class="status-text">{{ status_text }}{% if state.color_note %} · <span class="color-note" data-role="color-note">标签背景:{{ state.color_note }}</span>{% endif %}</span>{% if not state.is_board and state.status in ('green','yellow','red') and state.ocr_images %} <a href="#" data-role="detail" data-image-id="{{ state.ocr_images[-1]['id'] }}">详情 ›</a>{% endif %}
       </div>
       {% if not state.is_board %}
       <a class="point-entry" href="{{ url_for('mobile_shipping.shipping_placement_count', oid=order['id'], record_id=rec['id']) }}">🔢 点数</a>
@@ -132,15 +174,70 @@
 </div>
 
 <div class="ocr-detail-mask" id="ocrDetailMask" hidden>
-  <div class="ocr-detail-box">
-    <div class="ocr-detail-title" id="ocrDetailTitle">识别详情</div>
+  <div class="ocr-detail-shell">
+    <div class="ocr-detail-grab" aria-hidden="true"></div>
+    <header class="ocr-detail-page-head">
+      <button type="button" class="ocr-detail-back" id="ocrDetailBack" aria-label="返回">‹</button>
+      <div class="ocr-detail-page-title" id="ocrDetailTitle">识别详情</div>
+    </header>
     <div class="ocr-detail-body" id="ocrDetailBody"></div>
-    <div class="ocr-detail-actions">
-      <button type="button" class="ocr-detail-close" id="ocrDetailClose">关闭</button>
-    </div>
   </div>
 </div>
 
 <script src="{{ url_for('static', filename='js/mobile_blur.js') }}"></script>
 <script src="{{ url_for('static', filename='js/mobile_detail.js') }}"></script>
+<script>
+// 拷贝纸/日本纸 (2026-09-06)
+document.body.addEventListener('click', function (e) {
+    var lblBtn = e.target.closest('.m-copy-paper-label-btn');
+    var cntBtn = e.target.closest('.m-copy-paper-count-btn');
+    var btn = lblBtn || cntBtn;
+    if (!btn) return;
+    var rid = btn.getAttribute('data-record-id');
+    var source = btn.getAttribute('data-source');
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.capture = 'environment';
+    input.onchange = function () {
+        var file = input.files[0];
+        if (!file) return;
+        var fd = new FormData();
+        fd.append('source', source);
+        fd.append('file', file);
+        fetch('/api/v1/shipping-orders/records/' + rid + '/copy-paper-images', {
+            method: 'POST', body: fd
+        }).then(function (r) { return r.json(); }).then(function (j) {
+            if (!j.success) { alert('上传失败: ' + (j.error || '')); return; }
+            if (source === 'count') {
+                var ans = prompt('请输入张数（拷贝纸按令、日本纸按张）', '');
+                if (ans !== null && ans.trim() !== '') {
+                    var val = parseInt(ans.trim(), 10);
+                    fetch('/api/v1/shipping-orders/copy-paper-images/' + j.image.id + '/sheet-count', {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ sheet_count: val })
+                    });
+                }
+            }
+            location.reload();
+        });
+    };
+    input.click();
+});
+
+document.body.addEventListener('change', function (e) {
+    var inp = e.target.closest('.m-copy-paper-count-input');
+    if (!inp) return;
+    var iid = inp.getAttribute('data-image-id');
+    var val = inp.value.trim();
+    fetch('/api/v1/shipping-orders/copy-paper-images/' + iid + '/sheet-count', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sheet_count: val === '' ? null : parseInt(val, 10) })
+    }).then(function (r) { return r.json(); }).then(function (j) {
+        if (!j.success) alert('保存失败');
+    });
+});
+</script>
 {% endblock %}
