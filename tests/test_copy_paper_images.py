@@ -400,3 +400,44 @@ def test_e2e_full_flow(client, fresh_record):
     assert item['copy_paper_total'] == 5
     assert item['copy_paper_expected'] == 5.0
     assert len(item['copy_paper_images']) == 2
+
+
+# ─────────────────────────────────────────────────────────
+# Task 9 防回归 (2026-09-08): 标签/张数按钮必须带 onclick 属性
+# 否则点击没反应,见 debug 笔记 "出货页面 TD-2026-09-08-003 日本纸 按钮无反应"
+# ─────────────────────────────────────────────────────────
+
+def test_template_buttons_have_onclick():
+    """copy-paper-label-btn / copy-paper-count-btn 必须带 onclick=\"openCopyPaperUpload(...)\"。
+
+    2026-09-08 bug: Task 5 implementer 漏了 onclick,导致点击无反应。
+    改为正则强校验 onclick + 三个参数(recordPk, orderPk, source),不再 silently render inert buttons。
+    """
+    import re
+    with open('templates/shipping-records.html', encoding='utf-8') as f:
+        html = f.read()
+
+    # 模板里 onclick 的参数是 Jinja 占位符 {{ item.id }} / {{ group.id }} (源码态),
+    # 渲染后才是真实数字。两者都得接受。
+    label_btn_re = re.compile(
+        r'<button[^>]*class="[^"]*copy-paper-label-btn[^"]*"[^>]*'
+        r'onclick="openCopyPaperUpload\(\'([\d{}a-zA-Z_\. ]+)\',\'([\d{}a-zA-Z_\. ]+)\',\'label\'\)"',
+    )
+    count_btn_re = re.compile(
+        r'<button[^>]*class="[^"]*copy-paper-count-btn[^"]*"[^>]*'
+        r'onclick="openCopyPaperUpload\(\'([\d{}a-zA-Z_\. ]+)\',\'([\d{}a-zA-Z_\. ]+)\',\'count\'\)"',
+    )
+
+    label_matches = label_btn_re.findall(html)
+    count_matches = count_btn_re.findall(html)
+    assert len(label_matches) >= 1, 'templates/shipping-records.html 缺 copy-paper-label-btn onclick'
+    assert len(count_matches) >= 1, 'templates/shipping-records.html 缺 copy-paper-count-btn onclick'
+    # 占位符 (item.id / group.id) 或真实数字都算合法
+    for rid, oid in label_matches:
+        ok = rid in ('{{ item.id }}',) or rid.isdigit()
+        ok2 = oid in ('{{ group.id }}',) or oid.isdigit()
+        assert ok and ok2, f'标签按钮参数错: ({rid!r}, {oid!r})'
+    for rid, oid in count_matches:
+        ok = rid in ('{{ item.id }}',) or rid.isdigit()
+        ok2 = oid in ('{{ group.id }}',) or oid.isdigit()
+        assert ok and ok2, f'张数按钮参数错: ({rid!r}, {oid!r})'
