@@ -126,5 +126,21 @@
                 });
             }
         });
+
+        // 2026-09-09: 拷贝纸标签图删除 (普通商品图区, 独立 handler)
+        document.body.addEventListener('click', function (e) {
+            var btn = e.target.closest('.copy-paper-label-del-btn');
+            if (!btn) return;
+            if (!confirm('删除这张标签图？')) return;
+            var iid = btn.getAttribute('data-image-id');
+            fetch('/api/v1/shipping-orders/copy-paper-images/' + iid, { method: 'DELETE' })
+                .then(function (r) { return r.json(); })
+                .then(function (j) {
+                    if (!j.success) { alert('删除失败: ' + (j.error || '')); return; }
+                    // 简单方案:整行刷新(后续可优化为局部)
+                    location.reload();
+                })
+                .catch(function (err) { alert('删除失败: ' + err); });
+        });
     });
 })();

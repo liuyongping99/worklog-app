@@ -859,3 +859,25 @@ dialog[open] button:last-child { background: #e8e8e8; color: #333; }
     padding: 0;
 }
 .copy-paper-delete-btn:hover { background: #c92a2a; }
+
+/* ========== 拷贝纸/日本纸 标签图 (2026-09-09, 混排到普通商品图区) ========== */
+.shipping-page .img-item-copy-paper-label {
+    border: 1px dashed #74b9ff;
+}
+.shipping-page .img-item-copy-paper-label .copy-paper-label-del-btn {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    background: rgba(220, 38, 38, 0.85);
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 0.7rem;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+.shipping-page .img-item-copy-paper-label:hover .copy-paper-label-del-btn {
+    opacity: 1;
+}
