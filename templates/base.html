@@ -309,6 +309,7 @@
             <li><a href="/loading-orders" class="{% if request.endpoint == 'loading_orders' %}active{% endif %}">📦 装柜订单</a></li>
             <li><a href="/shipping-records" class="{% if request.endpoint == 'shipping_records' %}active{% endif %}">🚛 出货记录</a></li>
             <li><a href="/inbound-records" class="{% if request.endpoint == 'inbound_records' %}active{% endif %}"><span style="display:inline-block;transform:scaleX(-1);font-size:1em;">🚚</span> 入库记录</a></li>
+            <li><a href="/shipping-ypp-review" class="{% if request.endpoint == 'shipping_ypp_review_page' %}active{% endif %}" title="YPP 规则冲突核查(全表,不受日期过滤)">⚖️ YPP 核查</a></li>
             <li><a href="/unified-search" class="{% if request.endpoint == 'search.unified_search_page' %}active{% endif %}">🔍 综合查找</a></li>
         </ul>
     </div>

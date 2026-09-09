@@ -229,33 +229,23 @@
 .place-result.ok .pr-row b { color:#16835f; }
 .place-result.bad { background:#fdecea; border-color:#c0392b; }
 
-/* 拷贝纸/日本纸 (2026-09-06) */
-.m-copy-paper-label-btn, .m-copy-paper-count-btn {
+/* 拷贝纸/日本纸 (2026-09-06 / 2026-09-09 精简:张数按钮与徽章随点数走 placement 废弃) */
+.m-copy-paper-label-btn {
     margin: 4px 4px 0 0;
     padding: 6px 10px;
     border-radius: 4px;
     border: 1px solid #ced4da;
-    background: #fff;
+    background: #74b9ff;
+    color: #fff;
     font-size: 14px;
 }
-.m-copy-paper-label-btn { background: #74b9ff; color: #fff; }
-.m-copy-paper-count-btn { background: #fdcb6e; color: #222; }
 .m-copy-paper-area {
     margin-top: 8px;
     padding: 8px;
     background: #f8f9fa;
     border-radius: 4px;
 }
-.m-copy-paper-badge {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 10px;
-    font-size: 12px;
-    margin-right: 6px;
-}
-.m-copy-paper-badge.green { background: #d3f9d8; color: #2b8a3e; }
-.m-copy-paper-badge.yellow { background: #fff3bf; color: #b8860b; }
-.m-copy-paper-badge.partial { background: #e9ecef; color: #495057; }
+/* 2026-09-09: .m-copy-paper-badge(依赖废弃 sheet_count,恒 yellow 误导)已删 */
 .m-copy-paper-thumb {
     display: inline-block;
     width: 80px;
@@ -265,14 +255,5 @@
 .m-copy-paper-thumb img { width: 80px; height: 60px; object-fit: cover; border-radius: 2px; }
 .m-copy-paper-tag { display: block; font-size: 11px; margin-top: 2px; }
 .m-copy-paper-tag.tag-label { color: #1864ab; }
-.m-copy-paper-tag.tag-count { color: #b8860b; }
-.m-copy-paper-count-input {
-    width: 100%;
-    margin-top: 2px;
-    padding: 2px;
-    border: 1px solid #ced4da;
-    border-radius: 2px;
-    font-size: 12px;
-    box-sizing: border-box;
-}
+/* 2026-09-09: .m-copy-paper-tag.tag-count / .m-copy-paper-count-input 已删(张数录入废弃) */
 .place-result.bad .pr-row b { color:#c0392b; }

@@ -47,61 +47,84 @@ python -m pytest tests/ -v
 
 ```
 worklog-app/
-├── app.py                  # 应用入口（170 行，工厂模式 + 登录闸门 + 15 蓝图注册）
-├── models/                 # 数据模型包（14 个文件，29 张业务表）
+├── app.py                  # 应用入口（204 行，工厂模式 + 登录闸门 + 19 蓝图注册）
+├── models/                 # 数据模型包（16 个文件，35 张业务表）
 │   ├── __init__.py         # 统一 re-export（38 行）
 │   ├── _db.py              # get_db() + DB_PATH（22 行）
-│   ├── _init.py            # init_db() 建表 + 迁移（756 行）
-│   ├── _permissions.py     # 权限系统：Action 枚举 + can() 集中校验（99 行）
+│   ├── _init.py            # init_db() 建表 + 迁移（972 行）
+│   ├── _permissions.py     # 权限系统：Action 枚举 + can() 集中校验（100 行）
 │   ├── basic.py            # WorkLog / ErrorLog / TodoItem / VehicleMaintenance（134 行）
 │   ├── notice.py           # Notice / NoticeImage（144 行）
-│   ├── orders.py           # 三套订单 9 模型 + UnifiedSearch + OcrMatchEvent（2,068 行，最大文件）
+│   ├── orders.py           # 三套订单 9 模型 + UnifiedSearch + OcrMatchEvent（2,639 行，最大文件）
 │   ├── stock.py            # StockOutItem（40 行）
 │   ├── products.py         # ProductUnit / ProductCategory / Product（302 行）
 │   ├── piece_conversion.py # PieceConversion 件数换算规则（101 行）
-│   ├── tasks_flow.py       # Staff/Task/TaskItem/TaskImage/TaskEvent（491 行）
+│   ├── tasks_flow.py       # Staff/Task/TaskItem/TaskImage/TaskEvent（492 行）
 │   ├── audit.py            # AuditLog（58 行）
 │   ├── audit_query.py      # OcrEventAudit：OCR 事件审计只读查询（273 行）★
-│   └── category_prompt.py  # CategoryPrompt + classify_record：自适应提示词（238 行，新增）★
-├── blueprints/             # 17 个文件（14 个蓝图 + 2 个辅助模块 + 包标记）
+│   └── category_prompt.py  # CategoryPrompt + classify_record：自适应提示词（616 行，新增）★
+├── blueprints/             # 28 个文件（19 个蓝图 + 8 个辅助模块 + 包标记）
 │   ├── __init__.py         # 包标记（1 行）
-│   ├── _helpers.py         # 辅助：图片上传校验、YPP 匹配、支数换算、备注校验、汇总（552 行）
-│   ├── ocr_engine.py       # 辅助：OCR 引擎抽象层三引擎（1,064 行）
-│   ├── ocr_pipeline.py     # 辅助：行级图 OCR pipeline 共享层（RecordImageProcessor,出货/入库/装柜共用,新增）★
+│   ├── _helpers.py         # 辅助：图片上传校验、YPP 匹配、支数换算、备注校验、汇总（756 行）
+│   ├── ocr_engine.py       # 辅助：OCR 引擎抽象层三引擎（2,486 行；含 _wrinkle_ocr / KIND_FORM_NOLINES / 反光/红章）
+│   ├── ocr_pipeline.py     # 辅助：行级图 OCR pipeline 共享层（RecordImageProcessor,出货/入库/装柜共用,437 行,2026-08-19）★
+│   ├── ocr_log.py          # 辅助：业务日志上下文（set_log_context / clear_log_context，242 行）
 │   ├── auth.py             # 蓝图：登录/登出（67 行）
 │   ├── upload.py           # 蓝图：/upload/<path> 静态文件（17 行）
 │   ├── basic_records.py    # 蓝图：经验/错误/待办/车辆维护（126 行）
 │   ├── info_pages.py       # 蓝图：首页/价格板/通知/流程/仓库/要点/缺货（87 行）
 │   ├── notice.py           # 蓝图：/notice + REST API（220 行）
 │   ├── products.py         # 蓝图：商品管理（302 行）
-│   ├── shipping.py         # 蓝图：/shipping-records + REST + AI/OCR + 自适应提示词（1,577 行）
-│   ├── inbound.py          # 蓝图：/inbound-records + 行级图片（1,159 行）
-│   ├── loading.py          # 蓝图：/loading-orders + 行级图片（1,049 行）
+│   ├── shipping.py         # 蓝图：/shipping-records + /shipping-ypp-review + REST + AI/OCR + 自适应提示词（1,961 行）
+│   ├── inbound.py          # 蓝图：/inbound-records + 行级图片 + align 复制至出货（1,182 行）
+│   ├── loading.py          # 蓝图：/loading-orders + 行级图片 + img_cols（1,447 行）
 │   ├── search.py           # 蓝图：/unified-search 综合查找（80 行）
 │   ├── staff.py            # 蓝图：/staff 人员档案（176 行）
 │   ├── vehicles.py         # 蓝图：/vehicles 车辆档案（139 行）
 │   ├── task_flow.py        # 蓝图：任务流 REST + 状态机（616 行）
-│   └── audit.py            # 蓝图：OCR 事件审计页 + 聚合/钻取/CSV（132 行，新增）★
-├── templates/              # 34 个 Jinja2 模板（31 内容页 + 3 include 组件）
+│   ├── voice.py            # 蓝图：/api/v1/voice/{recognize,confirm,mappings/*}（217 行，2026-08-06）★
+│   ├── category_prompts_manage.py # 蓝图：/manage/category-prompts + REST（117 行）★
+│   ├── mobile_shipping.py  # 蓝图：/m/* 移动端当天出货（212 行，2026-08-09）★
+│   ├── point_count.py      # 蓝图：/tools/point-count 独立点数 + REST（408 行，含 bp+bp_api 两个 Blueprint）★
+│   └── audit.py            # 蓝图：OCR 事件审计页 + 聚合/钻取/CSV（132 行）★
+├── templates/              # 38 个 Jinja2 模板（34 内容页 + 4 include 组件 + 移动端子目录）
 │   ├── base.html           # 公共布局 + 导航 + Tailwind + 顶栏头像（431 行）
-│   ├── _smart_add_modal.html    # 共享智能添加弹框（989 行）
-│   ├── _image_upload_modal.html # 共享图片上传弹框（397 行）
-│   ├── _record_image_script.html # 共享行级图片 JS（883 行，三订单共用）
+│   ├── _smart_add_modal.html    # 共享智能添加弹框（995 行）
+│   ├── _image_upload_modal.html # 共享图片上传弹框（418 行）
+│   ├── _record_image_script.html # 共享行级图片 JS（1,182 行，三订单共用）
+│   ├── _voice_input_modal.html   # 共享语音录入弹框（129 行，2026-08-06）
 │   ├── login.html / index.html（70 / 108 行）
-│   ├── 三大订单: shipping-records.html（1,540） / inbound-records.html（1,704） / loading-orders.html（1,520）
+│   ├── 三大订单: shipping-records.html（1,986，含 YPP 跳转 focus） / inbound-records.html（1,763） / loading-orders.html（1,524）
 │   ├── 商品管理: product-units.html / product-categories.html / products.html / piece-conversions.html
 │   ├── 信息页: notice.html / notice-color.html / priceboard.html / workflow.html / warehouse.html
 │   ├── 操作要点: count-tips.html（741） / huandan-guide.html（642） / billing-tips.html（569）
 │   ├── 基础记录: experience.html / errorlog.html / todolist.html / vehicle-maintenance.html / stockout.html
 │   ├── 任务流: tasks.html / tasks-new.html / task-detail.html / coding-pool.html
-│   ├── 管理: staff.html / vehicles.html / unified-search.html / audit-ocr-events.html（232，新增）
+│   ├── 管理: staff.html / vehicles.html / unified-search.html / audit-ocr-events.html（232）
+│   ├── 独立点数: point-count.html（157） / point-count-session.html（124，2026-08-17）
+│   ├── 出货 YPP 核查: shipping_ypp_review.html（168，2026-08-22）
+│   └── mobile/             # 移动端出货/入库/装柜页面（8 个文件，2026-08-09）
+│       ├── index.html / shipping-today.html / shipping-order.html / placement-count.html
+│       ├── inbound-today.html / inbound-order.html
+│       └── loading-today.html / loading-order.html
 ├── static/                 # 静态资源
-│   ├── css/app.css         # 共享样式（762 行）
-│   ├── js/common.js        # 共享 JS（149 行）—— 唯一的外部 JS 文件 ★
+│   ├── css/app.css         # 共享样式（945 行）
+│   ├── css/mobile.css      # 移动端样式（438 行，2026-08-09）★
+│   ├── css/point-count.css # 独立点数样式（285 行）★
+│   ├── js/common.js        # 共享 JS（149 行）
+│   ├── js/placement_count.js # PC 摆放图计数（529 行，2026-08-15）★
+│   ├── js/voice_input.js   # 语音录入弹框（285 行，2026-08-06）★
+│   ├── js/point-count.js / point-count-list.js # 独立点数（313 + 79 行）★
+│   └── js/mobile_*.js      # 移动端（5 个文件，2026-08-09）：
+│       ├── mobile_blur.js（33） / mobile_detail.js（379）
+│       ├── mobile_inbound_detail.js（385） / mobile_loading_detail.js（356）
+│       └── mobile_placement.js（479）
 │   ├── mainflow.png / furongflow.png / warehouse.png
 │   └── notice/             # 通知图片
-├── upload/YYYY-MM/         # 用户上传图片，按月分组（~2,900 张）
-├── tests/                  # 测试套件（32 个测试文件 + __init__.py）
+├── upload/YYYY-MM/         # 用户上传图片，按月分组（~3,400 张）
+├── log/                     # 业务日志（log/YYYYMM/ 按天分文件，OCR/AI 落盘，2026-08-04）
+├── logging_setup.py        # 日志初始化（166 行）：trace_id ContextVar + 线程上下文传播 + 日志格式
+├── tests/                  # 测试套件（84 个测试文件 + __init__.py + conftest.py）
 ├── tools/                  # 工具脚本（3 个）
 │   ├── extract_ocr_fixture.py / inspect_overlay.py / split_commits.py
 ├── sql/                    # SQL 脚本（2 个）
@@ -111,9 +134,11 @@ worklog-app/
 └── setup_startup.ps1       # Windows 自启动 PowerShell 脚本
 ```
 
-## 路由结构（~159 个端点，按蓝图分布）
+## 路由结构（224 个端点，按 19 个蓝图分布，2026-08-23 盘点）
 
-所有端点已拆分到 `blueprints/` 目录下的 14 个蓝图 + 2 个辅助模块，主 `app.py` 只保留工厂、上下文、缓存、登录闸门、蓝图注册。
+所有端点已拆分到 `blueprints/` 目录下的 19 个蓝图 + 8 个辅助模块，主 `app.py` 只保留工厂、上下文、缓存、登录闸门、19 蓝图注册。
+
+移动端走 `/m/*` 前缀（**免登录**，见 `app.py._AUTH_PUBLIC_PREFIXES`），便于微信里点链接直接用；登录后路径仍是 `/shipping-records` 等带中文业务的页。
 
 ### `blueprints/auth.py` — 身份验证（3 个）
 - `GET /login` 登录页（选身份，无密码）· `POST /login` 设 session · `GET|POST /logout` 清 session
@@ -127,46 +152,79 @@ worklog-app/
 ### `blueprints/notice.py` — 通知（15 个）
 - `/notice` CRUD · `/api/v1/notices` REST API · `/api/v1/notice/<id>/images` 图片管理 · `/api/v1/notice/<id>/img-cols` 列数设置
 
-### `blueprints/shipping.py` — 出货（25 个端点）
+### `blueprints/shipping.py` — 出货（40 个端点 = 2 页面 + 38 API，2026-08-23 盘点）
 
-**页面与订单 CRUD**：
-- `GET /shipping-records` 列表页（日期范围/客户筛选/搜索）
+**页面**：
+- `GET /shipping-records` 列表页（日期范围/客户筛选/搜索，支持 `?focus=<record_id>&focus_date=YYYY-MM-DD` 跳转高亮）
+- `GET /shipping-ypp-review` YPP 规则冲突核查页（⚖️ YPP 核查，导航栏新增；扫描全表不受日期过滤）
+
+**YPP 核查**：
+- `POST /api/v1/shipping-orders/ypp-review/scan` 全表扫描，返回 warn/info 明细列表（前端在 YPP 页点「开始扫描」触发）
+
+**订单 CRUD**（PATCH 同时承载 lock/unlock、img_cols 等字段更新，无独立端点）：
 - `POST /api/v1/shipping-orders` 创建订单
-- `GET|PATCH|DELETE /api/v1/shipping-orders/<id>` 订单 CRUD
+- `PATCH /api/v1/shipping-orders/<id>` 改订单（含 `is_locked` 锁定翻转、`img_cols` 图片列数、`order_note` 备注等）
+- `DELETE /api/v1/shipping-orders/<id>` 删订单
 
 **明细行操作**：
 - `POST /api/v1/shipping-orders/<id>/records` 添加明细行
-- `GET|PATCH|DELETE /api/v1/shipping-records/<id>` 明细行 CRUD
-- `POST /api/v1/shipping-records/<id>/move` 移动明细行
-- `POST /api/v1/shipping-orders/<id>/records/batch-add` 批量添加
+- `POST /api/v1/shipping-orders/<id>/records/batch` 批量添加
+- `PUT /api/v1/shipping-orders/records/<id>` 改明细
+- `DELETE /api/v1/shipping-orders/records/<id>` 删明细
+- `DELETE /api/v1/shipping-orders/<id>/records` 删整单所有明细
+- `PATCH /api/v1/shipping-orders/records/<id>/move` 上移/下移
 
-**订单锁定与图片列**：
-- `POST /api/v1/shipping-orders/<id>/lock|unlock` 锁定/解锁
-- `POST /api/v1/shipping-orders/<id>/img-cols` 图片列数设置
-
-**图片上传与删除**：
-- `POST /api/v1/shipping-orders/<id>/images` 订单级图片上传
-- `POST /api/v1/shipping-orders/records/<id>/images` 行级图片上传（DeepSeek 优先 + 本地 fallback）
-- `GET /api/v1/shipping-orders/records/<id>/images-area` 行级图片合并查询
+**订单级图片（OCR 识别图，2026-08-10 增 rotate_deg + source_tag）**：
+- `POST /api/v1/shipping-orders/<id>/images` 订单级图片上传，支持 `rotate_deg`（90/180/270，移动端拍照方向修正）+ `source_tag`（备货照/装车照/归仓照 三选一，移动端整体图缩略图按此分组）
 - `DELETE /api/v1/shipping-orders/images/<id>` 删除图片
 
-**匹配与人工核查**：
-- `POST /api/v1/shipping-orders/images/<id>/manual-verify` 人工覆盖/撤销
-- `POST /api/v1/shipping-orders/images/<id>/fuzzy-match` 本地模糊匹配重跑
-- `POST /api/v1/shipping-orders/images/<id>/ai-judge` AI 判别重跑
-- `GET /api/v1/shipping-orders/images/<id>/ocr-detail` OCR/提示词/推理详情
-- `POST /api/v1/shipping-orders/<id>/ai-match` 整单 AI 比对（含自适应提示词注入）
-- `POST /api/v1/shipping-orders/ai-recognize` AI 图片识别（整单）
-- `POST /api/v1/shipping-orders/<id>/check-receipt` 智能验单（订单图片识别）
+**行级图片（明细标签，2026-08-10 起支持 `rotate_deg`）**：
+- `POST /api/v1/shipping-orders/records/<id>/images` 行级图片上传（DeepSeek 优先 + 本地 RapidFuzz fallback；支持 `rotate_deg`）
+- `GET /api/v1/shipping-orders/records/<id>/images-area` 行级图片合并查询
+- `POST /api/v1/shipping-orders/records/<id>/verify-warning` 标记/取消单条警告核查
 
-**自适应提示词**：
-- `POST /api/v1/shipping-orders/images/<id>/generate-prompt-suggestion` 生成自适应提示词
-- `GET|POST /api/v1/category-prompts` 提示词管理（共享）
-- `DELETE /api/v1/category-prompts/<id>` 提示词删除（共享）
+**匹配与人工核查**（按图）：
+- `POST /api/v1/shipping-orders/images/<id>/manual-verify` 人工覆盖/撤销 AI 判定
+- `POST /api/v1/shipping-orders/images/<id>/fuzzy-match` 本地 RapidFuzz 重跑（**优先用缓存 `record_ocr` 事件，命中则不重跑 PaddleOCR**）
+- `POST /api/v1/shipping-orders/images/<id>/re-ocr` 重跑 PaddleOCR（**强制 `use_cached=False`**；自动跟随一次本地 fuzzy 重比对；触发按钮带 `showBtnLoading` 异步 spinner）
+- `POST /api/v1/shipping-orders/images/<id>/ai-judge` DeepSeek 重比对
+- `GET /api/v1/shipping-orders/images/<id>/match-status` 异步轮询匹配状态
+- `GET /api/v1/shipping-orders/images/<id>/ocr-detail` OCR 原文/提示词/推理详情
+
+**整单 AI**：
+- `POST /api/v1/shipping-orders/ai-recognize` 整单图片 AI 识别（3 引擎可选）
+- `POST /api/v1/shipping-orders/<id>/ai-match` 整单 AI 比对（注入自适应提示词）
+
+**摆放图（点数）**——11 个端点，2026-08 上线，CLAUDE.md 早期未列：
+- `POST /api/v1/shipping-orders/records/<id>/placement-images` 上传摆放图
+- `GET /api/v1/shipping-orders/records/<id>/placement-images` 按明细行查摆放图
+- `GET /api/v1/shipping-orders/placement-images/<id>` 单图详情
+- `DELETE /api/v1/shipping-orders/placement-images/<id>` 删摆放图
+- `POST /api/v1/shipping-orders/placement-images/<id>/detect` 自动检测散落点
+- `POST /api/v1/shipping-orders/placement-images/<id>/mark-scale` 调整标记点大小
+- `POST /api/v1/shipping-orders/placement-images/<id>/loose-count` 录入散码数
+- `POST /api/v1/shipping-orders/placement-images/<id>/manual-count` 覆盖手动支数
+- `POST /api/v1/shipping-orders/placement-images/<id>/unload` 标记卸货（取负）
+- `POST /api/v1/shipping-orders/placement-images/<id>/marks` 追加点击标记
+- `DELETE /api/v1/shipping-orders/placement-images/<id>/marks/last` 撤销最后标记
+
+**自适应提示词**（共享端点，category_prompts 表）：
+- `GET /api/v1/category-prompts` 列出提示词
+- `POST /api/v1/category-prompts` 创建提示词
+- `DELETE /api/v1/category-prompts/<id>` 软删提示词
+- `POST /api/v1/shipping-orders/images/<id>/generate-prompt-suggestion` 基于图片 OCR 生成提示词建议
 
 **加面图标**: 后端 `has_jia_mian` 计算 + 前端 SVG 渲染（"杂胶+加面"→ 重点列网状图标）
 
-### `blueprints/inbound.py` — 入库（20 个端点，已同步出货行级图片功能）
+**OCR 糊图标记（2026-08-10 移动端）**：行级图 OCR 平均置信度 `avg_conf < 0.5` 时，由 `ocr_pipeline._append_blur_reason_if_low_conf()` 在 `image.reason` 末尾追加 `[图像可能模糊，建议重拍]`，前端 hover 提示用户重拍（幂等，marker 已存在不重复追加）。
+
+**共享弹框/子页面（`templates/`）**：
+- `_image_upload_modal.html`（418 行）—— 订单级 + record 级图片上传复用弹框（粘贴/选文件/旋转 90°，旋转后 Pillow 落盘再走 OCR）
+- `_smart_add_modal.html`（995 行）—— 智能添加明细：📷 AI 图片识别（Moonshot/PaddleOCR/DeepSeek 三引擎）+ 📝 文本输入（DeepSeek 结构化）
+- `_record_image_script.html`（1,182 行，30+ JS 函数）—— 行级图片所有交互：匹配徽章列动态插入、异步 OCR+AI 比对、人工 ✓ 确认 / 👤 已确认、re-ocr/fuzzy/ai-judge/ocr-detail 按钮、自适应提示词弹框；出货页初始化会调用 `bindReOcrButtons()` 让「重 OCR」按钮在每次刷新后也能响应
+- `_voice_input_modal.html`（129 行）—— 语音录入弹框（出货页集成入口 `/api/v1/voice/recognize`/`/confirm`）
+
+### `blueprints/inbound.py` — 入库（23 个端点，已同步出货行级图片功能）
 - `GET /inbound-records` 列表页
 - **REST API（`/api/v1/inbound-orders/*`）**: 订单 CRUD、明细 CRUD、move、图片 CRUD
 - **行级图片**: 行级上传/合并查询 + manual-verify/fuzzy-match/ai-judge/ocr-detail/gen-prompt（同出货）
@@ -174,14 +232,14 @@ worklog-app/
 - **日本纸件数换算**: 按件数×每件张数+散装张数对比（支持 loose 与 * 形式）
 - **备注**: 2026-07-16 已清理 11 个 HTML form 死端点，统一为 REST API
 
-### `blueprints/loading.py` — 装柜（20 个端点，已同步出货行级图片功能）
+### `blueprints/loading.py` — 装柜（34 个端点，已同步出货行级图片功能）
 - `GET /loading-orders` 列表页
 - **REST API（`/api/v1/loading-orders/*`）**: 订单 CRUD、明细 CRUD、move、图片 CRUD
 - **行级图片**: 行级上传/合并查询 + manual-verify/fuzzy-match/ai-judge/ocr-detail/gen-prompt（同出货）
 - **共享模板**: `_record_image_script.html`（与出货/入库共用 23 个 JS 函数）
 
 ### `blueprints/products.py` — 商品管理（18 个）
-- `/product-units` 商品单位（72 条数据）
+- `/product-units` 商品单位（77 条数据）
 - `/product-categories` 商品类型（`product_categories` 表，205 条 = 1 根 + 9 大类 + 分类树，以 `sql/new.sql` 为最终标准源）
 - `/products` 产品管理（`product` 表，1145 条）
 - `/piece-conversions` 件数换算规则（16 条）
@@ -229,21 +287,66 @@ worklog-app/
 
 后端走 `models/audit_query.py` 的 `OcrEventAudit`（只读查询：`prompt_stats` / `record_pairs` / `export_rows`）。用途：追踪「自适应提示词」各版本上线后对 AI 比对准确率的实际影响。
 
+### `blueprints/voice.py` — 语音录入（6 个端点，2026-08-06）★
+- `POST /api/v1/voice/recognize` 上传音频 → 返回候选文本（顺序：百度语音 → LLM → 本地 fuzzy）
+- `POST /api/v1/voice/confirm` 用户确认/修正后回写（用于自适应学习）
+- `GET /api/v1/voice/mappings` 列出自定义映射规则
+- `POST /api/v1/voice/mappings` 新建映射
+- `PATCH /api/v1/voice/mappings/<id>` 修改映射
+- `DELETE /api/v1/voice/mappings/<id>` 软删
+
+设计要点：表单 `action` 必须显式指向 `/api/v1/voice/recognize`（不要依赖 button 默认 form action，曾误回到 `/shipping-orders` 返回 HTML）。出货页用 `_voice_input_modal.html` + `static/js/voice_input.js`。
+
+### `blueprints/category_prompts_manage.py` — 分类提示词管理（4 个端点）★
+- `GET /manage/category-prompts` 管理页（挂「📚 分类提示词」导航）
+- `GET /api/v1/manage/category-prompts/list` 列出全部（含软删）
+- `PATCH /api/v1/manage/category-prompts/<id>` 修改
+- `POST /api/v1/manage/category-prompts/bulk` 批量导入
+
+### `blueprints/mobile_shipping.py` — 移动端出货（4 个页端点，2026-08-09）★
+- `GET /m/` 移动端入口（聚合今日出货/今日入库）
+- `GET /m/shipping-today` 当天出货分组列表（每客户一组，按 ⚠ 待确认 / ✕ 不符 / ✓ 通过 聚合统计）
+- `GET /m/shipping-today/order/<oid>` 移动端订单详情（含拍照按钮 + 摆放图状态 + 颜色提示）
+- `GET /m/shipping-today/order/<oid>/placement/<record_id>` 移动端点数页（复用 PC 摆放图后端，前端走 `mobile_placement.js`）
+
+PC 端的 `/m/inbound-today` / `/m/inbound-order/...` / `/m/loading-today` / `/m/loading-order/...` 分别由 `inbound.py` / `loading.py` 内的 `@bp.route('/m/...')` 服务，模板在 `templates/mobile/`。**所有 `/m/*` 都在 `_AUTH_PUBLIC_PREFIXES` 白名单**，免登录便于微信直接打开。
+
+### `blueprints/point_count.py` — 独立点数（bp + bp_api 两个 Blueprint，19 个端点，2026-08-17）★
+
+`bp`（页面路由，前缀 `/tools/point-count`）：
+- `GET /` 会话列表（开/关/全部）
+- `GET /new` 新建会话
+- `GET /session/<id>` 会话详情（点数画布 + 图片序列）
+
+`bp_api`（REST 前缀 `/api/v1/point-count`）：
+- `GET /sessions` · `POST /sessions` · `GET /sessions/<id>` · `POST /sessions/<id>/{update,close,reopen}` · `DELETE /sessions/<id>`
+- `GET /sessions/<id>/export` 导出 CSV
+- `GET /sessions/<id>/images` · `POST /sessions/<id>/images` 上传
+- `GET /images/<id>` · `DELETE /images/<id>`
+- `POST /images/<id>/marks` 追加点击标记
+- `DELETE /images/<id>/marks/last` 撤销最后标记
+- `POST /images/<id>/mark-scale` 调整标记点大小
+- `POST /images/<id>/loose-count` 录入散码数
+
+用于"独立点数"场景：临时开会话 → 连续拍照 → 标记支/散码 → 导出 CSV。不挂订单/明细，纯独立工具。
+
 ### `blueprints/upload.py` — 静态文件
 - `/upload/<path>` 访问 upload 目录下的文件
 
-### 主 `app.py` — 应用入口（170 行）
-- `create_app()` 工厂函数，注册 14 个蓝图（含 audit 审计蓝图）
+### 主 `app.py` — 应用入口（204 行，2026-08-23 盘点）
+- `create_app()` 工厂函数，**注册 19 个蓝图**（含 audit / voice / category_prompts_manage / mobile_shipping / point_count）
 - `inject_notices` 全局上下文（注入 all_notices 到所有模板）
-- `inject_current_operator` 全局上下文（注入当前操作员 Staff dict 到模板）
-- `_require_login` before_request 闸门（白名单：`/static`, `/api/`, `/login`, `/logout`, `/favicon.ico`）
+- `inject_current_operator` 全局上下文（注入当前操作员 Staff dict 到模板；session 失效时主动 `session.pop('operator_id', None)` 避免"什么都没了"假象）
+- `_require_login` before_request 闸门（白名单 `_AUTH_PUBLIC_PREFIXES = ("/static", "/api/", `/m/`, "/upload/")` + `_AUTH_PUBLIC_PATHS = ("/login", "/logout", "/favicon.ico")`）
 - `add_cache_control_headers` 禁用 HTML 缓存
-- `init_db()` 数据库初始化
-- 上传超限 413 友好返回
+- `_reset_log_context` after_request 清业务上下文 + `_TRACE_ID`，避免请求间串味
+- `init_logging(app)` 在 `init_db()` 之前（建表失败也能落盘到 `log/`）
+- `init_db()` 数据库初始化（35 张表）
+- 上传超限 413 友好返回（API 走 JSON，页面走纯文本）
 
-## 数据库（29 张业务表 + sqlite_sequence + 1 个临时清理表）
+## 数据库（35 张业务表 + sqlite_sequence + 1 个临时清理表 + 1 个迁移残留）
 
-> 实际 31 张表 = 29 业务表 + `sqlite_sequence`（系统自增序列）+ `_cleanup_safety_2026_07_30`（2026-07-30 数据清洗临时表，非业务表，可忽略/清理）。
+> 实际 38 张表 = 35 业务表 + `sqlite_sequence`（系统自增序列）+ `_cleanup_safety_2026_07_30`（2026-07-30 数据清洗临时表，非业务表，可忽略/清理）+ `product_units_new`（迁移残留，业务不直接用）。
 
 ### 核心业务表
 
@@ -261,13 +364,13 @@ worklog-app/
 三种订单都遵循 **订单 → 记录/明细 → 图片** 三表模式：
 
 **出货** (`shipping_orders` / `shipping_records` / `shipping_images`)
-- 610 个订单 / 1,387 条记录 / 1,999 张图片
+- 758 个订单 / 1,864 条记录 / 3,117 张图片
 
 **入库** (`inbound_orders` / `inbound_records` / `inbound_images`)
-- 154 个订单 / 515 条记录 / 412 张图片
+- 199 个订单 / 653 条记录 / 569 张图片
 
 **装柜** (`loading_orders` / `loading_order_records` / `loading_order_images`)
-- 20 个订单 / 111 条记录 / 192 张图片
+- 22 个订单 / 119 条记录 / 219 张图片
 
 通用字段：
 - `is_locked` (0/1) — 锁定订单防止修改
@@ -281,7 +384,7 @@ worklog-app/
 
 | 表 | 用途 | 行数 | 模型类 |
 |---|---|---|---|
-| `product_units` | 商品单位/规格（YPP 支码换算） | 72 | `ProductUnit` |
+| `product_units` | 商品单位/规格（YPP 支码换算） | 77 | `ProductUnit` |
 | `product_categories` | 商品分类（3 级树，带编码） | 205 | `ProductCategory` |
 | `product` | 产品（品名/规格/条码/价格/库存） | 1,145 | `Product` |
 | `piece_conversions` | 件数换算规则（件→张/只/令） | 16 | `PieceConversion` |
@@ -290,7 +393,7 @@ worklog-app/
 
 | 表 | 用途 | 行数 |
 |---|---|---|
-| `staff` | 人员档案（姓名/角色/电话/绑定车辆） | 1 |
+| `staff` | 人员档案（姓名/角色/电话/绑定车辆） | 7 |
 | `vehicles` | 车辆档案（车牌/吨位/长宽高/年检日期） | 1 |
 | `tasks` | 任务（task_no/状态/客户/地址/司机/车辆/打码状态） | 0 |
 | `task_items` | 任务明细行（品名/规格/数量/单位/备注） | 0 |
@@ -301,9 +404,9 @@ worklog-app/
 
 | 表 | 用途 | 行数 |
 |---|---|---|
-| `audit_log` | 操作审计日志 | 3,507 |
-| `ocr_match_event` | OCR 标签匹配事件记录（record_ocr / ai_match / human_verify 三类事件） | 139 |
-| `category_prompts` | 自适应提示词（scope=category/spec，注入 AI 比对，见提示词系统） | 见提示词系统 |
+| `audit_log` | 操作审计日志 | 7,023 |
+| `ocr_match_event` | OCR 标签匹配事件记录（record_ocr / ai_match / human_verify 三类事件） | 1,083 |
+| `category_prompts` | 自适应提示词（scope=category/spec，注入 AI 比对，见提示词系统） | 211 |
 
 **`ocr_match_event` 关键字段**：`event_type`（record_ocr / ai_match / human_verify）、`ocr_text`（PaddleOCR 原文）、`prompt_payload`（完整比对 prompt）、`ai_match_status/score/reason`、`ai_raw_response`（DeepSeek 原始返回）、`ai_engine`、`prompt_version`（按提示词版本聚合用）、`human_status/reason/verified_by`（人工裁决）。
 
@@ -352,6 +455,8 @@ worklog-app/
 | **DeepSeek** (v4-flash) | 云端结构化 | PaddleOCR 文字 → LLM → JSON，兼顾免费+语义理解 |
 
 **引擎工厂**：`get_ocr_engine(name)` 单例缓存，通过 `OCR_BACKEND` 环境变量或前端 `#aiEngine` 下拉选择。
+
+**PaddleOCR 双实例**：`_ocr`（默认阈值）+ `_wrinkle_ocr`（低阈值，专攻褶皱标签）。`form_nolines` kind 自动走后者。_wrinkle_ocr 加载失败时 `_ensure_model` try/except 回退到 _ocr。
 
 **共享后处理**：`_filter_summary_items()` 安全网过滤 LLM 未能跳过的汇总行（5 种检测：关键词/无品名/异常大数量/remark 汇总/规格汇总）。
 
@@ -472,7 +577,34 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
 ### 15. 登录状态与操作员头像
 
-`base.html` 顶栏右侧：登录后显示当前操作员头像（圆角色色块+姓名首字）+ 下拉菜单（切换身份/退出）；未登录时不显示。`inject_current_operator` 上下文注入 `current_operator` dict 到所有模板。
+`base.html` 顶栏右侧：登录后显示当前操作员头像（圆角色色块+姓名首字）+ 下拉菜单（切换身份/退出）；未登录时不显示。`inject_current_operator` 上下文注入 `current_operator` dict 到所有模板。session 里的 `Staff.is_active=0`（已离职）会主动 `session.pop('operator_id')` 避免头像永久消失假象。
+
+### 16. OCR 标签退化预处理双轨（kind: form_nolines / glare / redstamp）
+
+`blueprints/ocr_engine.ocr_preprocess_kind(product_name)` 双轨判定返回 `KIND_FORM_NOLINES`（磅布三文治等无表格线表单） / `KIND_GLARE`（无纺布透明膜反光） / `KIND_REDSTAMP`（杂胶/纯胶红章污染） / `None`：
+- 轨 1：子串白名单（`_FORM_NOLINES_VARIANTS` / `_GLARE_VARIANTS` / `_REDSTAMP_VARIANTS`）—— 命中即返回
+- 轨 2：品类 code 白名单（`_WRINKLE_CATEGORY_CODES`）—— 覆盖未来未知变体（仅 form_nolines）
+
+每 kind 走不同预处理管线：
+- `form_nolines`：调用 `_form_row_bands` 按固定行数（`_FORM_ROWS = 4`）等分图片 + 逐行 OCR + 与整图 OCR 择优；二级兜底 `_text_roi` 用暗像素投影估计文字 ROI
+- `glare`：透明膜反光抑制（CLAHE 类前处理）
+- `redstamp`：红章掩膜 + 擦除
+
+封装在 `PaddleOCREngine.extract_text(... preprocess_kind=...)`：kind 优先，旧参数 `apply_wrinkle_enhance=True` 等价于 `KIND_FORM_NOLINES`（已废弃）。
+
+### 17. 移动端图片旋转（rotate_deg）+ 糊图标记（avg_conf < 0.5）
+
+`blueprints/_helpers.apply_user_rotation(filepath, rotate_deg)`：移动端拍照常把横屏拍成竖屏（90° 旋转）。上传时带 `rotate_deg`（90/180/270），Pillow 落盘后再走 OCR，避免误识。订单级 + 行级上传端点都接受该参数（2026-08-10 起）。
+
+`blueprints/ocr_pipeline._append_blur_reason_if_low_conf(image_model, image_id, avg_conf, threshold=0.5)`：移动端拍照易糊，PaddleOCR 仍会跑出文字但平均置信度偏低。`avg_conf < 0.5` 时在 `image.reason` 末尾追加 `[图像可能模糊，建议重拍]`，前端 hover 提示重拍；幂等，marker 已存在不重复追加。
+
+### 18. match-col 服务端不再渲染 → JS 动态补建
+
+`templates/shipping-records.html` 服务端不再输出 `match-col` 单元格，改由 `initAllMatchColumns()` 在 DOMContentLoaded 后为有图片的 record 动态补建单元格 + 行级徽章（取该 record 所有图片最差一档）。理由：服务端渲染时图片可能还没匹配完，状态会过期；JS 端拿到完整 `ShippingImage.get_by_record(...)` 后再补，状态总是新的。
+
+### 19. 出货 YPP 核查 / focus 跳转
+
+`/shipping-ypp-review` 页（2026-08-22 上线）单页手动扫描，按 warn→info、日期倒序排列结果，点行跳转回 `/shipping-records?focus=<record_id>&focus_date=YYYY-MM-DD` 高亮闪烁目标行（IIFE 轮询 3s，行可能由 `initAllMatchColumns` 异步补建）。日期范围不含目标时弹 toast 提示用户调整。
 
 ## 出货页面功能流程
 
@@ -482,19 +614,23 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 - 每订单：订单头部（日期/客户/锁定）→ 明细表格 → 图片区
 - 每明细行：品名/规格/数量/单位/备注/辅助提示/AI 比对列/操作列
 
-### 图片匹配流水线
+### 图片匹配流水线（`blueprints/ocr_pipeline.RecordImageProcessor` 共享层封装）
 
 ```
-上传图片
-  → PaddleOCR 提取文字 (~2-4s)
+上传图片（订单级 / 行级 / 摆放图）
+  → 移动端可选 rotate_deg（90/180/270） Pillow 落盘后再走 OCR
+  → PaddleOCR 提取文字 (~2-4s，ocr_preprocess_kind 按品名走 form_nolines/glare/redstamp 三档)
   → 背景色检测 [标签背景: 黑/白]
-  → DeepSeek compare_single_record() 优先
+  → DeepSeek compare_single_record() 优先（出货 / 入库 自动注入自适应提示词；装柜显式 with_supplement=False）
   → 成功 → match_status(green/yellow/red) + match_score + reason + match_source(deepseek)
   → 失败 → fallback 本地 RapidFuzz → match_source(local_fuzzy)
+  → 移动端糊图标记: avg_conf < 0.5 时 _append_blur_reason_if_low_conf() 在 reason 末尾追加 "[图像可能模糊，建议重拍]"
   → 写入 shipping_images.match_status + match_score + reason + match_source
   → 写入 ocr_match_event (record_ocr 事件, audit trail)
   → 若 DeepSeek → 额外写入 ai_match 事件(含 prompt_payload + raw_response)
 ```
+
+**复用与隔离**：三套订单（出货/入库/装柜）共用 `ocr_pipeline.RecordImageProcessor`，显式注入 `image_model`（ShippingImage / LoadingOrderImage / InboundImage）。装柜端点显式传 `with_supplement=False` 保留旧行为（不注入自适应提示词）。`re-ocr` 端点强制 `use_cached=False`，`fuzzy-match` 端点优先用缓存的 `record_ocr` 事件避免重跑 PaddleOCR。
 
 ### 徽章系统
 
@@ -504,10 +640,11 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 - **行级徽章**: 取该 record 所有图片最差一档
 - **bg_color**: ⬛ 黑底 / ⬜ 白底（自动检测标签背景色）
 
-### 每图按钮（img-meta 2 行布局）
+### 每图按钮（img-meta 2 行布局，2026-08-19 起 Row 2 新增 re-ocr）
 
 - **Row 1**: match-badge + manual-confirm(✓确认通过)/manual-undo(👤已确认) + bg-color-tag + gen-prompt(💡生成提示词)
-- **Row 2**: fuzzy-match(本地 RapidFuzz) + ai-judge(DeepSeek) + ocr-detail(详情弹窗)
+- **Row 2**: fuzzy-match(本地 RapidFuzz，优先缓存) + re-ocr(重跑 PaddleOCR，强制 use_cached=False) + ai-judge(DeepSeek) + ocr-detail(详情弹窗)
+- **异步反馈**: re-ocr / fuzzy-match / ai-judge 按钮带 `showBtnLoading()` spinner，调用完成后恢复
 
 ### OCR 详情弹窗（3 段）
 
@@ -524,23 +661,36 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
 ### 共享 JS 模板
 
-`_record_image_script.html`（883 行，23 函数）：
+`_record_image_script.html`（1,182 行，30+ JS 函数）：
 - 通过 `{% set api_prefix %}` 参数化 URL
 - 三套订单共用：shipping / loading / inbound
+- 关键函数：`initAllMatchColumns`（服务端不渲染 match-col，由 JS 动态补建）/ `applyAllRecordImageOverlays` / `bindEditDeleteButtons` / `bindManualConfirmButtons` / `bindFuzzyMatchButtons` / `bindAiJudgeButtons` / `bindReOcrButtons` / `bindOcrDetailButtons` / `bindGenPromptButtons`
+- 出货页底部会显式调用上述 `bindReOcrButtons()`，确保「重 OCR」按钮在刷新后也能响应
+
+### JS 模块（除 `_record_image_script.html` 外）
+- `static/js/common.js`（149 行）—— 公共工具
+- `static/js/placement_count.js`（529 行）—— PC 端摆放图：上传/展示/点击计数/撤销/卸货/手动支数/散码；shipping-records.html `<script src="/static/js/placement_count.js">` 引入
+- `static/js/voice_input.js`（285 行）—— 语音录入弹框逻辑
+- `static/js/point-count.js`（313 行） / `point-count-list.js`（79 行）—— 独立点数
+- `static/js/mobile_*.js`（5 个）—— 移动端 blur/detail/inbound_detail/loading_detail/placement
 
 ### 关键 API 模式
 
 - **整单比对**: `/api/v1/shipping-orders/<id>/ai-match`（注入自适应提示词）
-- **行级上传**: `/api/v1/shipping-orders/records/<id>/images`（自动 OCR + 匹配）
-- **图片操作**: manual-verify / fuzzy-match / ai-judge / ocr-detail / generate-prompt-suggestion
+- **整单 AI 识别**: `/api/v1/shipping-orders/ai-recognize`（三引擎可选）
+- **行级上传**: `/api/v1/shipping-orders/records/<id>/images`（自动 OCR + 匹配；移动端可传 `rotate_deg`）
+- **图片操作**: manual-verify / fuzzy-match / **re-ocr**（2026-08-19 新增）/ ai-judge / ocr-detail / generate-prompt-suggestion
+- **YPP 核查**: `/api/v1/shipping-orders/ypp-review/scan`（全表扫描，不受日期过滤；扫描结果点行可携带 `?focus=<record_id>&focus_date=YYYY-MM-DD` 跳转回出货页高亮）
+- **异步状态轮询**: `/api/v1/shipping-orders/images/<id>/match-status`（前端轮询后台比对状态）
 
 ### 行级功能
 
 - **record-image-btn(🖼️)**: 行级上传图片，`has-image` class
-- **match-col**: 行级 AI 比对徽章（取最差）
+- **match-col**: 行级 AI 比对徽章（取最差）—— **服务端不再渲染**，由 `initAllMatchColumns()` JS 动态补建
 - 编辑/删除/移动/批量添加明细行
 - 辅助单位提示（支数换算）+ 备注校验
 - 加面图标（杂胶 + 加面 → 重点列网状图标）
+- **摆放图（点数）**: 11 个端点（placement-images 上传 / detect 自动检测散落点 / mark-scale / loose-count / manual-count / unload 卸货 / marks 点击计数 / marks/last 撤销）；前端 `static/js/placement_count.js` 统一处理；与备注「X支*Yy / X支+Yy」自动比对并出徽章
 
 ### 数据流 — 创建订单
 
@@ -551,29 +701,42 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
 ### 数据流 — 图片匹配
 
-1. 上传行级图片 → PaddleOCR 提取文字
+1. 上传行级图片（移动端可选 `rotate_deg` Pillow 旋转） → PaddleOCR 提取文字
 2. DeepSeek 优先 → fallback 本地 RapidFuzz
 3. 写入 match_status/score/reason/source
-4. 前端局部刷新徽章 + 行级徽章
-5. 黄/红牌 → 人工确认按钮 → 确认后变 👤 绿色
-6. 确认后显示 💡 生成提示词 → 可保存自适应提示词
+4. 若 `avg_conf < 0.5` → reason 追加 "[图像可能模糊，建议重拍]"（移动端糊图修复）
+5. 前端局部刷新徽章 + 行级徽章
+6. 黄/红牌 → 人工确认按钮 → 确认后变 👤 绿色
+7. 确认后显示 💡 生成提示词 → 可保存自适应提示词
+8. 任何时候可点「重 OCR」调 `/re-ocr` 重跑 PaddleOCR（强制 `use_cached=False`），自动跟随一次本地 fuzzy 重比对
+
+### 移动端配套（`/m/*`，2026-08-09 起免登录）
+
+- `/m/shipping-today` 当天分组列表 + 整体图缩略图（按 `source_tag=备货照/装车照/归仓照` 分组显示 HH:MM 时间）
+- `/m/shipping-today/order/<oid>` 订单详情：每行「📷 拍照」按钮 + 颜色提示 + 摆放图状态
+- `/m/shipping-today/order/<oid>/placement/<record_id>` 移动端点数页：复用 PC 摆放图后端
+- 移动端图片上传端点 `rotate_deg` 参数把横屏拍歪的图转正再走 OCR（避免 90° 标签误识）
+- 入库 / 装柜的 `/m/*` 入口在 `inbound.py` / `loading.py` 内部
 
 ## 模板设计约定
 
 - 所有模板继承 `base.html`
-- 导航分为 7 个分组（下拉菜单）：
-  - **运营信息** — 公司通知、通知彩色版、业务流程、仓库布局、综合查找
+- 顶栏登录后显示 `current_operator`（头像+姓名首字+下拉：切换登录/退出）；未登录不显示
+- 导航分组（8 个下拉 + 4 个单链 + 1 个拍照）：
+  - **运营信息** — 公司通知、通知彩色版、业务流程、仓库布局、**OCR 事件审计**（📊）
   - **当前缺货** — 单页
-  - **商品管理** — 商品单位、商品类型、产品管理、件数换算
+  - **商品管理** — 商品单位、商品类型、产品管理、件数换算、**分类提示词**（📚）
   - **码数报价** — 单页
-  - **操作要点** — 开单要点、换单要点、点数要点
+  - **操作要点** — 开单要点、换单要点、点数要点、**独立点数**（📷 工具型会话）
   - **快速录入** — 工作经验、错误经验、待办事项、车辆维护记录
-  - **任务流**（新增） — 任务列表、新建任务、打码抢单池、人员档案、车辆档案
-  - **订单操作**（单独） — 装柜订单、出货记录、入库记录
-- 样式以 Tailwind CSS 为主，共享自定义 CSS 在 `static/css/app.css`
+  - **任务流** — 任务列表、新建任务、打码抢单池、人员档案、车辆档案
+  - **订单操作** — 装柜订单、出货记录（含 ⚖️ YPP 核查）、入库记录、综合查找
+- 样式以 Tailwind CSS 为主，共享自定义 CSS 在 `static/css/app.css`（945 行）
+- 移动端样式独立在 `static/css/mobile.css`（438 行）
 - 共享 JS 工具函数在 `static/js/common.js`
-- 每个模板底部用 `<script>` 内联实现交互
-- 共享弹框 `_smart_add_modal.html` / `_image_upload_modal.html` 被多个模板 include 复用
+- 每个模板底部用 `<script>` 内联实现交互 + `<script src="...">` 引入专项 JS
+- 共享弹框 `_smart_add_modal.html` / `_image_upload_modal.html` / `_record_image_script.html` / `_voice_input_modal.html` 被多个模板 include 复用
+- 移动端页面在 `templates/mobile/` 子目录，由 `mobile_shipping.py` / `inbound.py` / `loading.py` 服务
 
 ## Windows 环境注意事项
 
@@ -615,37 +778,43 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 ## 重要文件参考
 
 ### 应用入口
-- `app.py` — 170 行（`create_app()` 工厂 + 缓存控制 + 登录闸门 + 14 蓝图注册 + 操作员上下文）
+- `app.py` — 204 行（`create_app()` 工厂 + 缓存控制 + 登录闸门 + 19 蓝图注册 + 操作员上下文 + 日志初始化 + log context 清理）
 
-### 蓝图（17 个模块，按大小排序）
+### 蓝图（19 个业务 + 8 个辅助 + 1 包标记 = 28 个模块，按行数排序）
 | 文件 | 行数 | 关键内容 |
 |---|---|---|
-| `blueprints/shipping.py` | 1,577 | 出货 REST + AI 识别 + OCR 匹配 + 行级图片 + 加面 + 自适应提示词 |
-| `blueprints/inbound.py` | 1,159 | 入库 REST + 行级图片（已删 HTML form 端点，统一 REST） |
-| `blueprints/ocr_engine.py` | 1,064 | 三引擎（Moonshot/PaddleOCR/DeepSeek）+ 后处理安全网 + COMPARE_PROMPT |
-| `blueprints/loading.py` | 1,049 | 装柜 REST + 行级图片 |
-| `blueprints/task_flow.py` | 616 | 任务流 REST + 状态机 + 证据闸门 + 建单/推进/退单/退货 |
-| `blueprints/_helpers.py` | 552 | 共享：图片上传校验、YPP 匹配、支数换算、备注校验、汇总 |
-| `blueprints/ocr_pipeline.py` | ~340 | 行级图 OCR pipeline 共享层：RecordImageProcessor(三套订单共用,2026-08-19 新增)★ |
+| `blueprints/ocr_engine.py` | 2,486 | 三引擎（Moonshot/PaddleOCR/DeepSeek）+ 后处理安全网 + COMPARE_PROMPT + _wrinkle_ocr + KIND_FORM_NOLINES/KIND_GLARE/KIND_REDSTAMP 三档预处理 |
+| `blueprints/shipping.py` | 1,961 | 出货 REST + AI 识别 + OCR 匹配 + 行级图片 + 加面 + 自适应提示词 + 摆放图 + `/re-ocr` + `/shipping-ypp-review` + YPP scan |
+| `blueprints/inbound.py` | 1,182 | 入库 REST + 行级图片 + 移动端 /m/*（已删 HTML form 端点，统一 REST） |
+| `blueprints/loading.py` | 1,447 | 装柜 REST + 行级图片 + img_cols + 移动端 /m/* |
+| `blueprints/task_flow.py` | 617 | 任务流 REST + 状态机 + 证据闸门 + 建单/推进/退单/退货 |
+| `blueprints/_helpers.py` | 756 | 共享：图片上传校验、YPP 匹配、支数换算、备注校验、汇总、apply_user_rotation |
+| `blueprints/ocr_pipeline.py` | 437 | 行级图 OCR pipeline 共享层：RecordImageProcessor(三套订单共用,2026-08-19)+ 糊图标记 + 模块级 _OCR_LOCK/_ASYNC_JOBS ★ |
+| `blueprints/ocr_log.py` | 242 | 业务日志上下文 set_log_context / clear_log_context（订单/记录/操作员） |
+| `blueprints/category_prompt.py`（注：实为 models/category_prompt.py，重复了无影响） |
 | `blueprints/products.py` | 302 | 商品管理 |
+| `blueprints/voice.py` | 217 | 语音录入：recognize / confirm / mappings CRUD（百度语音 / LLM / 本地 fuzzy 三档）★ |
 | `blueprints/notice.py` | 220 | 通知 CRUD |
 | `blueprints/staff.py` | 176 | 人员档案 CRUD |
-| `blueprints/audit.py` | 132 | OCR 事件审计：聚合/钻取/CSV 导出（新增）★ |
+| `blueprints/mobile_shipping.py` | 212 | 移动端 /m/* 出货（today/order/placement）★ |
+| `blueprints/point_count.py` | 408 | 独立点数（bp + bp_api 两个 Blueprint）★ |
+| `blueprints/audit.py` | 132 | OCR 事件审计：聚合/钻取/CSV 导出 ★ |
+| `blueprints/category_prompts_manage.py` | 117 | 分类提示词管理页 + REST ★ |
 | `blueprints/basic_records.py` | 126 | 基础记录 |
 | `blueprints/info_pages.py` | 87 | 信息展示页 |
 | `blueprints/search.py` | 80 | 综合查找 |
 | `blueprints/auth.py` | 67 | 登录/登出 |
 | `blueprints/upload.py` | 17 | 静态文件服务 |
 
-### 数据库层（14 个模块）
+### 数据库层（16 个模块）
 | 文件 | 行数 | 模型数 | 关键类 |
 |---|---|---|---|
-| `models/orders.py` | 2,068 | 10 | 三套订单 9 模型 + UnifiedSearch + OcrMatchEvent |
-| `models/_init.py` | 756 | — | 29 张表 DDL + 迁移逻辑 |
-| `models/tasks_flow.py` | 491 | 10 | Staff/StaffDB/Task/TaskItem/TaskImage/TaskEvent |
+| `models/orders.py` | 2,639 | 11 | 三套订单 9 模型 + UnifiedSearch + OcrMatchEvent + PlacementImage |
+| `models/category_prompt.py` | 616 | 2 | CategoryPrompt + compose_for_record + classify_record：自适应提示词★ |
+| `models/_init.py` | 972 | — | 35 张表 DDL + 迁移逻辑 |
+| `models/tasks_flow.py` | 492 | 10 | Staff/StaffDB/Task/TaskItem/TaskImage/TaskEvent |
 | `models/products.py` | 302 | 3 | ProductUnit / ProductCategory / Product |
 | `models/audit_query.py` | 273 | 1 | OcrEventAudit：OCR 事件只读查询（prompt_stats/record_pairs/export_rows）★ |
-| `models/category_prompt.py` | 238 | 1 | CategoryPrompt + classify_record：自适应提示词（新增）★ |
 | `models/notice.py` | 144 | 2 | Notice / NoticeImage |
 | `models/basic.py` | 134 | 4 | WorkLog / ErrorLog / TodoItem / VehicleMaintenance |
 | `models/piece_conversion.py` | 101 | 1 | PieceConversion |
@@ -655,14 +824,14 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 | `models/__init__.py` | 38 | — | re-export |
 | `models/_db.py` | 22 | — | get_db() + DB_PATH |
 
-### 模板（34 个文件，按大小排序）
+### 模板（38 个文件：34 业务页 + 4 include 组件 + mobile/ 子目录，按大小排序）
 | 文件 | 行数 | 说明 |
 |---|---|---|
-| `inbound-records.html` | 1,704 | 入库记录（含行级图片 JS） |
-| `shipping-records.html` | 1,540 | 出货记录（含行级图片 JS） |
-| `loading-orders.html` | 1,520 | 装柜订单（含行级图片 JS） |
-| `_smart_add_modal.html` | 989 | 共享智能添加弹框 |
-| `_record_image_script.html` | 883 | 共享行级图片 JS（三订单 include 复用，23 函数）★ |
+| `inbound-records.html` | 1,763 | 入库记录（含行级图片 JS + 移动端入口） |
+| `shipping-records.html` | 1,986 | 出货记录（含行级图片 JS + 摆放图 + YPP 跳转 focus） |
+| `loading-orders.html` | 1,524 | 装柜订单（含行级图片 JS + 移动端入口） |
+| `_record_image_script.html` | 1,182 | 共享行级图片 JS（三订单 include 复用，30+ 函数）★ |
+| `_smart_add_modal.html` | 995 | 共享智能添加弹框 |
 | `count-tips.html` | 741 | 点数要点 |
 | `huandan-guide.html` | 642 | 换单要点 |
 | `billing-tips.html` | 569 | 开单要点 |
@@ -670,19 +839,24 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 | `products.html` | 478 | 产品管理 |
 | `notice-color.html` | 477 | 通知彩色版 |
 | `product-categories.html` | 449 | 商品类型 |
-| `base.html` | 431 | 公共布局+导航 |
+| `base.html` | 431 | 公共布局+导航（17 链接 + 顶栏头像） |
 | `notice.html` | 428 | 通知管理 |
-| `_image_upload_modal.html` | 397 | 共享图片上传弹框 |
+| `_image_upload_modal.html` | 418 | 共享图片上传弹框（旋转 90° 落盘） |
 | `tasks-new.html` | 345 | 新建任务（OCR） |
 | `staff.html` | 308 | 人员档案 |
 | `task-detail.html` | 300 | 任务详情 |
 | `vehicles.html` | 254 | 车辆档案 |
 | `unified-search.html` | 235 | 综合查找 |
-| `audit-ocr-events.html` | 232 | OCR 事件审计页（新增）★ |
+| `audit-ocr-events.html` | 233 | OCR 事件审计页 |
 | `product-units.html` | 221 | 商品单位 |
 | `stockout.html` | 220 | 当前缺货 |
 | `tasks.html` | 219 | 任务列表 |
 | `vehicle-maintenance.html` | 174 | 车辆维护 |
+| `manage-category-prompts.html` | 817 | 分类提示词管理页（2026-07-30） |
+| `shipping_ypp_review.html` | 168 | 出货 YPP 规则冲突核查页（2026-08-22）★ |
+| `point-count.html` | 157 | 独立点数会话列表（2026-08-17）★ |
+| `point-count-session.html` | 124 | 独立点数会话详情 ★ |
+| `_voice_input_modal.html` | 129 | 共享语音录入弹框（2026-08-06） |
 | `piece-conversions.html` | 125 | 件数换算 |
 | `index.html` | 108 | 首页 |
 | `coding-pool.html` | 100 | 打码抢单池 |
@@ -692,21 +866,31 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 | `todolist.html` | 50 | 待办事项 |
 | `experience.html` | 48 | 工作经验 |
 | `warehouse.html` | 45 | 仓库布局 |
++ `templates/mobile/`（8 个文件）：`index.html` / `shipping-today.html` / `shipping-order.html` / `placement-count.html` / `inbound-today.html` / `inbound-order.html` / `loading-today.html` / `loading-order.html`
 
 ## 待办 / 待清理
 
 - [x] ~~统一 `product` / `product_category` 命名~~ — 已完成
 - [x] ~~图片上传后局部刷新~~ — 已完成
-- [x] ~~`app.py` 按业务拆分蓝图~~ — 已完成
+- [x] ~~`app.py` 按业务拆分蓝图（19 蓝图注册）~~ — 已完成
 - [x] ~~单位归一化 `码 → y`~~ — 已完成
 - [x] ~~辅助单位提示升级~~ — 已完成
 - [x] ~~备注汇总行拆分~~ — 已完成
 - [x] ~~商品分类树按 category_code 排序~~ — 已完成
 - [x] ~~任务流 M1~~ — 基本完工（2026-07-22），17 task 完成 16，仅抢单池占位
-- [ ] 打码抢单池 M2（抢单/完成/释放真逻辑，当前 501 占位）
-- [ ] 推送 66 个本地 commits 到 GitHub（需先开梯子，见 [[GitHub 需要梯子]]）
+- [x] ~~行级图片 OCR pipeline 共享层（`ocr_pipeline.RecordImageProcessor`，出货/入库/装柜共用）~~ — 已完成（2026-08-19）
+- [x] ~~移动端当天出货 / 入库 / 装柜（`/m/*`，免登录）~~ — 已完成（2026-08-09）
+- [x] ~~语音录入（百度语音 + LLM + 本地 fuzzy 三档）~~ — 已完成（2026-08-06）
+- [x] ~~摆放图点数（手动支数 / 散码 / 卸货）~~ — 已完成（2026-08-15）
+- [x] ~~独立点数工具（会话 + 拍照 + 标记 + 导出 CSV）~~ — 已完成（2026-08-17）
+- [x] ~~出货 YPP 规则冲突核查页（`/shipping-ypp-review`）~~ — 已完成（2026-08-22）
+- [x] ~~OCR 糊图标记（`avg_conf < 0.5` → reason 追加"建议重拍"）~~ — 已完成（2026-08-10）
+- [x] ~~CLAUDE.md / README.md 数据对账（订单 758/199/22、audit 7023、ocr 1083、placement 2104、staff 7、product_units 77）~~ — 已完成（2026-08-23）
+- [ ] 推送 84+ 个本地 commits 到 GitHub（需先开梯子，见 [[GitHub 需要梯子]]）
 - [ ] D 盘数据库备份（已停 5 天 +）
 - [ ] task_flow.py 中 `coding-claim`/`coding-done`/`coding-release` 三个端点 501 占位 → M2 实现
+- [ ] OCR Label Profile Registry（`config/ocr_profiles.json`，4 个 profile）—— 当前在 feature 分支，待合并
+- [ ] 入库 align 复制至出货：核对入库对齐逻辑能否让出货也用上（2026-08-13 在 inbound.py 加，未在 shipping.py 同步）
 
 ## 长期规划（2026-06-08 拍板）
 
@@ -726,6 +910,16 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 - AI 比对 reason + human_verified 人工确认
 - 辅助单位提示 + 备注 mismatch 红/粉行
 
+**阶段 2.5：OCR + 移动端 + 语音录入 + 独立点数（2026-08 上线）** ✅ 已完成
+- 行级图片 OCR pipeline 共享层（`ocr_pipeline.RecordImageProcessor`）：出货/入库/装柜三套共用
+- 移动端当天出货/入库/装柜（`/m/*`，免登录）—— 微信里点链接即用
+- 语音录入（百度语音 / LLM / 本地 fuzzy 三档），出货页直接弹框录入
+- 出货 YPP 规则冲突核查页（`/shipping-ypp-review`），全表扫描 + focus 跳转高亮
+- 独立点数工具（`/tools/point-count/`，会话+拍照+标记+导出 CSV）
+- OCR 糊图标记 / 重 OCR / 行级图片 rotate_deg / 整体图 source_tag
+- OCR 标签退化预处理（kind: form_nolines / glare / redstamp 三档）
+- 分类提示词管理页 + OCR 事件审计页（`/audit/ocr-events`）
+
 **阶段 3：任务流 M1** ✅ 基本完成
 - 7 态状态机 + 证据闸门 + 权限系统
 - 人员档案（6 种角色）+ 车辆档案
@@ -735,7 +929,7 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 **阶段 4：多人化 + 权限** 🚧 M1 已做准备
 - 身份选择登录（无密码）→ 登录闸门 → 权限枚举
 - 架构已预留密码升级路径（`login_name` / `password_hash` 字段已存在但未启用）
-- **移动端形态已拍板（2026-08-10）**：先走「微信浏览器」路径，WebView 套壳为长期规划
+- **移动端形态已落地（2026-08-09 起 `mobile_shipping.py` + 入库/装柜内部 `/m/*` 路由上线）**：当前走「微信浏览器」路径；WebView 套壳为长期规划
   - **近期（先落地）**：同一套 Flask 网页 + 现有响应式（`viewport` + `@media`），微信里直接开 URL 即用。零资质、零上架、发链接即用。
     - 拍照上传 OCR：原生 `<input type=file accept="image/*" capture="camera">` 即可在微信调起相机；如需「从微信聊天选图」再上 JSSDK `wx.chooseImage`（需公众号 AppID/AppSecret + 配 JS 安全域名 + 后端签名）。
     - 注意：iOS 微信原生 file 拍照会存入系统相册；JSSDK 拍照留在微信沙盒不污染个人相册。Android 行为随微信/X5 版本波动，以真机实测为准。

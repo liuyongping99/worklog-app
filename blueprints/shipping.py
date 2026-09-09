@@ -17,7 +17,7 @@ from datetime import date as date_cls, timedelta, datetime
 from flask import Blueprint, render_template, request, jsonify, current_app, session
 from models import (
     ShippingOrder, ShippingRecord, ShippingImage, ProductUnit, PieceConversion, AuditLog,
-    OcrMatchEvent, PlacementImage, CopyPaperImage,
+    OcrMatchEvent, PlacementImage,
     classify_record, CategoryPrompt,
 )
 from blueprints._helpers import (
@@ -28,7 +28,6 @@ from blueprints._helpers import (
     match_label_to_row, detect_bg_color,
     apply_user_rotation,
     compute_placement_expected_zhi,
-    compute_copy_paper_expected_quantity,
 )
 from blueprints.ocr_engine import (
     PaddleOCREngine, get_ocr_engine, OCR_MATCH_PROMPT_VERSION,
@@ -47,7 +46,60 @@ from models._db import get_db
 #     1) line ~202: placement_groups 渲染(每条 record 的备注汇总)
 #     2) line ~303: placement_match 判定(决定"点数"按钮是否加绿框)
 SANMA_RE = re.compile(r'(?<![\d.])(\d+)\s*[yY]')
+
+# 2026-09-09: 拷贝纸/日本纸 标签图在 shipping_images 里的 source 值。
+# 与 OCR 图('upload'/'ai')、摆放图('placement')并列,靠它区分:
+#   - 模板渲染:独立循环,不渲染 OCR/AI 按钮与 match-badge
+#   - has_image / ocr_images 统计:排除(不做 OCR,不算已核对图)
+COPY_PAPER_LABEL_SOURCE = 'copy_paper_label'
 from blueprints.ocr_log import set_log_context
+
+
+# 摆放图"支数"口径:直接输入(manual_count)优先,无则回退点击计数点(n_marks)。
+# 与前端 placement_count.js 的 effectiveZhi 保持一致,避免"前端✓、后端不匹配"的割裂。
+# 2026-09-09:卸载货物(is_unload=1)时取负,从记录总数扣减(对齐装柜,装柜后端早就有这段)。
+def _eff_zhi(p: dict):
+    mc = p.get('manual_count')
+    base = mc if mc is not None else (p.get('n_marks') or 0)
+    return -base if p.get('is_unload') else base
+
+
+def compute_placement_match(record: dict, pimgs: list) -> bool:
+    """单条 record 的 placement 匹配判定(供主页渲染 + 各 placement mutation 端点回报)。
+
+    匹配 = 该记录有摆放图,且(支匹配 且 散码匹配);支/散码若无期望则该项跳过。
+    容差 0.01 容忍浮点累计误差。
+    """
+    if not pimgs:
+        return False
+    remark = record.get('remark') or ''
+    qty = record.get('quantity') or ''
+    unit = record.get('unit') or ''
+    total = sum(_eff_zhi(p) for p in pimgs)
+    loose = sum(p.get('loose_count', 0) for p in pimgs)
+    exp_zhi, has_zhi = compute_placement_expected_zhi(remark, qty, unit)
+    san_m = list(SANMA_RE.finditer(remark))
+    exp_san = sum(int(x.group(1)) for x in san_m)
+    has_san = len(san_m) > 0
+    matched_zhi = (not has_zhi) or (abs(total - exp_zhi) <= 0.01)
+    matched_san = (not has_san) or (abs(loose - exp_san) <= 0.01)
+    return (has_zhi or has_san) and matched_zhi and matched_san
+
+
+def _placement_match_response(img: dict):
+    """placement 端点 mutation 后的标准回报字段(供 6 个端点末尾调用)。
+
+    返回 dict,直接 merge 进 jsonify({...})。
+    """
+    record_id = img.get('record_pk')
+    if not record_id:
+        return {'record_id': None, 'placement_match': False}
+    record = ShippingRecord.get_by_id(record_id)
+    pimgs = PlacementImage.get_by_record(record_id)
+    return {
+        'record_id': record_id,
+        'placement_match': compute_placement_match(record or {}, pimgs),
+    }
 
 
 bp = Blueprint('shipping', __name__)
@@ -177,18 +229,19 @@ def shipping_records():
         all_record_imgs = []
         for rec in grp.get('records', []):
             record_imgs = ShippingImage.get_by_record(rec['id'])
-            # 摆放图不计入 OCR 图的 has_image(红框语义=已上传 OCR 图)
-            rec['has_image'] = any(i.get('source') != 'placement' for i in record_imgs)
+            # 2026-09-09: 本行图缓存给 _enrich_copy_paper_for_item 复用(避免重复查库)
+            rec['_record_imgs_cache'] = record_imgs
+            # 摆放图不计入 OCR 图的 has_image(红框语义=已上传 OCR 图);
+            # 拷贝纸标签图(source='copy_paper_label')也不算 —— 它不做 OCR/AI
+            rec['has_image'] = any(
+                i.get('source') not in ('placement', 'copy_paper_label') for i in record_imgs)
             placement_by_record[rec['id']] = PlacementImage.get_by_record(rec['id'])
             all_record_imgs.extend(i for i in record_imgs if i.get('source') != 'placement')
         for img in all_record_imgs:
             target = ai_images if img.get('source') == 'ai' else order_non_ai
             target.setdefault(grp['id'], []).append(img)
     # 摆放图"支数"口径:直接输入(manual_count)优先,无则回退点击计数点(n_marks)。
-    # 与前端 placement_count.js 的 effectiveZhi 保持一致,避免"前端✓、后端不匹配"的割裂。
-    def _eff_zhi(p):
-        mc = p.get('manual_count')
-        return mc if mc is not None else (p.get('n_marks') or 0)
+    # 函数已抽到模块级(_eff_zhi / compute_placement_match),供 6 个 placement 端点复用。
     # 2026-08-16:按 product_name 把有点数图的 record 进行预分组(连续同 product_name 合并),模板里组内并排显示
     placement_groups = {}
     for grp in groups:
@@ -222,6 +275,9 @@ def shipping_records():
                 'expected_sanma': expected_sanma,
                 'has_sanma': has_sanma,
                 'images': pimgs,
+                # 2026-09-09: 计数单位参数化(支/令/张) + 拷贝纸无散码
+                'unit': rec.get('unit') or '',
+                'is_copy_paper': _is_copy_paper_item(rec),
             })
         if group_list:
             placement_groups[grp['id']] = group_list
@@ -298,45 +354,13 @@ def shipping_records():
             # 模板里 addRowWarning 据此决定每条警告单独显示/隐藏 + 渲染 ✓/✗ 按钮
             item['verified_warnings'] = ShippingRecord.get_verified_warnings(item['id'])
 
-            # 2026-08-16:点数匹配标记 —— 供操作列"点数"按钮加绿框。
-            # 匹配 = 该记录有摆放图,且 支合计==备注支期望,且(备注无散码期望 或 散码合计==备注散码期望)
+            # 2026-09-09:点数匹配标记 —— 委托模块级 compute_placement_match,
+            # 与 6 个 placement mutation 端点保持同一判定,避免"前端绿框"判定分裂。
             _pimgs = placement_by_record.get(item['id']) or []
-            _pm = False
-            if _pimgs:
-                _remark = item.get('remark') or ''
-                _qty = item.get('quantity') or ''
-                _unit = item.get('unit') or ''
-                _total = sum(_eff_zhi(p) for p in _pimgs)
-                _loose = sum(p.get('loose_count', 0) for p in _pimgs)
-                # 2026-09-03:placement 期望值兜底 — unit='支' + 备注无支数 → 用 quantity
-                _exp_zhi, _has_zhi = compute_placement_expected_zhi(_remark, _qty, _unit)
-                _san_m = list(SANMA_RE.finditer(_remark))
-                _exp_san = sum(int(x.group(1)) for x in _san_m)
-                _has_san = len(_san_m) > 0
-                _matched_zhi = (not _has_zhi) or (abs(_total - _exp_zhi) <= 0.01)
-                _matched_san = (not _has_san) or (abs(_loose - _exp_san) <= 0.01)
-                if (_has_zhi or _has_san) and _matched_zhi and _matched_san:
-                    _pm = True
-            item['placement_match'] = _pm
+            item['placement_match'] = compute_placement_match(item, _pimgs)
 
             # 2026-09-06: 拷贝纸/日本纸 行级图片 + 张数比对
             _enrich_copy_paper_for_item(item)
-
-            # 2026-09-09: 拷贝纸/日本纸 label 图混排到普通商品图区
-            # (张数图保留在 copy-paper-area,仅 label 图走 order-images-area)
-            if item.get('is_copy_paper'):
-                for lbl in (item.get('copy_paper_images') or []):
-                    if lbl.get('source') != 'label':
-                        continue
-                    # 补 relative_path (用 ShippingImage helper,支持 Windows 反斜杠)
-                    if not lbl.get('relative_path') and lbl.get('file_path'):
-                        lbl['relative_path'] = ShippingImage.get_relative_path(lbl['file_path'])
-                    # 标记 source 让模板能特判(不渲染 match-badge/人工核查)
-                    lbl['source'] = 'copy_paper_label'
-                    # 注入 record_pk 让模板 img-overlay-name 能查 record_by_pk 拿品名
-                    lbl['record_pk'] = item['id']
-                    # 注入到 order_non_ai 复用现有渲染管线
-                    order_non_ai.setdefault(group['id'], []).append(lbl)
         group.update(summarize_remarks(group['records']))
         group['has_eco'] = any('环保' in r.get('product_name', '') for r in group['records'])
         group['has_jia_mian'] = any(
@@ -1301,7 +1325,7 @@ def api_v1_shipping_orders_placement_mark_scale(image_id):
     except (TypeError, ValueError):
         return jsonify({'success': False, 'error': 'scale 必须是数字'}), 400
     scale = PlacementImage.set_mark_scale(image_id, scale)
-    return jsonify({'success': True, 'scale': scale, 'marks': PlacementImage.get_marks(image_id)})
+    return jsonify({'success': True, 'scale': scale, 'marks': PlacementImage.get_marks(image_id), **_placement_match_response(img)})
 
 
 @bp.route('/api/v1/shipping-orders/placement-images/<int:image_id>/loose-count', methods=['POST'])
@@ -1316,7 +1340,7 @@ def api_v1_shipping_orders_placement_loose_count(image_id):
     except (TypeError, ValueError):
         return jsonify({'success': False, 'error': 'count 必须是数字'}), 400
     count = PlacementImage.set_loose_count(image_id, count)
-    return jsonify({'success': True, 'count': count})
+    return jsonify({'success': True, 'count': count, **_placement_match_response(img)})
 
 
 @bp.route('/api/v1/shipping-orders/placement-images/<int:image_id>/manual-count', methods=['POST'])
@@ -1339,7 +1363,7 @@ def api_v1_shipping_orders_placement_manual_count(image_id):
         except (TypeError, ValueError):
             return jsonify({'success': False, 'error': 'count 必须是数字'}), 400
     count = PlacementImage.set_manual_count(image_id, count)
-    return jsonify({'success': True, 'manual_count': count})
+    return jsonify({'success': True, 'manual_count': count, **_placement_match_response(img)})
 
 
 @bp.route('/api/v1/shipping-orders/placement-images/<int:image_id>/marks', methods=['POST'])
@@ -1367,7 +1391,7 @@ def api_v1_shipping_orders_placement_mark_add(image_id):
     else:
         r = 0.0
     PlacementImage.add_mark(image_id, x, y, mark_r=r)
-    return jsonify({'success': True, 'marks': PlacementImage.get_marks(image_id)})
+    return jsonify({'success': True, 'marks': PlacementImage.get_marks(image_id), **_placement_match_response(img)})
 
 
 @bp.route('/api/v1/shipping-orders/placement-images/<int:image_id>/marks/last', methods=['DELETE'])
@@ -1377,7 +1401,22 @@ def api_v1_shipping_orders_placement_mark_undo(image_id):
     if not img:
         return jsonify({'success': False, 'error': '摆放图不存在'}), 404
     marks = PlacementImage.delete_last_mark(image_id)
-    return jsonify({'success': True, 'marks': marks})
+    return jsonify({'success': True, 'marks': marks, **_placement_match_response(img)})
+
+
+@bp.route('/api/v1/shipping-orders/placement-images/<int:image_id>/unload', methods=['POST'])
+def api_v1_shipping_orders_placement_unload(image_id):
+    """勾选 / 取消「卸载货物」(点数弹框内卸载 checkbox)。body: {unload: bool}。
+
+    is_unload=1 时,record 总数扣减(模型层 signed_count 取负);影响 placement_match。
+    """
+    img = PlacementImage.get_by_id(image_id)
+    if not img:
+        return jsonify({'success': False, 'error': '摆放图不存在'}), 404
+    data = request.get_json() or {}
+    flag = bool(data.get('unload', False))
+    is_unload = PlacementImage.set_unload(image_id, flag)
+    return jsonify({'success': True, 'is_unload': is_unload, **_placement_match_response(img)})
 
 
 @bp.route('/api/v1/shipping-orders/images/<int:image_id>/match-status', methods=['GET'])
@@ -1903,18 +1942,25 @@ def api_v1_category_prompts_delete(prompt_id):
 
 
 # ────────────────────────────────────────────────────────────
-# 拷贝纸/日本纸 行级图片(2026-09-06)
-# 与 OCR/AI 比对图彻底隔离:不进 pipeline、不进 match-col;
-# 仅供人工参考 + 行级 total 比对用。
-# 4 端点:POST 上传、GET 列表、DELETE 删、PATCH 录入张数
+# 拷贝纸/日本纸 标签图(2026-09-06 创建 / 2026-09-09 重构)
+#
+# **2026-09-09**:原 copy_paper_images 表已废弃 —— 标签图直接存
+# `shipping_images(source='copy_paper_label', record_pk=<明细 id>)`,与订单图同表、
+# 靠 source 区分,不再单独建表:
+#   - 渲染:自动进入 order_non_ai(见本文件图片分组循环),模板按 source 特判
+#     (走独立循环,不渲染 OCR / 模糊匹配 / AI判别 / match-badge)
+#   - 删除:复用通用端点 DELETE /api/v1/shipping-orders/images/<id>
+#     (已带锁单防御 + 审计),不再单独提供 DELETE 端点
+#   - 点数:统一走 placement 体系(shipping_images(source='placement'))
 # ────────────────────────────────────────────────────────────
 
 @bp.route('/api/v1/shipping-orders/records/<int:rid>/copy-paper-images', methods=['POST'])
 def api_v1_shipping_orders_record_copy_paper_upload(rid):
-    """上传拷贝纸/日本纸 行级图(标签照/张数照)。完全跳过 OCR pipeline。
+    """上传拷贝纸/日本纸 标签照 → 写 shipping_images(source='copy_paper_label')。
 
+    完全跳过 OCR pipeline(不做 OCR/AI 比对,仅供人工留档)。
     支持 multipart(字段名 `image`)与 JSON base64(`image` 字段)。
-    source ∈ {'label','count'};锁单 → 403;记录不存在 → 404;无图 → 400。
+    锁单 → 403;记录不存在 → 404;无图 → 400。
     """
     set_log_context(biz='shipping', record_id=rid, evt_src='copy_paper_upload')
     record = ShippingRecord.get_by_id(rid)
@@ -1926,17 +1972,17 @@ def api_v1_shipping_orders_record_copy_paper_upload(rid):
 
     upload_dir, _month_str = _get_upload_dir()
 
-    # 解析 source
+    # source 兼容:历史前端会传 'label'('count' 已随张数路径废弃),统一忽略
     if request.is_json:
         _payload = request.get_json(silent=True) or {}
         source = (_payload.get('source') or '').strip()
     else:
         source = (request.form.get('source') or '').strip()
-    if source not in ('label', 'count'):
-        return jsonify({'success': False, 'error': 'source 必须为 label 或 count'}), 400
+    if source not in ('', 'label'):
+        return jsonify({'success': False, 'error': 'source 只支持 label'}), 400
 
-    # 两种格式都支持:multipart 多个 `image` 字段,或 JSON 单 base64
-    files = request.files.getlist('image')
+    # 两种格式都支持:multipart(字段名 `image`,移动端历史用 `file`)或 JSON base64
+    files = request.files.getlist('image') or request.files.getlist('file')
     if files:
         try:
             filepath, original_name = _save_one_uploaded_file(files[0], upload_dir)
@@ -1952,89 +1998,19 @@ def api_v1_shipping_orders_record_copy_paper_upload(rid):
     else:
         return jsonify({'success': False, 'error': '未提供图片(image)'}), 400
 
-    new_id = CopyPaperImage.create(rid, filepath, original_name, source)
-    img = CopyPaperImage.get_by_id(new_id)
+    # 2026-09-09: 直接落 shipping_images,source='copy_paper_label'
+    new_id = ShippingImage.create(
+        record['order_pk'], filepath, original_name,
+        source=COPY_PAPER_LABEL_SOURCE, record_pk=rid)
+    img = ShippingImage.get_by_id(new_id)
     rel_path = os.path.join(_month_str, os.path.basename(filepath)).replace('\\', '/')
     img['file_path'] = filepath  # 全路径(与 PlacementImage 一致)
     img['relative_path'] = rel_path
     AuditLog.log('upload_copy_paper_image', 'shipping_order', record['order_pk'],
-                 detail={'filename': rel_path, 'source': source, 'record_id': rid})
+                 detail={'filename': rel_path,
+                         'source': COPY_PAPER_LABEL_SOURCE, 'record_id': rid})
     return jsonify({'success': True, 'image': img})
 
-
-@bp.route('/api/v1/shipping-orders/records/<int:rid>/copy-paper-images', methods=['GET'])
-def api_v1_shipping_orders_record_copy_paper_list(rid):
-    """列出某 record 下所有拷贝纸/日本纸行级图。"""
-    images = CopyPaperImage.list_by_record(rid)
-    # 补上 relative_path,便于前端直接展示
-    for img in images:
-        if img.get('file_path'):
-            img['relative_path'] = os.path.basename(img['file_path'])
-    return jsonify({'success': True, 'images': images})
-
-
-@bp.route('/api/v1/shipping-orders/copy-paper-images/<int:img_id>', methods=['DELETE'])
-def api_v1_shipping_orders_copy_paper_delete(img_id):
-    """删除一张拷贝纸/日本纸行级图(连带物理文件)。"""
-    img = CopyPaperImage.get_by_id(img_id)
-    if not img:
-        return jsonify({'success': False, 'error': '拷贝纸/日本纸图片不存在'}), 404
-
-    # 锁单防御:沿 record → order 查 is_locked
-    rec = ShippingRecord.get_by_id(img['record_pk']) if img.get('record_pk') else None
-    order = ShippingOrder.get_by_id(rec['order_pk']) if rec else None
-    if order and order.get('is_locked'):
-        return jsonify({'success': False, 'error': '该订单已锁定,无法删除'}), 403
-
-    # 删磁盘文件(找不到不报错,避免脏数据卡住流程)
-    try:
-        if img.get('file_path') and os.path.exists(img['file_path']):
-            os.remove(img['file_path'])
-    except Exception:
-        current_app.logger.exception('删拷贝纸/日本纸图片文件失败: %s', img.get('file_path'))
-
-    CopyPaperImage.delete(img_id)
-    AuditLog.log('delete_copy_paper_image', 'shipping_order',
-                 order['id'] if order else None,
-                 detail={'image_id': img_id, 'record_id': img.get('record_pk')})
-    return jsonify({'success': True})
-
-
-@bp.route('/api/v1/shipping-orders/copy-paper-images/<int:img_id>/sheet-count', methods=['PATCH'])
-def api_v1_shipping_orders_copy_paper_sheet_count(img_id):
-    """录入/清空 拷贝纸/日本纸 张数。
-
-    body: `{sheet_count: int | null}`
-    - 正数(含 0) → 写入
-    - null       → 清空
-    - 负数       → 400
-    """
-    img = CopyPaperImage.get_by_id(img_id)
-    if not img:
-        return jsonify({'success': False, 'error': '拷贝纸/日本纸图片不存在'}), 404
-
-    rec = ShippingRecord.get_by_id(img['record_pk']) if img.get('record_pk') else None
-    order = ShippingOrder.get_by_id(rec['order_pk']) if rec else None
-    if order and order.get('is_locked'):
-        return jsonify({'success': False, 'error': '该订单已锁定,无法修改'}), 403
-
-    body = request.get_json(silent=True) or {}
-    raw = body.get('sheet_count', None)
-    if raw is None:
-        val = None
-    else:
-        try:
-            val = int(raw)
-        except (TypeError, ValueError):
-            return jsonify({'success': False, 'error': 'sheet_count 必须为整数或 null'}), 400
-        if val < 0:
-            return jsonify({'success': False, 'error': 'sheet_count 不能为负'}), 400
-
-    CopyPaperImage.update_count(img_id, val)
-    AuditLog.log('update_copy_paper_sheet_count', 'shipping_order',
-                 order['id'] if order else None,
-                 detail={'image_id': img_id, 'sheet_count': val})
-    return jsonify({'success': True, 'sheet_count': val})
 
 
 # ─────────────────────────────────────────────────────────
@@ -2066,44 +2042,32 @@ def _is_copy_paper_item(item: dict) -> bool:
 def _enrich_copy_paper_for_item(item: dict) -> None:
     """对单条 record 原地写入 copy-paper 字段。
 
-    写入字段:
-      is_copy_paper / copy_paper_images / copy_paper_total / copy_paper_match
-      copy_paper_expected (float 或 None;qty/unit 算不出时为 None)
+    **2026-09-09 重构**:点数已统一走 placement 体系
+    (存 `shipping_images(source='placement')`,复用 placement_count.js 与全部端点);
+    标签图也迁入 `shipping_images(source='copy_paper_label')`,**copy_paper_images 表已废弃**。
 
-    copy_paper_match 四态:
-      - None      → 期望值算不出来(qty=0 / unit 非法)
-      - 'partial' → 有 count 图但 sheet_count 未全部录入
-      - 'green'   → 录入合计 == 期望值
-      - 'yellow'  → 录入合计 != 期望值
+    写入字段:
+      is_copy_paper       → 是否拷贝纸/日本纸(模板据此给标签按钮 + 隐藏普通图按钮)
+      label_images        → 该 record 的标签图列表(移动端缩略图用;
+                            PC 端由 order-images-area 按 source 直接渲染,不读此字段)
+      has_label_image     → 是否已上传标签图(标签按钮红框反馈)
+
+    已废弃并移除(勿再引用):
+      copy_paper_images / copy_paper_total / copy_paper_match / copy_paper_expected
+      —— 原为「张数录入」(sheet_count)服务,该路径随点数走 placement 而废弃;
+         sheet_count 恒为 NULL 导致 match 恒为 'yellow',会渲染误导性的
+         "⚠ 张数不符 0≠300" 徽章,与新 placement 点数体系语义冲突。
     """
     item['is_copy_paper'] = _is_copy_paper_item(item)
     if not item['is_copy_paper']:
-        item['copy_paper_images'] = []
-        item['copy_paper_total'] = 0
-        item['copy_paper_match'] = None
-        item['copy_paper_expected'] = None
+        item['label_images'] = []
+        item['has_label_image'] = False
         return
 
-    images = CopyPaperImage.list_by_record(item['id'])
-    item['copy_paper_images'] = images
-
-    counts = [img['sheet_count'] for img in images if img['sheet_count'] is not None]
-    total = sum(counts)
-    item['copy_paper_total'] = total
-
-    count_imgs = [img for img in images if img['source'] == 'count']
-    total_count_imgs = len(count_imgs)
-    counted_imgs = sum(1 for img in count_imgs if img['sheet_count'] is not None)
-
-    expected, has_expected = compute_copy_paper_expected_quantity(
-        item.get('quantity'), item.get('unit'))
-    # Task 6 (2026-09-06): 模板要用 expected 渲染徽章文案,Task 4 漏写,这里补上。
-    item['copy_paper_expected'] = expected if has_expected else None
-    if not has_expected:
-        item['copy_paper_match'] = None
-    elif total_count_imgs > 0 and counted_imgs < total_count_imgs:
-        item['copy_paper_match'] = 'partial'
-    elif total == expected:
-        item['copy_paper_match'] = 'green'
-    else:
-        item['copy_paper_match'] = 'yellow'
+    # 优先复用调用方已查好的本行图缓存(PC 端图片分组循环注入),否则现查
+    _cache = item.get('_record_imgs_cache')
+    imgs = _cache if _cache is not None else ShippingImage.get_by_record(item['id'])
+    labels = [i for i in imgs if i.get('source') == COPY_PAPER_LABEL_SOURCE]
+    item['label_images'] = labels
+    # 标签按钮已上传反馈(红框),与点数状态无关
+    item['has_label_image'] = bool(labels)

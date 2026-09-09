@@ -326,6 +326,25 @@ def init_db():
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_inbound_placement_marks_image_id ON inbound_placement_marks(image_id)')
     except Exception:
         pass
+
+    # 2026-09-09:loading placement_marks table (separate FK to loading_order_images)
+    # 装柜摆放图计数点与出货/inbound 隔离,避免主键串图;口径与 placement_marks 一致。
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS loading_placement_marks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            image_id INTEGER NOT NULL,
+            seq INTEGER NOT NULL,
+            x_ratio REAL NOT NULL,
+            y_ratio REAL NOT NULL,
+            mark_r REAL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (image_id) REFERENCES loading_order_images(id)
+        )
+    ''')
+    try:
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_loading_placement_marks_image_id ON loading_placement_marks(image_id)')
+    except Exception:
+        pass
     # 2026-07-30: 老表增量加 match_source 列(若已存在则 skip)
     for tbl in ('shipping_images', 'loading_order_images'):
         try:
@@ -363,6 +382,22 @@ def init_db():
         cursor.execute("ALTER TABLE shipping_images ADD COLUMN loose_count INTEGER DEFAULT 0")
     except Exception:
         pass
+    # 2026-09-09: 补齐 loading_order_images 摆放图相关列(与 shipping_images 对齐),
+    # 若已存在则 skip。live DB 已含这些列,_init.py 仅用于全新库重建时补足。
+    for col, typ in (
+        ('source', 'TEXT DEFAULT NULL'),
+        ('record_pk', 'INTEGER DEFAULT NULL'),
+        ('sort_order', 'INTEGER DEFAULT NULL'),
+        ('mark_scale', 'REAL DEFAULT 1'),
+        ('loose_count', 'INTEGER DEFAULT 0'),
+        ('manual_count', 'INTEGER DEFAULT NULL'),
+        ('is_unload', 'INTEGER DEFAULT 0'),
+        ('source_tag', 'TEXT DEFAULT NULL'),
+    ):
+        try:
+            cursor.execute(f"ALTER TABLE loading_order_images ADD COLUMN {col} {typ}")
+        except Exception:
+            pass
 
 
     # 2026-08-17: 独立点数工具 -- 独立建表 / 单独持久化(可追溯)
@@ -938,19 +973,9 @@ def init_db():
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_voice_phrase ON voice_phrase_mapping(phrase)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_voice_status ON voice_phrase_mapping(status)')
 
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS copy_paper_images (
-            id            INTEGER PRIMARY KEY AUTOINCREMENT,
-            record_pk     INTEGER NOT NULL,
-            file_path     TEXT NOT NULL,
-            original_name TEXT,
-            source        TEXT NOT NULL CHECK (source IN ('label','count')),
-            sheet_count   INTEGER,
-            created_at    TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (record_pk) REFERENCES shipping_records(id) ON DELETE CASCADE
-        )
-    ''')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_copy_paper_record ON copy_paper_images(record_pk)')
+    # 2026-09-09: copy_paper_images 表已废弃(标签图迁入 shipping_images,
+    # source='copy_paper_label';点数走 shipping_images(source='placement')),
+    # 不再建表;本机迁移时旧表已 DROP,不影响运行。
 
     # ── 启动 seed:为管理页要列出的分类节点占位空白提示词 ─────────
     # 2026-08-08 新增:不再依赖 classify_record 自动分类精度,

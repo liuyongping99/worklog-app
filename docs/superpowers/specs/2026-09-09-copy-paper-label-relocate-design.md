@@ -1,171 +1,120 @@
-# 拷贝纸/日本纸 标签图移至普通商品图区（2026-09-09）
+# 拷贝纸/日本纸 标签图存于 shipping_images（最终设计）
+
+> 本功能在 2026-09-06 初版曾把标签图与张数图都存进独立表 `copy_paper_images`
+> （`source='label'` / `'count'`），渲染在专属 `copy-paper-area` 块。
+> 2026-09-09 重构后：**`copy_paper_images` 表已废弃删除**，标签图直接存
+> `shipping_images(source='copy_paper_label')`，与普通出货图同表；张数图随点数统一走
+> `shipping_images(source='placement')`。
+>
+> 本文档描述重构后的**最终**形态：标签图如何存储、如何渲染到普通商品图区。
 
 ## 背景
 
-2026-09-06 上线的「拷贝纸/日本纸 行级双按钮」功能（`docs/superpowers/specs/2026-09-06-copy-paper-row-buttons-design.md`）把标签图（`source='label'`）与张数图（`source='count'`）都渲染在专属的 `<div class="copy-paper-area">` 块，紧贴 `placement-area`（点数区）。
-
-用户反馈：标签图本质是参考照片，混在「点数区」语义不对；应与普通商品的 🖼️ 行级图混排在 `<div class="order-images-area">`。张数图（数据输入）继续留在 `copy-paper-area` 不动。
+标签图本质是参考照片，应对照普通商品的 🖼️ 行级图，混排在 `<div class="order-images-area">`
+（普通商品图区），而不是挤在「点数区」语义里。重构后它和普通出货图一样存 `shipping_images`，
+靠 `source='copy_paper_label'` 区分，且**不进 OCR / AI 比对流水线**。
 
 ## 目标 / 非目标
 
 **目标**：
-- 拷贝纸/日本纸的标签图（`source='label'`）渲染到普通商品图区
-- 张数图（`source='count'`）保留在 `copy-paper-area`
-- 完全复用现有 4 端点 + CopyPaperImage 表
-- 不引入 OCR/AI 处理
+- 标签图存 `shipping_images`，`source='copy_paper_label'`，`record_pk` 关联明细行
+- 标签图混排到普通商品图区（`order-images-area`），class 为 `.img-item-copy-paper-label`
+- AI 比对列对该类图特判为空（不渲染 match-badge / 人工核查）
+- 标签图删除复用通用 `DELETE /api/v1/shipping-orders/images/<id>`（自带锁单防御 + 审计）
+- 完全不引入 OCR/AI 处理
 
 **非目标**：
-- 不动张数图流程
-- 不动 4 端点
-- 不动 CopyPaperImage 模型 / 表结构
+- 不动 placement / 点数流程（点数图仍 `source='placement'`）
 - 不动 OCR pipeline
-- 不改 mobile_shipping.py（移动端按原样继续在 copy-paper-area）
+- 不重建 `copy_paper_images` 表
 
-## 数据流
+## 存储
 
-### 后端：把 `source='label'` 的 CopyPaperImage 注入 `order_images`
+标签图行示例（`shipping_images`）：
 
-在 `blueprints/shipping.py` 的 `shipping_records()` 主循环里（record 富化段，约 line 270-320 区域，enrich 完 `placement_match` 之后），追加：
+```text
+id=4185
+order_pk=955
+record_pk=2668          ← 拷贝纸明细行
+source='copy_paper_label'
+file_path='upload/2026-09/xxxx.jpg'
+relative_path='2026-09/xxxx.jpg'
+```
+
+常量定义：`COPY_PAPER_LABEL_SOURCE = 'copy_paper_label'`（`blueprints/shipping.py:54`）。
+
+## 后端
+
+### 上传（`blueprints/shipping.py:1914`）
 
 ```python
-# 2026-09-09: 拷贝纸/日本纸 label 图移至普通商品图区
-# (张数图保留在 copy-paper-area,仅 label 图混排)
-if item.get('is_copy_paper'):
-    for lbl in (item.get('copy_paper_images') or []):
-        if lbl.get('source') != 'label':
-            continue
-        # 仿 PlacementImage.get_by_record 模式补 relative_path
-        if 'relative_path' not in lbl and lbl.get('file_path'):
-            lbl['relative_path'] = os.path.basename(lbl['file_path'])
-        # 注入到 order_non_ai[order_id] 复用现有渲染管线
-        # 标记 source='copy_paper_label' 让模板能识别(非 OCR 图,无需 match-badge)
-        lbl['source'] = 'copy_paper_label'
-        order_non_ai.setdefault(grp['id'], []).append(lbl)
+@bp.route('/api/v1/shipping-orders/records/<int:rid>/copy-paper-images', methods=['POST'])
+def api_v1_shipping_orders_record_copy_paper_upload(rid):
+    # 锁单检查 → 保存文件 → ShippingImage.create(
+    #     order_pk, file_path, original_name, source=COPY_PAPER_LABEL_SOURCE, record_pk=rid)
+    # 跳过 OCR pipeline; AuditLog.log('upload_copy_paper_image', ...)
 ```
 
-**关键点**：
-- 不动 CopyPaperImage 表/类
-- `relative_path` 字段缺失时从 `file_path` 推算（PlacementImage.get_by_record 同款）
-- 注入到 `order_non_ai` 后自动进入 `order_images.get(group.id)` 模板渲染管线
-- `source` 临时改成 `'copy_paper_label'` 让模板可以特判（不渲染 match-badge / 人工核查按钮）
+支持 multipart（`image` 字段）与 JSON base64（`image` 字段，需 `data:image/...;base64,` 前缀）。
 
-### 前端：模板渲染 + 删除按钮
+### 富化（`_enrich_copy_paper_for_item`，shipping.py:1999）
 
-#### `templates/shipping-records.html`（line 940-985，普通商品图区）
-
-紧贴现有 `{% for img in all_order_imgs %}` 循环之后（不替换），追加：
-
-```jinja2
-{# 2026-09-09: 拷贝纸/日本纸 label 图混排在普通区 (source='copy_paper_label') #}
-{% for img in all_order_imgs if img.source == 'copy_paper_label' %}
-<div class="img-item img-item-record img-item-copy-paper-label"
-     data-record-pk="{{ img.record_pk }}" data-image-id="{{ img.id }}">
-  <div class="img-photo">
-    <img src="/upload/{{ img.relative_path }}" alt="{{ img.original_name or '拷贝纸标签' }}"
-         onclick="showImgPreview('/upload/{{ img.relative_path }}')">
-    <button class="copy-paper-label-del-btn lock-hide" data-image-id="{{ img.id }}">× 删除</button>
-    {# 顶部水印区分 #}
-    <div class="img-overlay-name">📋 拷贝纸标签</div>
-  </div>
-</div>
-{% endfor %}
+```python
+item['is_copy_paper'] = _is_copy_paper_item(item)
+if not item['is_copy_paper']:
+    item['label_images'] = []
+    item['has_label_image'] = False
+    return
+imgs = item.get('_record_imgs_cache') or ShippingImage.get_by_record(item['id'])
+labels = [i for i in imgs if i.get('source') == COPY_PAPER_LABEL_SOURCE]
+item['label_images'] = labels
+item['has_label_image'] = bool(labels)
 ```
 
-#### `templates/shipping-records.html`（line 1091-1117，copy-paper-area）
+### 删除
 
-把现有 `{% for img in item.copy_paper_images %}` 改为只渲染 `source='count'`：
+走通用端点 `DELETE /api/v1/shipping-orders/images/<id>`（shipping.py:789），对 `shipping_images`
+任意行生效，自带锁单防御 + 审计日志。**不存在** copy-paper 专用 DELETE 端点。
 
-```jinja2
-{% for img in item.copy_paper_images if img.source == 'count' %}
-{# 原缩略图 + 张数输入框 + 删除按钮 — 不变 #}
-{% endfor %}
-```
+## 前端
 
-#### `static/js/copy_paper.js` — 新增 label 删除 handler
+### PC 端（`templates/shipping-records.html`）
 
-```js
-// 拷贝纸标签图删除(在普通商品图区,需要单独接管)
-document.body.addEventListener('click', function (e) {
-    var btn = e.target.closest('.copy-paper-label-del-btn');
-    if (!btn) return;
-    if (!confirm('删除这张标签图？')) return;
-    var iid = btn.getAttribute('data-image-id');
-    fetch('/api/v1/shipping-orders/copy-paper-images/' + iid, { method: 'DELETE' })
-        .then(function (r) { return r.json(); })
-        .then(function (j) {
-            if (!j.success) { alert('删除失败'); return; }
-            // 简单方案:整行刷新(后续可优化为局部)
-            location.reload();
-        });
-});
-```
+- 操作列 `🖼️ 标签` 按钮（`copy-paper-label-btn`，上传后加 `has-label-image` 红框类）→
+  `openCopyPaperUpload(rid, oid, 'label')` → 复用上传弹框 → `POST .../copy-paper-images`。
+- 标签图渲染在普通商品图区 `order-images-area`，class 为 `.img-item-copy-paper-label`，
+  带 `.copy-paper-label-del-btn`（调用通用 `DELETE /images/<id>`）。
+- AI 比对列 `initRowMatchColumn`（`_record_image_script.html`）查询时排除
+  `.img-item-copy-paper-label`，对该类图不渲染比对结果。
+- 渲染分流：主循环中把 `source='copy_paper_label'` 的图注入 `order_non_ai`，
+  模板按 source 特判渲染（仅普通图区显示，无 match-badge）。
 
-#### `static/css/app.css` — 新增样式
+### 移动端（`templates/mobile/shipping-order.html`）
 
-```css
-/* 2026-09-09: 拷贝纸标签图(混排到普通商品图区,虚线边框区分) */
-.shipping-page .img-item-copy-paper-label {
-    border: 1px dashed #74b9ff;
-}
-.shipping-page .img-item-copy-paper-label .copy-paper-label-del-btn {
-    position: absolute;
-    top: 4px;
-    right: 4px;
-    background: rgba(220, 38, 38, 0.85);
-    color: #fff;
-    border: none;
-    border-radius: 4px;
-    padding: 2px 6px;
-    font-size: 0.7rem;
-    cursor: pointer;
-    opacity: 0;
-    transition: opacity 0.15s;
-}
-.shipping-page .img-item-copy-paper-label:hover .copy-paper-label-del-btn {
-    opacity: 1;
-}
-```
+- `m-copy-paper-label-btn` 调相机/相册 → `POST .../copy-paper-images`。
+- `.m-copy-paper-area` 块渲染 `rec.label_images`，用 `img.relative_path` 拼 `/upload/...`。
+- 点数走独立点数页 `point-entry` → `shipping_placement_count(oid, record_id)`。
 
-## 文件改动清单
+## 文件改动清单（相对初版 relocate 计划，已落地的最终态）
 
-| 文件 | 改动 |
+| 文件 | 实际状态 |
 |---|---|
-| `blueprints/shipping.py` | record 富化段后追加 12 行:label 图注入 order_non_ai |
-| `templates/shipping-records.html` | (a) 普通图区追加 label 缩略图循环 (b) copy-paper-area 加 `if img.source == 'count'` 过滤 |
-| `static/js/copy_paper.js` | 新增 `.copy-paper-label-del-btn` 点击 handler (~10 行) |
-| `static/css/app.css` | 末尾追加 `.img-item-copy-paper-label` + `.copy-paper-label-del-btn` 样式 (~18 行) |
-| `tests/test_copy_paper_images.py` | 新增 2 个测试:`test_label_image_renders_in_order_images_area` / `test_count_image_still_renders_in_copy_paper_area` |
+| `blueprints/shipping.py` | 上传端点写 `shipping_images(source=copy_paper_label)`；`_enrich_copy_paper_for_item` 产出 `label_images` / `has_label_image`；标签图注入 `order_non_ai` 复用普通图渲染 |
+| `templates/shipping-records.html` | 标签图在普通图区渲染为 `.img-item-copy-paper-label` + `.copy-paper-label-del-btn`；AI 比对列特判为空 |
+| `templates/mobile/shipping-order.html` | `m-copy-paper-area` 渲染 `rec.label_images`（relative_path） |
+| `static/js/copy_paper.js` | 仅标签上传 + 删除（删除走通用 `/images/<id>`） |
+| `static/css/app.css` | `.img-item-copy-paper-label` 样式（虚线蓝边框 + 删除按钮） |
+| `static/css/mobile.css` | `.m-copy-paper-area` / `.m-copy-paper-thumb` / `.m-copy-paper-tag` 样式 |
 
-## 测试计划
+## 已废弃
 
-`tests/test_copy_paper_images.py` 新增：
+- `copy_paper_images` 表（DDL 移除 + DB `DROP TABLE`）
+- `CopyPaperImage` 模型类及导出
+- `templates/_copy_paper_count_modal.html`
+- 专用 `GET /copy-paper-images`、专用 `DELETE /copy-paper-images/<id>`、`PATCH .../sheet-count`
+- PC `.copy-paper-area` / `.copy-paper-badge` / `.copy-paper-thumb` / `.copy-paper-tag` 整块 CSS
 
-1. **`test_label_image_renders_in_order_images_area`**：
-   - 构造 fixture：拷贝纸 record + 1 张 `source='label'` + 1 张 `source='count'` 图
-   - 调 `shipping_records()` 主富化逻辑（用 `client.get('/shipping-records')` 触发）
-   - 断言：label 图 HTML 出现在 `<div class="order-images-area">` 内
-   - 断言：label 图带 `.img-item-copy-paper-label` class
+## 验证
 
-2. **`test_count_image_still_renders_in_copy_paper_area`**：
-   - 同样 fixture
-   - 断言：count 图 HTML 出现在 `<div class="copy-paper-area">` 内
-   - 断言：label 图 **不**出现在 `<div class="copy-paper-area">`
-
-3. **现有 22 个测试保持 PASS**：
-   - `test_template_buttons_have_onclick` 不受影响
-   - `test_e2e_full_flow` 不受影响
-   - 其他 HTTP/CRUD 测试不受影响
-
-## 风险 / 回滚
-
-- 后端仅 1 处注入,易回滚(删 12 行)
-- 模板仅追加(不替换),回滚 = 删追加块
-- JS/CSS 增量,直接删即可
-- 完全无 OCR 风险(标签图从不走 RecordImageProcessor)
-- 无数据迁移(数据一直在 CopyPaperImage 表,只是渲染位置换了)
-
-## 范围边界
-
-- ❌ 不做张数图移动(用户明确要求保留在 copy-paper-area)
-- ❌ 不做 mobile_shipping.py 同步修改(用户只提 PC 页面,移动端按原样)
-- ❌ 不优化 label 删除的局部刷新(简单方案:location.reload())
+`tools/verify_copy_paper_label_merge.py`（PC + 移动端渲染校验，无 JS 错误）、
+`tools/verify_label_merge_e2e.py`（上传→`shipping_images`、删→移除 回环）。

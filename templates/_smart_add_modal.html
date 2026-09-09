@@ -30,6 +30,12 @@ function buildShippingRecordRow(rec, tbody) {
     var bad = typeof isInvalidQty === 'function' ? isInvalidQty(rec.quantity) : false;
     var cm = ''; if (mismatch==='warn'||pieceMismatch==='warn') cm='warn'; else if (mismatch==='info'||pieceMismatch==='info') cm='info';
     var prefix = bad ? (typeof invalidQtyIcon === 'function' ? invalidQtyIcon() : '❌') : (typeof mismatchIcon === 'function' ? mismatchIcon(cm) : '');
+    // 2026-08-30: 补齐批量添加后漏的点数按钮 — 按 unit_hint 或 piece_hint 含「支」判定,
+    //   对齐 shipping-records.html 服务端模板 line 852 的条件。
+    //   batch 返回的 rec 没有 placement_match 字段,新行必未匹配,不挂 placement-ok。
+    var placementBtn = (hint && hint.indexOf('支') !== -1) || (pieceHint && pieceHint.indexOf('支') !== -1)
+        ? '<button type="button" class="placement-add-btn lock-hide" data-record-id="'+rec.id+'" data-order-id="'+_smartFillOrderPk+'" title="添加点数图(供清点支数)" onclick="openPlacementImageModal(\''+rec.id+'\',\''+_smartFillOrderPk+'\')">点数</button>'
+        : '';
     tr.innerHTML =
         // 1. 序号(可能带 ❌/💡/❌ 前缀图标)
         '<td style="text-align:center;color:#868e96;font-size:0.85rem;">'+prefix+(tbody.children.length+1)+'</td>' +
@@ -39,23 +45,22 @@ function buildShippingRecordRow(rec, tbody) {
         '<td class="product-name-cell" style="font-size:0.9rem;">'+escHtml(rec.product_name)+'</td>' +
         // 4. 规格
         '<td class="spec-cell" style="color:#636e72;font-size:0.9rem;">'+escHtml(rec.specification||'')+'</td>' +
-        // 5. AI 比对(match-col)— 占位
-        '<td class="match-col"></td>' +
-        // 6. 数量
+        // 5. 数量(match-col 是虚拟列,首次有匹配结果时由 _ensureMatchColumn 动态补建)
         '<td class="qty-cell"><span class="qty-badge">'+escHtml(rec.quantity)+'</span></td>' +
-        // 7. 单位
+        // 6. 单位
         '<td class="unit-cell"><span class="unit-badge">'+escHtml(rec.unit)+'</span></td>' +
-        // 8. 备注
+        // 7. 备注
         '<td class="remark-cell">'+escHtml(rec.remark||'—')+'</td>' +
-        // 9. 辅助单位提示
+        // 8. 辅助单位提示
         '<td class="unit-hint-cell" style="font-size:0.85rem;color:#e17055;">'+escHtml(hint||'—')+(pieceHint?'<br><span style="color:#0984e3;">'+escHtml(pieceHint)+'</span>':'')+'</td>' +
-        // 10. 操作(上移/下移/编辑/删除/🖼️ + 隐藏 file input)
+        // 9. 操作(上移/下移/编辑/删除/🖼️ + 点数(按需) + 隐藏 file input)
         '<td class="actions-cell" style="white-space:nowrap;">' +
             '<button type="button" class="btn btn-sm move-up-btn lock-hide" data-id="'+rec.id+'" title="上移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.1rem 0.35rem;font-size:0.75rem;">▲</button> ' +
             '<button type="button" class="btn btn-sm move-down-btn lock-hide" data-id="'+rec.id+'" title="下移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.1rem 0.35rem;font-size:0.75rem;">▼</button> ' +
             '<button type="button" class="btn btn-primary btn-sm edit-record-btn lock-hide" data-id="'+rec.id+'">✏️</button> ' +
             '<button type="button" class="btn btn-danger btn-sm delete-record-btn lock-hide" data-id="'+rec.id+'">🗑️</button> ' +
             '<button type="button" class="btn btn-sm record-image-btn lock-hide" data-record-id="'+rec.id+'" title="上传图片到此商品" style="background:#74b9ff;color:#fff;">🖼️</button>' +
+            placementBtn +
             '<input type="file" class="record-image-input" data-record-id="'+rec.id+'" accept="image/*" multiple style="display:none;">' +
         '</td>';
     if (typeof applyMismatchClass === 'function') applyMismatchClass(tr, cm);
@@ -326,6 +331,10 @@ function bindRowWarningClickHandler() {
             dataRow = warnRow ? warnRow.previousElementSibling : null;
         }
         if (!recordId || !dataRow) return;
+        // 2026-08-21: 锁定订单后,已核查按钮只读,点击不触发 unmark
+        if (dataRow.closest('.date-group[data-locked="1"]')) {
+            return;
+        }
         if (btn.classList.contains('record-warn-verify-btn') && typeof window.markRecordVerified === 'function') {
             window.markRecordVerified(recordId, dataRow);
         } else if ((btn.classList.contains('record-verified-unverify') || btn.classList.contains('record-verified-toggle')) && typeof window.unmarkRecordVerified === 'function') {
@@ -376,13 +385,42 @@ function submitAiRecognize() {
     }).catch(function(err) { document.getElementById('aiLoading').classList.remove('show'); alert('请求失败：' + err); });
 }
 
+// ── 码基产品归一化 ──────────────────────────────────────────────
+// 业务惯例: 纯胶/三文治等 is_usingyardforcounting=1 的产品按「码」存储,
+// 即 quantity=码数、unit=y、remark=「N支」。但 LLM 常把它们识别成
+// quantity=支数、unit=支、remark=码数(数字)。这里在渲染前归一化:
+// 若产品是码基且 LLM 返回 unit=支 + remark 为纯数字(码数),
+// 则对调 → quantity=码数、unit=y、remark=支数+'支'。
+// yards_per_piece 仅作「是否码基」判定,不参与换算(码数取 LLM 实读值)。
+function _normalizeAiItemForYardProduct(item) {
+    if (typeof findUnit !== 'function') return item;
+    var pn = (item.product_name || '').toString().trim();
+    var sp = (item.specification || '').toString().trim();
+    var info = findUnit(pn, sp);
+    if (!info || !info.is_usingyardforcounting) return item;
+    if ((item.unit || '').toString().trim() === '支') {
+        var rm = (item.remark || '').toString().trim();
+        if (rm !== '' && /^\d+(\.\d+)?$/.test(rm)) {
+            var qtyNum = (item.quantity || '').toString().trim();
+            return {
+                product_name: item.product_name,
+                specification: item.specification,
+                quantity: rm,            // 码数 → 数量
+                unit: 'y',
+                remark: (qtyNum ? qtyNum + '支' : '')  // 支数 → 备注
+            };
+        }
+    }
+    return item;
+}
+
 function renderAiResults(items) {
     // 注意: 校验警告不在弹框里渲染,而是搬到出货/入库/装柜/任务流的明细行下方
     // (函数 addRowWarning 负责)。这里只渲染可编辑的数据行。
     var tbody = document.getElementById('aiResultBody'), i, item, tr;
     tbody.innerHTML = '';
     for (i = 0; i < items.length; i++) {
-        item = items[i]; tr = document.createElement('tr');
+        item = _normalizeAiItemForYardProduct(items[i]); tr = document.createElement('tr');
         tr.innerHTML = '<td><input type="text" value="' + escHtml(item.product_name||'') + '" data-field="product_name"></td>' +
             '<td><input type="text" value="' + escHtml(item.specification||'') + '" data-field="specification"></td>' +
             '<td><input type="text" value="' + escHtml(item.quantity||'') + '" data-field="quantity"></td>' +
@@ -563,6 +601,8 @@ function addRowWarning(targetTr, item) {
 
 // 在数据行最右侧(操作 cell 末尾)追加"✅ 已核查"小按钮
 // 点击 → window.unmarkRecordVerified(recordId, dataRow) → 取消核查 + 恢复警告行
+// 2026-08-21: 不再 lock-hide,锁定订单后该状态指示仍要可见(只读)
+// 锁定时点击会被 bindRowWarningClickHandler 拦截,不再触发 unmark
 function addVerifiedToggle(dataRow, recordId) {
     if (!dataRow || !recordId) return;
     var opCell = dataRow.children[dataRow.children.length - 1];
@@ -571,7 +611,7 @@ function addVerifiedToggle(dataRow, recordId) {
     if (opCell.querySelector('.record-verified-toggle')) return;
     var btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'btn btn-sm record-verified-toggle lock-hide';
+    btn.className = 'btn btn-sm record-verified-toggle';
     btn.setAttribute('data-record-id', String(recordId));
     btn.title = '已核查 — 点击取消核查,恢复警告';
     btn.textContent = '✅ 已核查';

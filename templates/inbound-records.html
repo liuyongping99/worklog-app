@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 
 {% block content %}
 <style>
@@ -221,6 +221,56 @@
 
 /* 图片上传弹框样式见共享 partial _image_upload_modal.html（.img-upload-modal） */
 
+/* placement count modals (shared classes; same shell as shipping) */
+.placement-count-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 1100; align-items: center; justify-content: center; }
+.placement-count-modal.show { display: flex; }
+.placement-count-modal .pcm-inner { background: #2d3436; color: #dfe6e9; border-radius: 10px; width: min(900px, 92vw); max-height: 92vh; display: flex; flex-direction: column; padding: 0.8rem 1rem 0.6rem; box-shadow: 0 12px 32px rgba(0,0,0,0.4); }
+.placement-count-modal .pcm-head { display: flex; justify-content: space-between; align-items: center; gap: 0.6rem; flex-wrap: wrap; padding-bottom: 0.4rem; border-bottom: 1px solid #57606f; }
+.placement-count-modal .pcm-head-left { display: flex; align-items: baseline; gap: 0.55rem; min-width: 0; flex: 1 1 auto; }
+.placement-count-modal .pcm-head-title { font-size: 0.85rem; color: #b2bec3; font-weight: 600; }
+.placement-count-modal .pcm-cur { display: flex; flex-direction: column; line-height: 1; }
+.placement-count-modal .pcm-cur-label { font-size: 0.66rem; color: #868e96; margin-bottom: 2px; }
+.placement-count-modal .pcm-cur-num { font-size: 1.7rem; font-weight: 700; color: #ffd479; }
+.placement-count-modal .pcm-sep { color: #57606f; font-size: 1.1rem; }
+.placement-count-modal .pcm-cum { display: flex; flex-direction: column; line-height: 1.25; }
+.placement-count-modal .pcm-cum-label { font-size: 0.66rem; color: #868e96; }
+.placement-count-modal .pcm-cum-val { font-size: 0.85rem; color: #dfe6e9; font-weight: 600; }
+.placement-count-modal .pcm-diff-chip { font-size: 0.72rem; padding: 0.15rem 0.5rem; border-radius: 8px; font-weight: 700; }
+.placement-count-modal .pcm-diff-chip.none { background: #57606f; color: #dfe6e9; }
+.placement-count-modal .pcm-diff-chip.ok { background: #00b894; color: #fff; }
+.placement-count-modal .pcm-diff-chip.bad { background: #d63031; color: #fff; }
+.placement-count-modal .pcm-diff-chip.warn { background: #fdcb6e; color: #7a4a00; }
+.placement-count-modal .pcm-head-right { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+.placement-count-modal .pcm-seg { display: inline-flex; border-radius: 6px; overflow: hidden; }
+.placement-count-modal .pcm-seg-btn { padding: 0.3rem 0.6rem; font-size: 0.78rem; background: #dfe6e9; color: #2d3436; border: none; cursor: pointer; }
+.placement-count-modal .pcm-seg-btn.on { background: #6c5ce7; color: #fff; }
+.placement-count-modal .pcm-unload-toggle { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.78rem; background: #dfe6e9; color: #2d3436; padding: 0.3rem 0.55rem; border-radius: 6px; cursor: pointer; }
+.placement-count-modal .pcm-unload-toggle input { cursor: pointer; }
+.placement-count-modal .pcm-unload-toggle.checked { background: #d63031; color: #fff; }
+.placement-count-modal .pcm-unload-icon { font-size: 0.85rem; line-height: 1; }
+.placement-count-modal .pcm-undo-btn { padding: 0.3rem 0.7rem; font-size: 0.78rem; background: #b2bec3; color: #2d3436; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; }
+.placement-count-modal .pcm-undo-btn:disabled { background: #636e72; color: #b2bec3; cursor: not-allowed; }
+.placement-count-modal .pcm-close-btn { background: none; border: none; color: #dfe6e9; font-size: 1.2rem; cursor: pointer; padding: 0 0.2rem; }
+.placement-count-modal .pcm-progress { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0; }
+.placement-count-modal .pcm-prog-text { font-size: 0.72rem; color: #b2bec3; white-space: nowrap; }
+.placement-count-modal .pcm-prog-track { flex: 1; height: 6px; border-radius: 3px; background: #57606f; overflow: hidden; }
+.placement-count-modal .pcm-prog-fill { height: 100%; width: 0; background: #fdcb6e; border-radius: 3px; transition: width .15s, background .15s; }
+.placement-count-modal .pcm-prog-fill.ok { background: #00b894; }
+.placement-count-modal .pcm-prog-fill.over { background: #d63031; }
+.placement-count-modal .pcm-prog-loose { font-size: 0.7rem; color: #00b894; font-weight: 700; white-space: nowrap; }
+.placement-count-modal .pcm-body { display: flex; flex-direction: column; align-items: center; gap: 0.4rem; padding: 0.5rem 0; overflow: auto; flex: 1; }
+.placement-count-modal .pcm-img-pos { font-size: 0.78rem; color: #b2bec3; }
+.placement-count-modal .pcm-img-wrap { position: relative; display: inline-block; line-height: 0; align-self: flex-start; flex: 0 0 auto; max-width: 100%; }
+.placement-count-modal .pcm-img { max-width: 100%; max-height: calc(60vh - 1rem); width: auto; height: auto; display: block; cursor: crosshair; }
+.placement-count-modal .pcm-marks { position: absolute; left: 0; top: 0; right: 0; bottom: 0; pointer-events: none; z-index: 3; }
+.placement-count-modal .pcm-mark { position: absolute; border-radius: 50%; background: rgba(253,203,110,0.7); border: 2px solid #e17055; transform: translate(-50%, -50%); pointer-events: none; }
+.placement-count-modal .pcm-mark.last { background: rgba(214,48,49,0.85); border-color: #fff; }
+.placement-count-modal .pcm-zoom-float { display: flex; gap: 0.3rem; align-self: flex-end; }
+.placement-count-modal .pcm-zoom-btn { width: 32px; height: 32px; font-size: 1.1rem; background: #dfe6e9; color: #2d3436; border: none; border-radius: 6px; cursor: pointer; }
+.placement-count-modal .pcm-keys { display: flex; flex-wrap: wrap; gap: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #57606f; font-size: 0.72rem; color: #b2bec3; }
+.placement-count-modal .pcm-keys kbd { background: #57606f; color: #dfe6e9; padding: 0 0.3rem; border-radius: 3px; font-family: monospace; }
+.placement-count-modal .pcm-undo-target { font-size: 0.72rem; color: #fdcb6e; margin-left: 0.4rem; align-self: center; }
+
 /* ── Record 级图片样式（与出货页一致）── */
 .inbound-page .order-images-area { display: grid; margin: 0.75rem 0; gap: 0.75rem; padding: 0.75rem 0; border-top: 1px solid #eee; }
 .inbound-page .order-images-area.columns-1 { grid-template-columns: 1fr; }
@@ -319,6 +369,21 @@
 .inbound-page .record-table .record-image-btn.has-image {
     border: 2px solid #dc2626;
 }
+
+/* 2026-09-07: 点数(摆放图)按钮 — 与出货 shipping-records.html 对齐 */
+.inbound-page .placement-add-btn {
+    margin: 0 0 0 0.25rem; padding: 0.18rem 0.5rem; font-size: 0.72rem; vertical-align: middle;
+    background: #fdcb6e; color: #2d3436; border: 2px solid #b9770e; border-radius: 5px; cursor: pointer;
+    font-weight: 700;
+    box-shadow: 0 0 0 1px rgba(185, 119, 14, 0.25);
+}
+.inbound-page .placement-add-btn:hover { background: #f0b94e; }
+/* 2026-08-16:点数匹配(支/散码均对上备注)时,"点数"按钮加绿框 */
+.inbound-page .placement-add-btn.placement-ok {
+    background: #e6f9ec; color: #1e7e34; border: 2px solid #27ae60;
+    box-shadow: 0 0 0 1px #27ae60;
+}
+.inbound-page .placement-add-btn.placement-ok:hover { background: #d3f3df; }
 </style>
 
 <script>
@@ -540,8 +605,8 @@
                     <td class="eco-col">{% if '环保' in record.product_name %}<span class="eco-icon" title="环保产品">🌿</span>{% endif %}{% if '杂胶' in record.product_name and '加面' in (record.specification or '') %}<svg class="jia-mian-icon" viewBox="0 0 16 16" width="14" height="14" title="加面工艺"><defs><pattern id="mesh-{{ record.id }}" width="3" height="3" patternUnits="userSpaceOnUse"><path d="M0,3 L3,0" stroke="currentColor" stroke-width="0.6"/><path d="M0,0 L3,3" stroke="currentColor" stroke-width="0.6"/></pattern></defs><rect width="16" height="16" fill="url(#mesh-{{ record.id }})"/></svg>{% endif %}</td>
                     <td class="product-name product-name-cell" style="max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ record.product_name }}">{{ record.product_name }}</td>
                     <td class="spec spec-cell">{{ record.specification }}</td>
-                    <td><span class="qty-badge">{{ record.quantity }}</span></td>
-                    <td><span class="unit-badge">{{ record.unit }}</span></td>
+                    <td class="qty-cell"><span class="qty-badge">{{ record.quantity }}</span></td>
+                    <td class="unit-cell"><span class="unit-badge">{{ record.unit }}</span></td>
                     <td class="remark-cell{% if record.remark %} has-content{% endif %}">{{ record.remark or '-' }}</td>
                     <td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">{{ record.unit_hint or '—' }}{% if record.piece_hint %}<br><span style="color:#0984e3;">{{ record.piece_hint }}</span>{% endif %}</td>
                     <td style="white-space: nowrap;">
@@ -550,7 +615,11 @@
                         <button type="button" class="btn btn-primary btn-sm edit-inbound-btn lock-hide" data-id="{{ record.id }}">✏️</button>
                         <button type="button" class="btn btn-danger btn-sm lock-hide" onclick="deleteInboundRecord({{ record.id }}, this)">删除</button>
                         <button type="button" class="btn btn-sm record-image-btn lock-hide{% if record.has_image %} has-image{% endif %}" data-record-id="{{ record.id }}" title="上传图片到此商品{% if record.has_image %}（已上传）{% endif %}" style="background:#74b9ff;color:#fff;">🖼️</button>
+                        {# 2026-09-05: 摆放图(计数用) 按钮 — 对齐出货 shipping-records.html:920 #}
+                        {% if '支' in (record.unit_hint or '') or '支' in (record.piece_hint or '') %}<button type="button" class="placement-add-btn lock-hide{% if record.placement_match %} placement-ok{% endif %}" data-record-id="{{ record.id }}" data-order-id="{{ group.id }}" title="添加点数图(供清点支数)" onclick="openPlacementImageModal('{{ record.id }}','{{ group.id }}')">点数</button>{% endif %}
                         <input type="file" class="record-image-input" data-record-id="{{ record.id }}" accept="image/*" multiple style="display:none;">
+                        {# 2026-09-05: 已点徽章 — 对齐出货 shipping-records.html:923 #}
+                        {% if '支' in (record.unit_hint or '') or '支' in (record.piece_hint or '') %}{% if record.placement_match %}<span class="status-badge placement-badge lock-show" title="该行已添加点数图">✓ 点数</span>{% endif %}{% endif %}
                     </td>
                 </tr>
                 {% endfor %}
@@ -573,6 +642,63 @@
                 {% endif %}
             </tbody>
         </table>
+
+        {# 2026-09-05: 摆放图(计数用) 平铺区 — 对齐出货 shipping-records.html:1025-1081 #}
+        <div class="placement-area" data-order-id="{{ group.id }}">
+            {% set _groups = placement_groups.get(group.id, []) %}
+            {% for _grp in _groups %}
+                {% for _item in _grp['items'] %}
+                <div class="placement-record-block"
+                     data-record-id="{{ _item.record_id }}"
+                     data-total="{{ _item.total }}"
+                     data-expected-zhi="{{ _item.expected_zhi }}"
+                     data-has-zhi="{{ '1' if _item.has_zhi else '0' }}"
+                     data-img-count="{{ _item.images | length }}"
+                     data-loose-total="{{ _item.loose_total }}">
+                    <div class="placement-record-head">
+                        <span class="placement-record-name">{{ _grp.product_name }}{% if _item.specification %} · {{ _item.specification }}{% endif %}</span>
+                        <span class="placement-count-badge" data-total="{{ _item.total }}">已点 {{ _item.total }} 支</span>
+                        {% if _item.has_zhi %}
+                            {% if _item.total == _item.expected_zhi %}
+                        <span class="placement-compare-badge ok">✓ 支 {{ _item.total }} = 备注 {{ _item.expected_zhi }}</span>
+                            {% elif _item.total < _item.expected_zhi %}
+                        <span class="placement-compare-badge bad">✗ 支 {{ _item.total }} &lt; 备注 {{ _item.expected_zhi }}（差 {{ _item.expected_zhi - _item.total }}）</span>
+                            {% else %}
+                        <span class="placement-compare-badge warn">⚠ 支 {{ _item.total }} &gt; 备注 {{ _item.expected_zhi }}（多 {{ _item.total - _item.expected_zhi }}）</span>
+                            {% endif %}
+                        {% else %}
+                        <span class="placement-compare-badge none">备注无支</span>
+                        {% endif %}
+                        {% if _item.has_sanma %}
+                            {% if _item.loose_total == _item.expected_sanma %}
+                        <span class="placement-compare-badge ok">✓ 散 {{ _item.loose_total }} = 备注 {{ _item.expected_sanma }}</span>
+                            {% elif _item.loose_total < _item.expected_sanma %}
+                        <span class="placement-compare-badge bad">✗ 散 {{ _item.loose_total }} &lt; 备注 {{ _item.expected_sanma }}（差 {{ _item.expected_sanma - _item.loose_total }}）</span>
+                            {% else %}
+                        <span class="placement-compare-badge warn">⚠ 散 {{ _item.loose_total }} &gt; 备注 {{ _item.expected_sanma }}（多 {{ _item.loose_total - _item.expected_sanma }}）</span>
+                            {% endif %}
+                        {% else %}
+                        <span class="placement-compare-badge none">备注无散码</span>
+                        {% endif %}
+                    </div>
+                    <div class="placement-images">
+                        {% for pimg in _item.images %}
+                        <div class="placement-thumb-wrap" data-image-id="{{ pimg.id }}" data-record-id="{{ _item.record_id }}">
+                            <img class="placement-thumb" src="/upload/{{ pimg.relative_path }}" data-image-id="{{ pimg.id }}" alt="点数图">
+                            {% if pimg.is_unload %}
+                            <span class="placement-thumb-count placement-thumb-count-unload" title="卸载货物,本图支数从总数扣减">卸 -{{ pimg.effective_zhi }} 支</span>
+                            {% else %}
+                            <span class="placement-thumb-count">{{ pimg.effective_zhi }} 支</span>
+                            {% endif %}
+                            {% if pimg.loose_count %}<span class="placement-thumb-loose">散码 {{ pimg.loose_count }} y</span>{% endif %}
+                            <button type="button" class="placement-del-btn lock-hide" data-image-id="{{ pimg.id }}" title="删除此点数图">×</button>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endfor %}
+            {% endfor %}
+        </div>
 
         <!-- 添加明细表单 -->
         {% if not group.is_locked %}
@@ -718,7 +844,97 @@
     <!-- 图片上传弹框 -->
     {% with image_api="/api/v1/inbound-orders" %}{% include "_image_upload_modal.html" %}{% endwith %}
 
+{# 2026-08-28: 摆放图清点弹框 (段控 + 直输 + 卸载 + 累计 + 进度条 + diff 徽章 + 快捷键栏) #}
+<div id="placementCountModal" class="placement-count-modal">
+    <div class="pcm-inner">
+        <div class="pcm-head">
+            <div class="pcm-head-left">
+                <span class="pcm-head-title">清点支数</span>
+                <div class="pcm-cur">
+                    <span class="pcm-cur-label" id="pcmCurLabel">本图</span>
+                    <span class="pcm-cur-num" id="pcmCount">0</span>
+                </div>
+                <span class="pcm-sep">/</span>
+                <div class="pcm-cum">
+                    <span class="pcm-cum-label">累计 / 目标</span>
+                    <span class="pcm-cum-val" id="pcmCumulative">-- / --</span>
+                </div>
+                <span class="pcm-diff-chip none" id="pcmDiffChip">无</span>
+            </div>
+            <div class="pcm-head-right">
+                <div class="pcm-seg">
+                    <button type="button" class="pcm-seg-btn on" id="pcmSegClick" title="点击图任意位置计 1 支">点击</button>
+                    <button type="button" class="pcm-seg-btn" id="pcmManual" title="直接输入支数">直输</button>
+                    <button type="button" class="pcm-seg-btn" id="pcmLoose" title="录入散码数量">散码</button>
+                </div>
+                <label class="pcm-unload-toggle" id="pcmUnloadWrap" title="勾选后,本图清点支数以负数计入累计(卸载/退货)">
+                    <input type="checkbox" id="pcmUnload"> <span class="pcm-unload-icon">U</span> 卸载
+                </label>
+                <button type="button" id="pcmUndo" class="pcm-undo-btn" title="撤销最近一次操作 (Z)">撤销</button>
+                <button type="button" id="pcmClose" class="pcm-close-btn" title="关闭 (Esc)">X</button>
+                <span class="pcm-undo-target" id="pcmUndoTarget" style="display:none;"></span>
+            </div>
+        </div>
+        <div class="pcm-progress">
+            <span class="pcm-prog-text" id="pcmProgText">本记录累计 0 / 目标 0</span>
+            <div class="pcm-prog-track"><div class="pcm-prog-fill" id="pcmProgBar"></div></div>
+            <span class="pcm-prog-loose" id="pcmLooseVal" style="display:none;"></span>
+        </div>
+        <div class="pcm-body" id="pcmBody">
+            <div class="pcm-img-pos" id="pcmImgPosLabel">本图第 -/- 张</div>
+            <div class="pcm-img-wrap" id="pcmImgWrap">
+                <img id="pcmImg" class="pcm-img" src="" alt="摆放图">
+                <div id="pcmMarks" class="pcm-marks"></div>
+            </div>
+            <div class="pcm-zoom-float">
+                <button type="button" id="pcmBigger" class="pcm-zoom-btn" title="放大 (+)">+</button>
+                <button type="button" id="pcmSmaller" class="pcm-zoom-btn" title="缩小 (-)">-</button>
+            </div>
+        </div>
+        <div class="pcm-keys">
+            <span><kbd>Z</kbd> 撤销</span>
+            <span><kbd>1-9</kbd> 直输</span>
+            <span><kbd>L</kbd> 散码</span>
+            <span><kbd>U</kbd> 卸载</span>
+            <span><kbd>Esc</kbd> 关闭</span>
+        </div>
+    </div>
+</div>
 
+{# 2026-08-16: 散码数量录入弹框 #}
+<div id="looseCountModal" class="loose-count-modal">
+    <div class="lcm-inner">
+        <div class="lcm-title">散码数量</div>
+        <div class="lcm-body">
+            <input type="number" id="looseCountInput" min="0" step="1" placeholder="请输入散码数量" inputmode="numeric">
+        </div>
+        <div class="lcm-actions">
+            <button type="button" id="looseCountCancel" class="lcm-cancel">取消</button>
+            <button type="button" id="looseCountSave" class="lcm-save">保存</button>
+        </div>
+    </div>
+</div>
+
+{# 2026-08-28: 直接输入支数弹框 #}
+<div id="manualCountModal" class="manual-count-modal">
+    <div class="mcm-inner">
+        <div class="mcm-title">直接输入支数</div>
+        <div class="mcm-body">
+            <input type="number" id="manualCountInput" min="0" step="1" placeholder="请输入支数" inputmode="numeric">
+            <div class="mcm-hint">直接输入会清空这张图的点击计数点,二者互斥。清空可恢复点击计数。</div>
+        </div>
+        <div class="mcm-actions">
+            <button type="button" id="manualCountClear" class="mcm-clear">清空</button>
+            <button type="button" id="manualCountCancel" class="mcm-cancel">取消</button>
+            <button type="button" id="manualCountSave" class="mcm-save">保存</button>
+        </div>
+    </div>
+</div>
+
+
+
+{# 2026-09-05: 摆放图计数 JS — 对齐出货 shipping-records.html:2158 #}
+<script src="/static/js/placement_count.js"></script>
 
 <script>
 var INBOUND_UNIT_LIST = {{ unit_list | default([]) | tojson }};
@@ -1137,7 +1353,7 @@ document.addEventListener('keydown', function(e) {
 
 // 3秒后自动隐藏 flash 消息
 setTimeout(() => {
-    document.querySelectorAll('.flash-messages .flash, [style*="position: fixed"]').forEach(function(el) {
+    document.querySelectorAll('.flash-messages .flash, [style*="position: fixed"]:not(#dateRangeModal)').forEach(function(el) {
         el.style.opacity = '0';
         el.style.transition = 'opacity 0.3s';
         setTimeout(function() { el.remove(); }, 300);
@@ -1451,8 +1667,8 @@ setTimeout(() => {
             ecoTd +
             '<td class="product-name product-name-cell" style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapedName + '">' + escHtml(rec.product_name) + '</td>' +
             '<td class="spec spec-cell">' + escHtml(rec.specification || '') + '</td>' +
-            '<td><span class="qty-badge">' + escHtml(rec.quantity) + '</span></td>' +
-            '<td><span class="unit-badge">' + escHtml(rec.unit) + '</span></td>' +
+            '<td class="qty-cell"><span class="qty-badge">' + escHtml(rec.quantity) + '</span></td>' +
+            '<td class="unit-cell"><span class="unit-badge">' + escHtml(rec.unit) + '</span></td>' +
             '<td class="remark-cell' + (rec.remark ? ' has-content' : '') + '">' + escHtml(rec.remark || '-') + '</td>' +
             '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">' + escHtml(unitHint) + (pieceHint ? '<br><span style="color:#0984e3;">' + escHtml(pieceHint) + '</span>' : '') + '</td>' +
             '<td style="white-space:nowrap;">' +

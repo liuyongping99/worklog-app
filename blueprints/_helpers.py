@@ -421,11 +421,12 @@ def summarize_remarks(records):
 def compute_placement_expected_zhi(remark, quantity_str, unit):
     """按 record 计算 placement 期望支数与是否有支目标。
 
-    规则(2026-09-03 placement 期望值兜底):
+    规则(2026-09-03 placement 期望值兜底;2026-09-09 扩展到令/张):
       1. 先按 remark 解析所有「X支」之和。
-      2. 若 remark 无「X支」且 unit == '支':
+      2. 若 remark 无「X支」且 unit in ('支','令','张'):
            用 float(quantity_str) 兜底作为 expected_zhi, has_zhi=True。
            (quantity 解析失败或 ≤0 → 兜底失效, has_zhi=False。)
+           — 拷贝纸(令)/日本纸(张)的 quantity 本身就是点数目标值。
       3. 否则沿用 remark 解析结果。
 
     Returns:
@@ -435,6 +436,8 @@ def compute_placement_expected_zhi(remark, quantity_str, unit):
         - expected_zhi 始终以 float 返回(便于跨订单统一比较)
         - 整数 expected_zhi 仍以 33.0 形式返回(数值本身是整数)
         - 模板如需去小数点,用 `{{ '%g' % value }}` Jinja 格式符
+        - 单位标签(支/令/张)由前端 placement_count.js 从 tr[data-count-unit] 读取,
+          后端只管数值口径,不掺单位文字。
     """
     remark = remark or ''
     qty_str = (quantity_str or '').strip()
@@ -444,8 +447,9 @@ def compute_placement_expected_zhi(remark, quantity_str, unit):
     remark_zhi = sum(int(x.group(1)) for x in zhi_m)
     has_remark_zhi = len(zhi_m) > 0
 
-    # 2. 兜底:unit='支' 且备注无支数 → 用 quantity
-    if not has_remark_zhi and (unit or '').strip() == '支':
+    # 2. 兜底:unit in ('支','令','张') 且备注无支数 → 用 quantity
+    #    (拷贝纸=令 / 日本纸=张,quantity 即目标令/张数)
+    if not has_remark_zhi and (unit or '').strip() in ('支', '令', '张'):
         try:
             qty_val = float(qty_str)
         except (ValueError, TypeError):
@@ -456,30 +460,6 @@ def compute_placement_expected_zhi(remark, quantity_str, unit):
 
     # 3. 沿用 remark 解析结果
     return float(remark_zhi), has_remark_zhi
-
-
-def compute_copy_paper_expected_quantity(quantity, unit):
-    """拷贝纸/日本纸 期望张/令数,直接从 quantity 字段取。
-
-    语义:对拷贝纸(令)/日本纸(张)而言,quantity 本身就是期望值。
-    与 compute_placement_expected_zhi 的区别:
-    - placement:解析备注「X支」 + unit='支' 时回退 quantity
-    - copy_paper:不解析备注,直接用 quantity;unit 必须是 '令'|'张'
-
-    Returns:
-        (expected: float, has_expected: bool)
-        - unit 合法且 quantity > 0 → (float(q), True)
-        - 其他 → (0.0, False)
-    """
-    if unit not in ('令', '张'):
-        return (0.0, False)
-    try:
-        q = float(quantity)
-    except (TypeError, ValueError):
-        return (0.0, False)
-    if q <= 0:
-        return (0.0, False)
-    return (q, True)
 
 
 # =====================================================================

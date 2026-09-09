@@ -131,14 +131,20 @@ class RecordImageProcessor:
         # 或一步到位:
         processor.process_full(image_id=..., filepath=..., record=..., ...)
         processor.process_async(image_id=..., filepath=..., record=...)  # 已在子线程内
+
+    构造函数接受可选 ocr_engine_getter:传一个 callable(engine_name) -> BaseOCREngine,
+    用于在调用时按 blueprint 模块名查 get_ocr_engine,以便测试 monkeypatch
+    (如 mock.patch('blueprints.shipping.get_ocr_engine')) 能穿透到 ocr_pipeline。
+    默认 = ocr_pipeline 模块内的 get_ocr_engine。
     """
 
-    def __init__(self, image_model):
+    def __init__(self, image_model, ocr_engine_getter=None):
         # 契约(image_model 必须实现):
         #   get_by_id(image_id) -> dict | None
         #   set_match(image_id, status, score, reason, source=...) -> None
         #   set_bg_color(image_id, bg_color) -> None
         self.image_model = image_model
+        self._get_ocr_engine = ocr_engine_getter if ocr_engine_getter is not None else get_ocr_engine
 
     # ── 核心方法 1:OCR + 背景色 ──────────────────────────────
     def extract_ocr(self, filepath, record=None, *, image_id=None, use_cached=True):
@@ -174,8 +180,9 @@ class RecordImageProcessor:
                 product_name = (record or {}).get('product_name', '')
                 preprocess_kind = ocr_preprocess_kind(product_name)
                 with open(filepath, 'rb') as _f:
-                    _ocr_text, _conf = get_ocr_engine('paddleocr').extract_text_with_conf(
-                        _f.read(), preprocess_kind=preprocess_kind)
+                    _ocr_text, _conf = self._get_ocr_engine(
+                        'paddleocr').extract_text_with_conf(
+                            _f.read(), preprocess_kind=preprocess_kind)
                     ocr_text = _ocr_text or ''
                     avg_conf = _conf
             except Exception:
@@ -219,11 +226,15 @@ class RecordImageProcessor:
                 'source': 'deepseek'|'local_fuzzy'|'',
                 'prompt_text': str,   # DeepSeek 时有效
                 'raw_response': str,  # DeepSeek 时有效
+                'deepseek_failed': bool,  # 2026-08-21:True 表示 DeepSeek 尝试但失败
+                                          # (超时/网络/非合法状态),已 fallback 到本地;
+                                          # False = DeepSeek 成功 或 未配置(/永远走本地)
             }
         """
         empty = {
             'status': '', 'score': None, 'reason': '', 'source': '',
             'prompt_text': '', 'raw_response': '',
+            'deepseek_failed': False,
         }
 
         # OCR 为空 → 跳过所有引擎,不打徽章(语义:没证据 ≠ 不符)
@@ -232,7 +243,7 @@ class RecordImageProcessor:
 
         # 1. 优先 DeepSeek(有 key 才联网)
         try:
-            ds = get_ocr_engine('deepseek')
+            ds = self._get_ocr_engine('deepseek')
             if getattr(ds, 'API_KEY', ''):
                 supplement = (_supplement_for_record(record)
                               if with_supplement else '')
@@ -247,16 +258,36 @@ class RecordImageProcessor:
                         'source': 'deepseek',
                         'prompt_text': res.get('prompt_text', ''),
                         'raw_response': res.get('raw_response', ''),
+                        'deepseek_failed': False,
                     }
                 # 非合法状态:fallback 本地
                 logger.warning('DeepSeek 返回非合法状态: %r, 改走本地', ms)
             else:
+                # 未配置 key 不算"失败"——用户没启用 AI,deepseek_failed=False
                 logger.info('DeepSeek API key 未配置, 行级图走本地 RapidFuzz')
         except Exception as e:
-            # 联网但调用失败(超时/网络/配额):fallback 本地
+            # 联网但调用失败(超时/网络/配额):fallback 本地,deepseek_failed=True
             logger.warning('DeepSeek 单 record 比对失败, fall back 本地: %s', e)
+            try:
+                status, score, reason = match_label_to_row(
+                    ocr_text,
+                    record.get('product_name', ''),
+                    record.get('specification', ''),
+                )
+                return {
+                    'status': status or '', 'score': score, 'reason': reason or '',
+                    'source': 'local_fuzzy', 'prompt_text': '', 'raw_response': '',
+                    'deepseek_failed': True,
+                }
+            except Exception:
+                logger.exception('本地匹配失败')
+                return {
+                    'status': '', 'score': None, 'reason': '', 'source': '',
+                    'prompt_text': '', 'raw_response': '',
+                    'deepseek_failed': True,
+                }
 
-        # 2. fallback: 本地 RapidFuzz
+        # 2. fallback: 本地 RapidFuzz(走这条分支 = DeepSeek 未配置 / 返回非合法状态)
         try:
             status, score, reason = match_label_to_row(
                 ocr_text,
@@ -266,6 +297,7 @@ class RecordImageProcessor:
             return {
                 'status': status or '', 'score': score, 'reason': reason or '',
                 'source': 'local_fuzzy', 'prompt_text': '', 'raw_response': '',
+                'deepseek_failed': False,
             }
         except Exception:
             logger.exception('本地匹配失败')
@@ -390,7 +422,13 @@ class RecordImageProcessor:
                 result=result, record=record, order_id=order_id,
                 avg_conf=extracted.get('avg_conf', 1.0),
             )
-            _ASYNC_JOBS[image_id] = {'state': 'done', 'finished': time.time()}
+            # 2026-08-21: 把 deepseek_failed 一并存到 _ASYNC_JOBS,
+            # 给前端 /match-status 端点轮询时返回(用户能看到"AI 不可用,本地匹配"提示)
+            _ASYNC_JOBS[image_id] = {
+                'state': 'done',
+                'finished': time.time(),
+                'deepseek_failed': bool(result.get('deepseek_failed')),
+            }
         except Exception:
             logger.exception('行级图异步处理失败 image_id=%s', image_id)
             _ASYNC_JOBS[image_id] = {

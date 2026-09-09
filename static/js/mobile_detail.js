@@ -246,6 +246,8 @@
     const title = $("#ocrDetailTitle");
     if (!mask || !body || !imageId) return;
     mask.hidden = false;
+    // 2026-08-30 v4: 改底部 sheet 模式 — mask 加 .open 触发遮罩淡入 + shell 从底部滑入
+    mask.classList.add("open");
     body.innerHTML = '<div class="ocr-detail-loading">加载中…</div>';
     try {
       const resp = await fetch(`${API}/images/${imageId}/ocr-detail`);
@@ -254,25 +256,50 @@
       const d = data.detail || {};
       title.textContent = (d.product_name || "识别详情") + (d.specification ? " · " + d.specification : "");
       const esc = (s) => String(s == null ? "" : s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+      // 把 ocr_text(多行 品名:/规格:/标签背景: ...) 拆成键值对卡片;非 kv 格式则返回空,走 fallback
+      const ocrToKv = (text, escFn) => {
+        if (!text) return "";
+        const lines = String(text).split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+        let hasKv = false;
+        const rows = [];
+        for (const ln of lines) {
+          const m = ln.match(/^([^:：]+?)[:：]\s*(.*)$/);
+          if (m) { hasKv = true; rows.push({ k: m[1].replace(/^\[|\]$/g, "").trim(), v: m[2].trim() }); }
+          else rows.push({ k: "", v: ln, plain: true });
+        }
+        if (!hasKv) return "";
+        let h = '<div class="ocr-detail-kv">';
+        for (const r of rows) {
+          if (r.plain) { h += `<div class="kv-row"><span class="kv-val" style="flex:1">${escFn(r.v)}</span></div>`; }
+          else {
+            const hl = /背景|颜色|厚度|手感|规格|品名/.test(r.k) ? " hl" : "";
+            h += `<div class="kv-row"><span class="kv-key">${escFn(r.k)}</span><span class="kv-val${hl}">${escFn(r.v)}</span></div>`;
+          }
+        }
+        return h + "</div>";
+      };
       const st = (d.ai && d.ai.ai_match_status) || d.effective_match_status || d.match_status || "";
       const stText = st === "green" ? "✓ 一致" : st === "yellow" ? "⚠ 待确认" : st === "red" ? "✕ 不符" : (st || "—");
       let html = "";
-      // OCR 段
-      html += '<div class="ocr-detail-sec"><div class="ocr-detail-sec-h">OCR 识别结果</div>';
-      html += '<div class="ocr-detail-text">' + (d.ocr && d.ocr.ocr_text ? esc(d.ocr.ocr_text) : '<span class="muted">无</span>') + '</div></div>';
-      // AI 段（仅状态 + 推理理由,不含 prompt_payload 提示词）
-      html += '<div class="ocr-detail-sec"><div class="ocr-detail-sec-h">AI 推理结果</div>';
+      // OCR 段(键值对结构化,fallback 等宽文本)
+      html += '<div class="ocr-detail-sec"><div class="ocr-detail-sec-h"><span class="ocr-detail-sec-h-icon">📄</span><span class="ocr-detail-sec-h-text">OCR 识别结果</span></div>';
+      const ocrText = (d.ocr && d.ocr.ocr_text) ? d.ocr.ocr_text : "";
+      const kvHtml = ocrToKv(ocrText, esc);
+      html += kvHtml ? kvHtml : '<div class="ocr-detail-text">' + (ocrText ? esc(ocrText) : '<span class="muted">无</span>') + '</div>';
+      html += '</div>';
+      // AI 段（仅状态 + 推理理由,不含 prompt_payload 提示词;推理用普通字体非等宽）
+      html += '<div class="ocr-detail-sec"><div class="ocr-detail-sec-h"><span class="ocr-detail-sec-h-icon">🤖</span><span class="ocr-detail-sec-h-text">AI 推理结果</span></div>';
       if (d.ai) {
         html += `<div class="ocr-detail-ai-status ${st}">${stText}</div>`;
-        html += '<div class="ocr-detail-text">' + (d.ai.ai_match_reason ? esc(d.ai.ai_match_reason) : '<span class="muted">无推理说明</span>') + '</div>';
+        html += '<div class="ocr-detail-reason">' + (d.ai.ai_match_reason ? esc(d.ai.ai_match_reason) : '<span class="muted">无推理说明</span>') + '</div>';
       } else {
         html += '<div class="muted">未做 AI 判别</div>';
       }
       html += '</div>';
       // 人工确认（简短一行）
       if (d.human) {
-        html += '<div class="ocr-detail-sec"><div class="ocr-detail-sec-h">人工确认</div>';
-        html += '<div class="ocr-detail-text">' + esc((d.human.human_status || "") + (d.human.operator_name ? " · " + d.human.operator_name : "")) + '</div></div>';
+        html += '<div class="ocr-detail-sec"><div class="ocr-detail-sec-h"><span class="ocr-detail-sec-h-icon">✓</span><span class="ocr-detail-sec-h-text">人工确认</span></div>';
+        html += '<div class="ocr-detail-reason">' + esc((d.human.human_status || "") + (d.human.operator_name ? " · " + d.human.operator_name : "")) + '</div></div>';
       }
       body.innerHTML = html;
     } catch (e) {
@@ -364,9 +391,19 @@
 
   function bindOcrDetailControls() {
     const mask = $("#ocrDetailMask");
-    if (mask) mask.addEventListener("click", (e) => { if (e.target === mask) mask.hidden = true; });
-    const close = $("#ocrDetailClose");
-    if (close) close.addEventListener("click", () => { if (mask) mask.hidden = true; });
+    if (!mask) return;
+    // 顶部 ‹ 返回按钮
+    const back = $("#ocrDetailBack");
+    if (back) back.addEventListener("click", () => closeOcrDetail());
+    // 点遮罩左边 8% 露出的旧页区域也能关闭(保持 iOS 习惯:点边缘返回)
+    mask.addEventListener("click", (e) => { if (e.target === mask) closeOcrDetail(); });
+  }
+  function closeOcrDetail() {
+    const mask = $("#ocrDetailMask");
+    if (!mask) return;
+    // 2026-08-30 v4: sheet 模式 — 移除 .open,遮罩淡出 + sheet 滑下,等动画完成再 hidden
+    mask.classList.remove("open");
+    setTimeout(() => { mask.hidden = true; }, 320);  // 等 .32s transition 走完
   }
 
   document.addEventListener("DOMContentLoaded", () => {

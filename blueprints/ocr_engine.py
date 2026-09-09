@@ -32,7 +32,7 @@ if sys.platform == 'win32':
 logger = logging.getLogger('ocr.engine')
 
 # 提示词版本号 —— 改 COMPARE_PROMPT 时同时 bump,事件日志按此版本切分分析
-OCR_MATCH_PROMPT_VERSION = 'compare_rows_v2'
+OCR_MATCH_PROMPT_VERSION = 'compare_rows_v3'
 
 # 2026-08-18 v2.3: 业务字段规则纠错 (Direction 1)
 # 字段前缀白名单 + 右列首字反查表:
@@ -451,16 +451,35 @@ _FORM_NOLINES_VARIANTS = frozenset({
     # '磅布三文治' 已移除:它是其他变体的公共子串,
     # 会误中「环保磅布三文治」(有表格线标签,不走 form_nolines 分行 OCR)
 })
+# 命中本白名单的品名走 KIND_FORM_NOLINES → _extract_form_lines 分行 OCR。
+# 已知已知盲点(塑膜反光漏厚度行):见 KIND_FORM_NOLINES 分支 glare 兜底注释
+# + memory ocr-form-nolines-glare-fallback-2026-09-02。
 _GLARE_VARIANTS = frozenset({'无纺布'})
-_REDSTAMP_VARIANTS = frozenset({'杂胶', '纯胶'})
+# 【2026-09-02 修复】环保磅布三文治 加入 redstamp 白名单。
+# 背景:订单 TD-2026-09-02-005(911/司机)image 3804 真机实测 — 环保磅布三文治
+# 横版表格标签**常带检验合格红章**(肉眼可见红章盖「15P环保磅布三文治」+「0.6黑色」+
+# 「中硬」三行的关键字段)。原 routing 把环保磅布三文治从 KIND_FORM_NOLINES 排除后
+# 静默回 None,完全不走 redstamp 擦除 → 红章盖字段仍漏字。
+# 同类损失历史:67 条中至少 7 条环保磅布三文治(2412/2413/2215/2234/2256 等)
+# 因红章干扰 OCR 严重漏字。
+# 修复:加到 _REDSTAMP_VARIANTS,走 commit 8412d03 已建的红章擦除 + 双 pass 取优。
+# 表格线 + 默认 _ocr 整图路径不冲突(redstamp 走整图,不分行)。
+# 注意:7P环保磅布三文治仍在 _FORM_NOLINES_VARIANTS,因轨 1 按声明顺序先匹配
+# _FORM_NOLINES(_FORM_NOLINES_EXCLUDES 已不再包含 环保磅布三文治),子串「环保磅布
+# 三文治」也能命中 form_nolines,但 7P 前缀会优先命中 _FORM_NOLINES_VARIANTS 第一项。
+# 详见 memory: ocr-eco-pangburger-redstamp-routing-2026-09-02
+_REDSTAMP_VARIANTS = frozenset({'杂胶', '纯胶', '环保磅布三文治'})
 
 # 【2026-08-27 修复】已知有表格线标签, 显式排除 — 不会被任何轨命中 form_nolines。
 # 背景:订单 TD-2026-08-27-006(879/阿桂)三条「环保磅布三文治」OCR 不全。
 # 根因 1:白名单里「磅布三文治」是公共子串, 误中「环保磅布三文治」→ 已删。
 # 根因 2:删完后「环保磅布三文治」与 7P 变体共享同一品类 code(0212/021003 等),
-#         轨 2 仍命中 form_nolines。需显式按品名前缀排除环保磅布三文治(横版表格标签)。
+#         轨 2 仍命中 form_nolines。
+# 【2026-09-02 更新】「环保磅布三文治」已从本集合移除,改走 KIND_REDSTAMP 路径
+# (见 _REDSTAMP_VARIANTS 注释)。原因:其横版表格标签常带红章,form_nolines 路径
+# 不擦除红章会漏字段;redstamp 走整图 _ocr,对表格线无副作用。
 _FORM_NOLINES_EXCLUDES = frozenset({
-    '环保磅布三文治',  # 横版表格标签, 含「品名:/规格:/手感:」字段, 应走默认 _ocr 整图路径
+    # '环保磅布三文治' 已移除 (2026-09-02):改走 KIND_REDSTAMP
 })
 
 # 轨 2:品类 code 白名单(DeepSeekEngine._classify_product 返回值命中即算)
@@ -778,6 +797,45 @@ def _preprocess_for_kind(img_np: np.ndarray, kind: Optional[str]) -> np.ndarray:
     return img_np
 
 
+def _sharpen_for_ocr(rgb: np.ndarray) -> np.ndarray:
+    """轻量锐化预处理:为手写体数字增强对比度(2026-09-02)。
+
+    背景:环保杂胶/杂胶/纯胶等橡胶类商品的标签常用「印刷体 + 手写马克笔数字」
+    混排(工人手填厚度/颜色),PaddleOCR 对训练集外的手写数字识别率先天弱。
+    不同 UnsharpMask 参数对同一手写数字的捕捉不同(实测:r=2 p=200 抓「4」,
+    r=4 p=300 抓「1」),本函数提供 2 档预设,供 KIND_REDSTAMP 三遍 OCR 取优。
+
+    异常返回原图 (设计硬约束)。
+    """
+    try:
+        from PIL import Image
+        sharp = Image.fromarray(rgb).filter(
+            __import__('PIL.ImageFilter', fromlist=['UnsharpMask']).UnsharpMask(
+                radius=2, percent=200, threshold=0))
+        return np.array(sharp)
+    except Exception as e:
+        logger.warning('锐化失败,用原图: %s', e)
+        return rgb
+
+
+def _sharpen_strong_for_ocr(rgb: np.ndarray) -> np.ndarray:
+    """强锐化变体,与 _sharpen_for_ocr 形成"不同字符"互补(2026-09-02)。
+
+    实测同一张手写「1.4」:轻度(r2p200)抓「4」,中度(r4p300)抓「1」;
+    KIND_REDSTAMP 三遍 OCR 合并时按 (line_count, total_chars, prefix_bonus) 评分取优,
+    两个锐化版哪个总字符更多哪个胜出(通常能拿到至少 1 个数字)。
+    """
+    try:
+        from PIL import Image
+        sharp = Image.fromarray(rgb).filter(
+            __import__('PIL.ImageFilter', fromlist=['UnsharpMask']).UnsharpMask(
+                radius=4, percent=300, threshold=0))
+        return np.array(sharp)
+    except Exception as e:
+        logger.warning('强锐化失败,用原图: %s', e)
+        return rgb
+
+
 # ═══════════════════════════════════════════════════════════════════
 # 知识库：从数据库加载产品名（按长度降序，优先匹配长名）
 # ═══════════════════════════════════════════════════════════════════
@@ -1077,34 +1135,21 @@ _SUMMARY_IN_REMARK_RE = re.compile(
 def _filter_summary_items(items):
     """后处理安全网：过滤 LLM 未能跳过的汇总行。
 
-    分两步：
-    1. 标记明确的汇总行（product_name 匹配关键词，或只有数量+单位没有品名特征）
-    2. 清理 remark 中被误填的汇总数据
+    步骤:
+      1. product_name 匹配汇总关键词(合计/总计/共X支/纯数字名)
+      2. 清理 remark/specification 中被误填的汇总数据
+
+    注意:不再做"中位数×3 离群值"检测(2026-09-03 拆除)。
+    原因:码基/大批量出货单里,真实商品的 qty 跨度常 > 3x 中位数(如
+    露华里 2400 码 vs 环保磅布三文治 300 码),该启发式假阳率太高。
+    如果 LLM 给汇总行填了真实品名(步骤 1 漏),由用户在「AI 识别结果
+    预览」弹窗里手动删,不应让安全网静默丢商品。
 
     Returns:
         (filtered_items, removed_count)
     """
     if not items:
         return items, 0
-
-    # 计算中位数数量，用于检测异常大的汇总值
-    quantities = []
-    for it in items:
-        try:
-            q = float(it.get('quantity', 0))
-            if q > 0:
-                quantities.append(q)
-        except (ValueError, TypeError):
-            pass
-
-    if quantities:
-        quantities.sort()
-        n = len(quantities)
-        median_qty = quantities[n // 2] if n > 0 else 0
-        # 阈值：超过中位数的 3 倍 且 超过 50，可能是汇总行
-        outlier_threshold = max(median_qty * 3, 50)
-    else:
-        outlier_threshold = float('inf')
 
     clean = []
     removed = 0
@@ -1120,25 +1165,14 @@ def _filter_summary_items(items):
             removed += 1
             continue
 
-        # ── 检测 2: 无品名特征（空名或纯数字+单位） ──
+        # ── 检测 2: 无品名特征(空名或纯数字+单位) ──
         if not name or re.match(r'^[\d.,]+\s*[支yYkg件箱桶张块个]?$', name):
             removed += 1
             continue
 
-        # ── 检测 3: 数量异常大（可能是汇总值）─
-        try:
-            qty_val = float(qty_str)
-        except (ValueError, TypeError):
-            qty_val = 0
-
-        if qty_val > outlier_threshold and len(clean) > 0:
-            # 数量远大于中位数，且不是第一个商品 → 很可能是汇总行
-            removed += 1
-            continue
-
-        # ── 检测 4: remark 被填入了汇总数据 ──
+        # ── 检测 3: remark 被填入了汇总数据 ──
         if _SUMMARY_IN_REMARK_RE.search(remark):
-            # 把汇总数据从 remark 清掉，保留行
+            # 把汇总数据从 remark 清掉,保留行
             it['remark'] = re.sub(
                 r'^(合计|总计|小计|总数量|总金额|总共|共\d+|TOTAL|SUM)[：:\s]*\d*\s*[支yYkg件箱桶张块个]?\s*$',
                 '', remark
@@ -1147,10 +1181,10 @@ def _filter_summary_items(items):
             if not it['remark']:
                 it['remark'] = ''
 
-        # ── 检测 5: specification 里只有"共X支"之类的汇总文本 ──
+        # ── 检测 4: specification 里只有"共X支"之类的汇总文本 ──
         if _SUMMARY_KEYWORDS_RE.search(spec):
             it['specification'] = ''
-            # 不删除行，只清规格
+            # 不删除行,只清规格
 
         clean.append(it)
 
@@ -1834,6 +1868,44 @@ class PaddleOCREngine(BaseOCREngine):
             return list(pre_lines), list(pre_confs)
         return list(orig_lines), list(orig_confs)
 
+    @staticmethod
+    def _pick_best_of_n(passes):
+        """多 pass OCR 取优(2026-09-02):用于 KIND_REDSTAMP 三遍 OCR 合并。
+
+        输入:passes = [(lines1, confs1), (lines2, confs2), (lines3, confs3), ...]
+        打分 = (line_count, total_chars, prefix_bonus),高者胜。
+        同分时索引小的胜(原图 > 红章擦除 > 锐化版,越靠后越激进/噪声越多)。
+
+        背景:环保杂胶 / 杂胶 / 纯胶等橡胶类商品的标签含印刷体+手写体混排。
+        PaddleOCR 对手写数字识别弱,不同锐化参数能捕捉不同字符(实测:r2p200 抓
+        「4」,r4p300 抓「1」)。整体取优至少能拿到 1 个数字。
+
+        Args:
+            passes: list of (lines, confs) tuples,按"保守→激进"顺序排列。
+        Returns:
+            (winner_lines, winner_confs): 最高分 pass 的结果。
+        """
+        def score(lines):
+            if not lines:
+                return (-1, -1, -1)
+            n_lines = len(lines)
+            total_chars = sum(len(l) for l in lines)
+            known_prefixes = ('品名', '规格', '颜色', '厚度', '手感', '底布', '成份', '克重')
+            prefix_bonus = sum(1 for l in lines
+                              if any(p in l for p in known_prefixes))
+            return (n_lines, total_chars, prefix_bonus)
+
+        best_score = (-1, -1, -1)
+        best_idx = -1
+        for idx, (lines, confs) in enumerate(passes):
+            s = score(lines)
+            if s > best_score:
+                best_score = s
+                best_idx = idx
+        if best_idx < 0:
+            return [], []
+        return list(passes[best_idx][0]), list(passes[best_idx][1])
+
     def _resolve_kind(self, preprocess_kind, apply_wrinkle_enhance):
         """统一 kind 入参:优先 preprocess_kind;旧参数 apply_wrinkle_enhance=True
         等价于 'form_nolines'(向后兼容别名)。"""
@@ -1881,7 +1953,37 @@ class PaddleOCREngine(BaseOCREngine):
                 ocr = (self._wrinkle_ocr or self._ocr)
                 # 一次性算 bg_color, 传入分行 OCR 内部用于色字补全 (D5)。
                 bg_color = _detect_bg_color_from_np(img_np)
-                lines, _confs = self._extract_form_lines(img_np, ocr, bg_color=bg_color)
+                lines, confs = self._extract_form_lines(img_np, ocr, bg_color=bg_color)
+                # 【2026-09-02】form_nolines glare 兜底(必须与 extract_text_with_conf
+                # 的 KIND_FORM_NOLINES 分支保持严格同构 — /re-ocr 按钮走后者)。
+                # ─────────────────────────────────────────────────────────
+                # 根因:黑磅布三文治/白磅布三文治/B级磅布三文治/7P环保磅布三文治
+                # 常被塑膜包裹,塑膜反光干扰 PaddleOCR band 第 2 行(厚度)。
+                # 案例:订单 TD-2026-09-02-002 / image 3788 / f888b1ab...jpg
+                #  - 原图 form_nolines → [品名, (空), 手感, 底布] ← 漏「厚度:1.0mm」
+                #  - glare 抑制图       → [(空), 厚度, 手感, 底布] ← 偶尔丢品名
+                #  - 合并后            → [品名, 厚度:1.0mm, 手感, 底布] ← 完整
+                # 同构修复:本路径与 commit 8412d03 (redstamp 双 pass 取优) 同构,
+                # 但 redstamp 是整图取优,本路径必须逐行合并才能既保留原图清
+                # 晰字段又补回 glare 找回的字段。
+                # 详见 memory: ocr-form-nolines-glare-fallback-2026-09-02
+                # 调优政策: ocr-failure-tuning-process
+                # 同类隐患(67 条历史中 14 条曾因此 yellow/red):
+                #   product_name IN ('黑磅布三文治', '白磅布三文治',
+                #                     'B级 磅布三文治', '7P环保磅布三文治')
+                # 防回归:tests/test_form_nolines_glare_fallback.py (6 项)
+                # ─────────────────────────────────────────────────────────
+                try:
+                    glare_np = _suppress_glare(img_np)
+                    if glare_np is not img_np:
+                        glare_lines, glare_confs = self._extract_form_lines(
+                            glare_np, ocr, bg_color=bg_color)
+                        if glare_lines:
+                            lines, confs = self._merge_form_candidates(
+                                lines, confs, glare_lines, glare_confs)
+                except Exception:
+                    # 兜底路径异常 → 静默用原图结果,不影响主流程
+                    pass
             elif kind in (KIND_GLARE, KIND_REDSTAMP):
                 # 反光/红章:图级预处理(擦除退化)后走默认 _ocr。
                 if isinstance(resized, (bytes, bytearray)):
@@ -1892,11 +1994,22 @@ class PaddleOCREngine(BaseOCREngine):
                 if kind == KIND_REDSTAMP:
                     # 【2026-08-28】红章擦除 60% 样本漏字(误擦「软性」等标签文字)。
                     # OCR 两次取优: 原图通常保留更多字段, 擦除图偶尔修对红章盖住的字。
-                    orig_lines, _orig_confs = self._collect(ocr.ocr(img_np, cls=True))
+                    # 【2026-09-02】加第 3 遍 OCR = 锐化版,捕捉「环保杂胶/杂胶/纯胶」
+                    # 等橡胶类商品常见的「印刷体+手写体」混排 — 工人手填厚度数字时
+                    # PaddleOCR 弱,不同锐化参数能抓不同字符(r2p200 → 「4」,r4p300 → 「1」)。
+                    # 三遍 OCR 整体取优:按 (line_count, total_chars, prefix_bonus)
+                    # 打分,同分时原图胜(更保守)。
+                    # 详见 memory: ocr-handwritten-paddleocr-fallback-2026-09-02
+                    orig_lines, orig_confs = self._collect(ocr.ocr(img_np, cls=True))
                     pre = _preprocess_for_kind(img_np, kind)
-                    pre_lines, _pre_confs = self._collect(ocr.ocr(pre, cls=True))
-                    lines, _confs = self._pick_better_ocr(
-                        orig_lines, _orig_confs, pre_lines, _pre_confs)
+                    pre_lines, pre_confs = self._collect(ocr.ocr(pre, cls=True))
+                    sharp = _sharpen_for_ocr(img_np)
+                    sharp_lines, sharp_confs = self._collect(ocr.ocr(sharp, cls=True))
+                    lines, confs = self._pick_best_of_n([
+                        (orig_lines, orig_confs),
+                        (pre_lines, pre_confs),
+                        (sharp_lines, sharp_confs),
+                    ])
                 else:
                     pre = _preprocess_for_kind(img_np, kind)
                     lines, _confs = self._collect(ocr.ocr(pre, cls=True))
@@ -1946,6 +2059,26 @@ class PaddleOCREngine(BaseOCREngine):
                 ocr = (self._wrinkle_ocr or self._ocr)
                 bg_color = _detect_bg_color_from_np(img_np)
                 lines, confs = self._extract_form_lines(img_np, ocr, bg_color=bg_color)
+                # 【2026-09-02】form_nolines glare 兜底(出货页 ↻重 OCR 按钮路径)。
+                # ─────────────────────────────────────────────────────────
+                # 必须与 extract_text 的 KIND_FORM_NOLINES 分支严格同构 ——
+                # /re-ocr 端点(出货页 ↻重 OCR 按钮)走 extract_text_with_conf,
+                # 如果只修 extract_text 会绕过兜底(首次修复就漏了这里,见
+                # test 6: test_extract_text_with_conf_also_has_glare_fallback)。
+                # ─────────────────────────────────────────────────────────
+                # 根因/案例/同类隐患/防回归:见 extract_text 同款注释块
+                # 详见 memory: ocr-form-nolines-glare-fallback-2026-09-02
+                # ─────────────────────────────────────────────────────────
+                try:
+                    glare_np = _suppress_glare(img_np)
+                    if glare_np is not img_np:
+                        glare_lines, glare_confs = self._extract_form_lines(
+                            glare_np, ocr, bg_color=bg_color)
+                        if glare_lines:
+                            lines, confs = self._merge_form_candidates(
+                                lines, confs, glare_lines, glare_confs)
+                except Exception:
+                    pass
             elif kind in (KIND_GLARE, KIND_REDSTAMP):
                 if isinstance(resized, (bytes, bytearray)):
                     img_np = np.array(Image.open(io.BytesIO(resized)).convert('RGB'))
@@ -1955,11 +2088,19 @@ class PaddleOCREngine(BaseOCREngine):
                 if kind == KIND_REDSTAMP:
                     # 【2026-08-28】与 extract_text 一致:红章擦除 60% 漏字,
                     # OCR 两次取优(原图+擦除图)。
+                    # 【2026-09-02】三遍 OCR(原图+擦除+锐化),与 extract_text 严格同构,
+                    # 见 extract_text 的 KIND_REDSTAMP 注释 + memory
+                    # ocr-handwritten-paddleocr-fallback-2026-09-02。
                     orig_lines, orig_confs = self._collect(ocr.ocr(img_np, cls=True))
                     pre = _preprocess_for_kind(img_np, kind)
                     pre_lines, pre_confs = self._collect(ocr.ocr(pre, cls=True))
-                    lines, confs = self._pick_better_ocr(
-                        orig_lines, orig_confs, pre_lines, pre_confs)
+                    sharp = _sharpen_for_ocr(img_np)
+                    sharp_lines, sharp_confs = self._collect(ocr.ocr(sharp, cls=True))
+                    lines, confs = self._pick_best_of_n([
+                        (orig_lines, orig_confs),
+                        (pre_lines, pre_confs),
+                        (sharp_lines, sharp_confs),
+                    ])
                 else:
                     pre = _preprocess_for_kind(img_np, kind)
                     lines, confs = self._collect(ocr.ocr(pre, cls=True))
@@ -2042,7 +2183,10 @@ class DeepSeekEngine(BaseOCREngine):
     BASE_URL = 'https://api.deepseek.com/v1'
     MODEL = 'deepseek-v4-flash'  # 当前活跃;v4-flash 比 v4-pro 便宜约 10 倍,纯文本结构化够用
     MAX_TOKENS = 8000
-    TIMEOUT = 30
+    # 【2026-09-02】30s 太短 — 长 prompt(3000+ chars 注入自适应提示词)在高峰时段
+    # 偶发响应超过 30s 触发 ReadTimeout。日志实证(image 3832 在 18:20-18:21 连续
+    # 3 次均恰好 30.91-30.96s 失败)。调到 60s 给长 prompt 留 2 倍冗余。
+    TIMEOUT = 60
 
     STRUCT_PROMPT = (
         '你是一个商品信息提取助手。以下是从出货单/送货单/装车单图片中 OCR 识别出的文字，'
@@ -2160,7 +2304,13 @@ class DeepSeekEngine(BaseOCREngine):
         '    （关键冲突，应判 red）\n'
         '  - 规格里有"单面"或规格无加面要求 + OCR 文字里有"单面" → 匹配 ✓\n'
         '  - 规格里有"单面" + OCR 文字里有"加面" → 不匹配 ✗\n'
-        '  - 规格里无加面/单面字样 + OCR 文字里有"加面"或"单面" → 视为多余信息，不判错\n'
+        '  - 规格里无加面/单面字样 + OCR 文字里有"加面"或"单面" → 默认视为多余信息，不判错\n'
+        '    ★ 例外（2026-08-28 加严）：若 OCR 文字中"加面"嵌在品名词组内（如"18P加面杂胶"、"7P加面纯胶"、"加面三文治"、"双面杂胶"等"X加面Y"或"Y加面"形式），\n'
+        '      "加面"是该商品的实际类型（双面 ≡ 加面），规格里必须有"加面"字样才算对得上；\n'
+        '      若规格里无"加面"也未在备注/说明里标注加面 → 关键冲突，应判 red（让人工核对是规格漏写还是拿错货）。\n'
+        '    ★ 对称条款（2026-08-28）："单面"是商品默认形态。OCR 文字中若"单面"嵌在品名词组内（如"18P单面杂胶中软"、"7P单面纯胶"），\n'
+        '      表示实物就是单面型，规格里**不应**出现"加面"字样（单面 ≡ 非加面）；若规格含"加面" → 关键冲突 red。\n'
+        '      （注：此规则亦已被上方"规格里有加面 + OCR 文字里有单面 → 加面不匹配 ✗"覆盖，此处显式重申以防 LLM 漏看。）\n'
         '\n'
         '▌规则 5：手感 / 软硬度匹配（软、中、硬）\n'
         '规格中常含手感词：软、中、硬。其中"中"是"中性"的简写，判定前一律先把"中"归一化为"中性"（中 ≡ 中性）。\n'
@@ -2493,6 +2643,20 @@ class DeepSeekEngine(BaseOCREngine):
                 resp = cli.post(url, headers=headers, json=body)
                 resp.raise_for_status()
                 data = resp.json()
+        except httpx.ReadTimeout as e:
+            # 【2026-09-02】长 prompt(3000+ chars)在高峰时段偶发 ReadTimeout,
+            # 重试 1 次给 DeepSeek 二次机会。仅 ReadTimeout 重试(连接错误重试
+            # 容易把网络问题放大),重试间隔 1 秒。
+            import time as _time
+            try:
+                with httpx.Client(timeout=self.TIMEOUT) as cli:
+                    resp = cli.post(url, headers=headers, json=body)
+                    resp.raise_for_status()
+                    data = resp.json()
+            except httpx.HTTPError as e2:
+                raise openai.APIConnectionError(
+                    message=f'无法连接 DeepSeek 服务(已重试 1 次): {type(e2).__name__}: {e2}',
+                    request=e2.request) from e2
         except httpx.HTTPStatusError as e:
             # 401/403/429 等 SDK 风格的异常(确保 _classify_and_match_image 的 try/except 能 fallback)
             raise openai.APIStatusError(

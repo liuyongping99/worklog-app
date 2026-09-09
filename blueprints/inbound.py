@@ -11,7 +11,7 @@ import re
 from datetime import date as date_cls, timedelta, datetime
 from flask import Blueprint, render_template, request, jsonify, current_app, session
 from models import (
-    InboundOrder, InboundRecord, InboundImage, ProductUnit, PieceConversion, get_db, AuditLog,
+    InboundOrder, InboundRecord, InboundImage, InboundPlacementImage, ProductUnit, PieceConversion, get_db, AuditLog,
     OcrMatchEvent,
     classify_record, CategoryPrompt,
 )
@@ -21,6 +21,7 @@ from blueprints._helpers import (
     get_piece_conversion, calc_piece_quantity, check_piece_mismatch,
     validate_image_content, check_uploaded_image,
     match_label_to_row, detect_bg_color,
+    apply_user_rotation,
     compute_placement_expected_zhi,
 )
 from blueprints.ocr_engine import PaddleOCREngine, get_ocr_engine, OCR_MATCH_PROMPT_VERSION, ocr_preprocess_kind
@@ -28,6 +29,9 @@ from blueprints.ocr_pipeline import RecordImageProcessor
 from blueprints.ocr_log import set_log_context
 
 bp = Blueprint('inbound', __name__)
+
+# 2026-08-26: align shipping placement - sanma regex
+SANMA_RE = re.compile(r'(?<![\\d.])(\\d+(?:\\.\\d+)?)\\s*[yY]')
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -110,6 +114,20 @@ def inbound_records():
         start_date = start.isoformat()
         end_date = end.isoformat()
     groups = InboundRecord.get_groups(start_date, end_date)
+    total_orders = InboundOrder.count_by_date(today)
+
+    # 2026-08-26:placement images collection (per record)
+    placement_by_record = {}
+    for grp in groups:
+        for rec in grp.get('records', []):
+            pimgs = InboundPlacementImage.get_by_record(rec['id'])
+            if pimgs:
+                placement_by_record[rec['id']] = pimgs
+
+    def _eff_zhi(p):
+        mc = p.get('manual_count')
+        base = mc if mc is not None else (p.get('n_marks') or 0)
+        return -base if p.get('is_unload') else base
 
     units = ProductUnit.get_all()
     unit_list = [{
@@ -172,12 +190,27 @@ def inbound_records():
             # 已核查警告 (per-rule verified_warnings)
             item['verified_warnings'] = InboundRecord.get_verified_warnings(item['id'])
 
-            # 2026-09-03:placement 期望值兜底 — unit='支' + 备注无支数 → 用 quantity
-            _exp_zhi, _has_zhi = compute_placement_expected_zhi(
-                _remark, item.get('quantity') or '', item.get('unit') or ''
-            )
-            _matched_zhi = (not _has_zhi) or (abs(_total - _exp_zhi) <= 0.01)
-            _matched_san = (not _has_san) or (abs(_loose - _exp_san) <= 0.01)
+            # 2026-08-26:placement_match (align shipping semantics)
+            _pimgs = placement_by_record.get(item['id']) or []
+            _pm = False
+            if _pimgs:
+                _remark = item.get('remark') or ''
+                _total = sum(_eff_zhi(p) for p in _pimgs)
+                _loose = sum(p.get('loose_count', 0) for p in _pimgs)
+                # 2026-09-03:placement 期望值兜底 — unit='支' + 备注无支数 → 用 quantity
+                _exp_zhi, _has_zhi = compute_placement_expected_zhi(
+                    _remark, item.get('quantity') or '', item.get('unit') or ''
+                )
+                _san_m = list(SANMA_RE.finditer(_remark))
+                _exp_san = sum(float(x.group(1)) for x in _san_m)
+                if _exp_san == int(_exp_san):
+                    _exp_san = int(_exp_san)
+                _has_san = len(_san_m) > 0
+                _matched_zhi = (not _has_zhi) or (abs(_total - _exp_zhi) <= 0.01)
+                _matched_san = (not _has_san) or (abs(_loose - _exp_san) <= 0.01)
+                if (_has_zhi or _has_san) and _matched_zhi and _matched_san:
+                    _pm = True
+            item['placement_match'] = _pm
         group.update(summarize_remarks(group['records']))
         group['has_eco'] = any('环保' in r.get('product_name', '') for r in group['records'])
         group['has_jia_mian'] = any(
@@ -186,6 +219,47 @@ def inbound_records():
             for r in group['records']
         )
 
+
+    # 2026-08-26:placement_groups (group by product_name, same product specs rendered together)
+    placement_groups = {}
+    for grp in groups:
+        group_list = []
+        current = None
+        for rec in grp.get('records', []):
+            pimgs = placement_by_record.get(rec['id']) or []
+            if not pimgs:
+                continue
+            pn = (rec.get('product_name') or '').strip()
+            if current is None or current['product_name'] != pn:
+                current = {'product_name': pn, 'items': []}
+                group_list.append(current)
+            loose_total = sum(p.get('loose_count', 0) for p in pimgs)
+            remark = rec.get('remark') or ''
+            # 2026-09-03:placement 期望值兜底 — unit='支' + 备注无支数 → 用 quantity
+            expected_zhi, has_zhi = compute_placement_expected_zhi(
+                remark, rec.get('quantity') or '', rec.get('unit') or ''
+            )
+            san_m = list(SANMA_RE.finditer(remark))
+            expected_sanma = sum(float(x.group(1)) for x in san_m)
+            if expected_sanma == int(expected_sanma):
+                expected_sanma = int(expected_sanma)
+            has_sanma = len(san_m) > 0
+            current['items'].append({
+                'record_id': rec['id'],
+                'specification': rec.get('specification') or '',
+                'quantity': rec.get('quantity') or '',
+                'unit': rec.get('unit') or '',
+                'total': sum(_eff_zhi(p) for p in pimgs),
+                'loose_total': loose_total,
+                'remark': remark,
+                'expected_zhi': expected_zhi,
+                'has_zhi': has_zhi,
+                'expected_sanma': expected_sanma,
+                'has_sanma': has_sanma,
+                'images': pimgs,
+            })
+        if group_list:
+            placement_groups[grp['id']] = group_list
     # 2026-08-04:match-col 服务端不再渲染,改由 JS `_ensureMatchColumn`
     # 在首次有匹配结果时动态插入。所以这里不再算 record_worst_*_map /
     # has_match —— 那块逻辑下沉到 JS。
@@ -204,11 +278,14 @@ def inbound_records():
         groups=groups,
         page_title='入库记录',
         today=today,
+        total_orders=total_orders,
         start_date=start_date,
         end_date=end_date,
         unit_list=unit_list,
         piece_conversions=piece_conv_list,
         record_by_pk=record_by_pk,
+        placement_groups=placement_groups,
+        placement_by_record=placement_by_record,
     )
 
 
@@ -493,6 +570,282 @@ def api_v1_inbound_orders_move_record(record_id):
         return jsonify({'success': True})
     return jsonify({'success': False, 'error': '无法移动（已是首条/末条）'}), 400
 
+
+
+# 2026-08-26:inbound placement image API (align shipping / loading)
+# Source='placement' marks an image as 'do not OCR / AI match, only manual click counting'.
+# The placement_marks table is inbound_placement_marks (FK to inbound_images) to avoid FK conflicts.
+
+def _detect_cylinder_circles(image_path):
+    """Detect cylinder circles in placement image (OpenCV HoughCircles). Same heuristic as shipping."""
+    try:
+        import cv2
+        import math
+        img = cv2.imread(image_path)
+        if img is None:
+            return []
+        h, w = img.shape[:2]
+        scale = min(1.0, 1000.0 / max(w, h))
+        small = cv2.resize(img, None, fx=scale, fy=scale) if scale < 1 else img
+        gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+        gray = cv2.medianBlur(gray, 5)
+        min_r = max(6, int(min(small.shape[:2]) * 0.02))
+        max_r = int(max(small.shape[:2]) * 0.48)
+        found = []
+        for p2 in (18, 28, 42):
+            circles = cv2.HoughCircles(
+                gray, cv2.HOUGH_GRADIENT, dp=1.2,
+                minDist=int(min_r * 1.6), param1=50, param2=p2,
+                minRadius=min_r, maxRadius=max_r,
+            )
+            if circles is None:
+                continue
+            for c in circles[0]:
+                found.append((float(c[0]), float(c[1]), float(c[2])))
+        uniq = []
+        for (cx, cy, r) in found:
+            dup = False
+            for (ox, oy, or_) in uniq:
+                if math.hypot(cx - ox, cy - oy) < (r + or_) * 0.5:
+                    dup = True
+                    break
+            if not dup:
+                uniq.append((cx, cy, r))
+        result = []
+        for (cx, cy, r) in uniq:
+            result.append({
+                'x': round(cx / (w * scale), 4),
+                'y': round(cy / (h * scale), 4),
+                'rx': round(r / (w * scale), 4),
+                'ry': round(r / (h * scale), 4),
+            })
+        return result
+    except Exception:
+        current_app.logger.exception('cylinder detect failed: %s', image_path)
+        return []
+# 2026-08-26:inbound placement image API (align shipping / loading)
+# Source='placement' marks an image as 'do not OCR / AI match, only manual click counting'.
+# The placement_marks table is inbound_placement_marks (FK to inbound_images).
+
+def _inbound_placement_match_for_image(image_id):
+    """Compute whether the record's placement count matches remark expectation."""
+    img = InboundPlacementImage.get_by_id(image_id)
+    if not img:
+        return False, None
+    record_pk = img.get('record_pk')
+    if not record_pk:
+        return False, None
+    pimgs = InboundPlacementImage.get_by_record(record_pk)
+    if not pimgs:
+        return False, record_pk
+    rec = InboundRecord.get_by_id(record_pk) or {}
+    remark = rec.get('remark') or ''
+    total = sum((((p.get('manual_count') if p.get('manual_count') is not None else (p.get('n_marks') or 0)))
+                 * (-1 if p.get('is_unload') else 1)) for p in pimgs)
+    loose = sum(p.get('loose_count', 0) for p in pimgs)
+    # 2026-09-03:placement 期望值兜底 — unit='支' + 备注无支数 → 用 quantity
+    exp_zhi, has_zhi = compute_placement_expected_zhi(
+        remark, rec.get('quantity') or '', rec.get('unit') or ''
+    )
+    san_m = list(SANMA_RE.finditer(remark))
+    exp_san = sum(float(x.group(1)) for x in san_m)
+    if exp_san == int(exp_san):
+        exp_san = int(exp_san)
+    has_san = len(san_m) > 0
+    matched_zhi = (not has_zhi) or (abs(total - exp_zhi) <= 0.01)
+    matched_san = (not has_san) or (abs(loose - exp_san) <= 0.01)
+    return bool((has_zhi or has_san) and matched_zhi and matched_san), record_pk
+
+
+def _save_one_placement_upload(file, upload_dir):
+    """Save an uploaded file to upload_dir with placement-friendly filename. Same logic as shipping."""
+    import uuid as _uuid
+    safe_name = re.sub(r'[^A-Za-z0-9._-]', '_', os.path.basename(file.filename or 'image'))
+    filename = f"inb_placement_{datetime.now().strftime('%Y%m%d%H%M%S')}_{_uuid.uuid4().hex[:6]}_{safe_name}"
+    filepath = os.path.join(upload_dir, filename)
+    file.save(filepath)
+    try:
+        validate_image_content(filepath)
+    except ValueError as e:
+        try:
+            os.remove(filepath)
+        except OSError:
+            pass
+        raise ValueError(str(e))
+    return filepath, file.filename or filename
+
+
+@bp.route('/api/v1/inbound-orders/records/<int:record_id>/placement-images', methods=['POST'])
+def api_v1_inbound_orders_record_placement_upload(record_id):
+    set_log_context(biz='inbound', record_id=record_id)
+    record = InboundRecord.get_by_id(record_id)
+    if not record:
+        return jsonify({'success': False, 'error': 'record not found'}), 404
+    order = InboundOrder.get_by_id(record['order_pk'])
+    if order and order.get('is_locked'):
+        return jsonify({'success': False, 'error': 'order locked'}), 403
+    upload_dir, month_str = _get_upload_dir()
+    saved = []
+    files = request.files.getlist('image')
+    if files:
+        for f in files:
+            try:
+                filepath, original_name = _save_one_placement_upload(f, upload_dir)
+            except ValueError as e:
+                return jsonify({'success': False, 'error': str(e)}), 400
+            rotate_deg = request.form.get('rotate_deg')
+            try:
+                filepath = apply_user_rotation(filepath, rotate_deg)
+            except ValueError as e:
+                return jsonify({'success': False, 'error': str(e)}), 400
+            image_id = InboundPlacementImage.create(
+                order_pk=record['order_pk'], record_pk=record_id,
+                file_path=filepath, original_name=original_name,
+            )
+            rel_path = os.path.join(month_str, os.path.basename(filepath)).replace('\\', '/')
+            img = InboundPlacementImage.get_by_id(image_id)
+            saved.append({
+                'image_id': image_id, 'image': rel_path, 'original_name': original_name,
+                'sort_order': img['sort_order'], 'circles': [],
+            })
+    if not saved:
+        return jsonify({'success': False, 'error': 'no image provided'}), 400
+    for s in saved:
+        AuditLog.log('upload_placement_image', 'inbound_order', record['order_pk'],
+                     detail={'filename': s['image'], 'record_id': record_id})
+    return jsonify({'success': True, 'images': saved, 'count': len(saved)}), 201
+
+
+@bp.route('/api/v1/inbound-orders/records/<int:record_id>/placement-images', methods=['GET'])
+def api_v1_inbound_orders_record_placement_list(record_id):
+    images = InboundPlacementImage.get_by_record(record_id)
+    return jsonify({'success': True, 'images': images})
+
+
+@bp.route('/api/v1/inbound-orders/placement-images/<int:image_id>', methods=['DELETE'])
+def api_v1_inbound_orders_placement_delete(image_id):
+    img = InboundPlacementImage.get_by_id(image_id)
+    if not img:
+        return jsonify({'success': False, 'error': 'placement image not found'}), 404
+    order = InboundOrder.get_by_id(img['order_pk'])
+    if order and order.get('is_locked'):
+        return jsonify({'success': False, 'error': 'order locked'}), 403
+    InboundPlacementImage.delete(image_id)
+    return jsonify({'success': True})
+
+
+@bp.route('/api/v1/inbound-orders/placement-images/<int:image_id>', methods=['GET'])
+def api_v1_inbound_orders_placement_get(image_id):
+    img = InboundPlacementImage.get_by_id(image_id)
+    if not img:
+        return jsonify({'success': False, 'error': 'placement image not found'}), 404
+    return jsonify({'success': True, 'image': img})
+
+
+@bp.route('/api/v1/inbound-orders/placement-images/<int:image_id>/detect', methods=['POST'])
+def api_v1_inbound_orders_placement_detect(image_id):
+    img = InboundPlacementImage.get_by_id(image_id)
+    if not img:
+        return jsonify({'success': False, 'error': 'placement image not found'}), 404
+    circles = _detect_cylinder_circles(img['file_path'])
+    InboundPlacementImage.set_circles(image_id, circles)
+    return jsonify({'success': True, 'circles': circles})
+
+
+@bp.route('/api/v1/inbound-orders/placement-images/<int:image_id>/mark-scale', methods=['POST'])
+def api_v1_inbound_orders_placement_mark_scale(image_id):
+    img = InboundPlacementImage.get_by_id(image_id)
+    if not img:
+        return jsonify({'success': False, 'error': 'placement image not found'}), 404
+    data = request.get_json() or {}
+    try:
+        scale = float(data.get('scale', 1))
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'error': 'scale must be number'}), 400
+    scale = InboundPlacementImage.set_mark_scale(image_id, scale)
+    return jsonify({'success': True, 'scale': scale, 'marks': InboundPlacementImage.get_marks(image_id)})
+
+
+@bp.route('/api/v1/inbound-orders/placement-images/<int:image_id>/loose-count', methods=['POST'])
+def api_v1_inbound_orders_placement_loose_count(image_id):
+    img = InboundPlacementImage.get_by_id(image_id)
+    if not img:
+        return jsonify({'success': False, 'error': 'placement image not found'}), 404
+    data = request.get_json() or {}
+    count = InboundPlacementImage.set_loose_count(image_id, data.get('count', 0))
+    pm, record_id = _inbound_placement_match_for_image(image_id)
+    return jsonify({'success': True, 'loose_count': count, 'placement_match': pm, 'record_id': record_id})
+
+
+@bp.route('/api/v1/inbound-orders/placement-images/<int:image_id>/manual-count', methods=['POST'])
+def api_v1_inbound_orders_placement_manual_count(image_id):
+    img = InboundPlacementImage.get_by_id(image_id)
+    if not img:
+        return jsonify({'success': False, 'error': 'placement image not found'}), 404
+    data = request.get_json() or {}
+    raw = data.get('count')
+    if raw is None or raw == '':
+        count = None
+    else:
+        try:
+            count = int(round(float(raw)))
+        except (TypeError, ValueError):
+            return jsonify({'success': False, 'error': 'count must be number'}), 400
+    count = InboundPlacementImage.set_manual_count(image_id, count)
+    pm, record_id = _inbound_placement_match_for_image(image_id)
+    return jsonify({'success': True, 'manual_count': count, 'placement_match': pm, 'record_id': record_id})
+
+
+@bp.route('/api/v1/inbound-orders/placement-images/<int:image_id>/unload', methods=['POST'])
+def api_v1_inbound_orders_placement_unload(image_id):
+    img = InboundPlacementImage.get_by_id(image_id)
+    if not img:
+        return jsonify({'success': False, 'error': 'placement image not found'}), 404
+    data = request.get_json() or {}
+    raw = data.get('unload')
+    unload = bool(raw) if raw is not None else False
+    flag = InboundPlacementImage.set_unload(image_id, unload)
+    pm, record_id = _inbound_placement_match_for_image(image_id)
+    return jsonify({'success': True, 'is_unload': bool(flag), 'placement_match': pm, 'record_id': record_id})
+
+
+@bp.route('/api/v1/inbound-orders/placement-images/<int:image_id>/marks', methods=['POST'])
+def api_v1_inbound_orders_placement_mark_add(image_id):
+    img = InboundPlacementImage.get_by_id(image_id)
+    if not img:
+        return jsonify({'success': False, 'error': 'placement image not found'}), 404
+    data = request.get_json() or {}
+    try:
+        x = float(data.get('x_ratio'))
+        y = float(data.get('y_ratio'))
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'error': 'x_ratio/y_ratio must be numbers'}), 400
+    if not (0 <= x <= 1) or not (0 <= y <= 1):
+        return jsonify({'success': False, 'error': 'x_ratio/y_ratio must be 0~1'}), 400
+    r = data.get('r')
+    if r is not None:
+        try:
+            r = float(r)
+        except (TypeError, ValueError):
+            r = 0.0
+        if not (0 <= r <= 1):
+            r = 0.0
+    else:
+        r = 0.0
+    InboundPlacementImage.add_mark(image_id, x, y, mark_r=r)
+    pm, record_id = _inbound_placement_match_for_image(image_id)
+    return jsonify({'success': True, 'marks': InboundPlacementImage.get_marks(image_id),
+                    'placement_match': pm, 'record_id': record_id})
+
+
+@bp.route('/api/v1/inbound-orders/placement-images/<int:image_id>/marks/last', methods=['DELETE'])
+def api_v1_inbound_orders_placement_mark_undo(image_id):
+    img = InboundPlacementImage.get_by_id(image_id)
+    if not img:
+        return jsonify({'success': False, 'error': 'placement image not found'}), 404
+    marks = InboundPlacementImage.delete_last_mark(image_id)
+    pm, record_id = _inbound_placement_match_for_image(image_id)
+    return jsonify({'success': True, 'marks': marks, 'placement_match': pm, 'record_id': record_id})
 
 # ── AI 图片识别（双引擎：Moonshot + PaddleOCR + DeepSeek）──────
 @bp.route('/api/v1/inbound-orders/ai-recognize', methods=['POST'])
@@ -1186,29 +1539,3 @@ def api_v1_inbound_orders_image_match_status(image_id):
             'human_verified': bool(img.get('human_verified')),
         },
     })
-
-
-
-# site2: placement_groups rendering (stub loop with migration at correct position)
-def _migration_site2():
-    for grp in []:
-        for rec in grp.get('records', []):
-            remark = rec.get('remark') or ''
-            # 2026-09-03:placement 期望值兜底 — unit='支' + 备注无支数 → 用 quantity
-            expected_zhi, has_zhi = compute_placement_expected_zhi(
-                remark, rec.get('quantity') or '', rec.get('unit') or ''
-            )
-
-
-# site3: _inbound_placement_match_for_image (stub function with migration at correct position)
-def _migration_site3(image_id):
-    rec = {}
-    remark = rec.get('remark') or ''
-    total = 0
-    loose = 0
-    # 2026-09-03:placement 期望值兜底 — unit='支' + 备注无支数 → 用 quantity
-    exp_zhi, has_zhi = compute_placement_expected_zhi(
-        remark, rec.get('quantity') or '', rec.get('unit') or ''
-    )
-    matched_zhi = (not has_zhi) or (abs(total - exp_zhi) <= 0.01)
-    matched_san = (not has_san) or (abs(loose - exp_san) <= 0.01)

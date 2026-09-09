@@ -7,10 +7,11 @@
 import os
 import re
 import base64
+import uuid
 from datetime import date, timedelta, datetime
 from flask import Blueprint, render_template, request, jsonify, current_app, session, abort
 from models import (
-    LoadingOrder, LoadingOrderRecord, LoadingOrderImage, ProductUnit, PieceConversion, get_db, AuditLog,
+    LoadingOrder, LoadingOrderRecord, LoadingOrderImage, LoadingPlacementImage, ProductUnit, PieceConversion, get_db, AuditLog,
     OcrMatchEvent,
     classify_record, CategoryPrompt,
 )
@@ -20,16 +21,24 @@ from blueprints._helpers import (
     get_piece_conversion, calc_piece_quantity, check_piece_mismatch,
     validate_image_content, check_uploaded_image,
     match_label_to_row, detect_bg_color,
+    compute_placement_expected_zhi, apply_user_rotation,
 )
 from blueprints.ocr_engine import PaddleOCREngine, get_ocr_engine, OCR_MATCH_PROMPT_VERSION, ocr_preprocess_kind
 from blueprints.ocr_pipeline import RecordImageProcessor
 from blueprints import _helpers
 from models._db import get_db
 from blueprints.ocr_log import set_log_context
+# 2026-09-09: 拷贝纸/日本纸 共享常量 + 判定函数(对齐出货,出货 9/9 已加)
+# 跨 blueprint import:shipping.py 不反向 import loading.py,无循环风险。
+from blueprints.shipping import COPY_PAPER_LABEL_SOURCE, _is_copy_paper_item
 
 bp = Blueprint('loading', __name__)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# 2026-09-09: 散码正则(对齐 shipping.py:SANMA_RE)
+# 匹配「5y」「5 y」「3Y」等形式,且前面不能是数字/小数点(避免吃掉码数如 3.5y 被误读成 5y)
+SANMA_RE = re.compile(r'(?<![\d.])(\d+)\s*[yY]')
 
 # 行级图 OCR pipeline 共用处理器(装柜专用,显式注入 LoadingOrderImage)
 # 替代端点内嵌的 OCR + AI 比对代码(2026-08-19 抽取到 ocr_pipeline)。
@@ -61,6 +70,62 @@ def _as_bool(value, default=True):
 def _get_upload_dir():
     """薄包装，返回 (upload_dir, month_str)。"""
     return get_helpers_upload_dir()
+
+
+def _detect_cylinder_circles(image_path):
+    """用 OpenCV HoughCircles 检测圆柱端面(正圆),返回归一化圆列表。
+
+    每个圆: {x, y, rx, ry},其中 (x, y) 为圆心(相对宽/高 0~1),
+    rx = 半径/宽, ry = 半径/高。检测不到或出错返回 []。
+    仅适用于圆柱端面正对镜头(圆形可见)的摆放照。
+    (对齐 shipping.py:_detect_cylinder_circles)
+    """
+    try:
+        import cv2
+        import math
+        img = cv2.imread(image_path)
+        if img is None:
+            return []
+        h, w = img.shape[:2]
+        scale = min(1.0, 1000.0 / max(w, h))
+        small = cv2.resize(img, None, fx=scale, fy=scale) if scale < 1 else img
+        gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+        gray = cv2.medianBlur(gray, 5)
+        min_r = max(6, int(min(small.shape[:2]) * 0.02))
+        max_r = int(max(small.shape[:2]) * 0.48)
+        found = []
+        # 多次尝试不同累加阈值,提升召回(避免漏检),最后去重
+        for p2 in (18, 28, 42):
+            circles = cv2.HoughCircles(
+                gray, cv2.HOUGH_GRADIENT, dp=1.2,
+                minDist=int(min_r * 1.6), param1=50, param2=p2,
+                minRadius=min_r, maxRadius=max_r,
+            )
+            if circles is None:
+                continue
+            for c in circles[0]:
+                found.append((float(c[0]), float(c[1]), float(c[2])))
+        uniq = []
+        for (cx, cy, r) in found:
+            dup = False
+            for (ox, oy, or_) in uniq:
+                if math.hypot(cx - ox, cy - oy) < (r + or_) * 0.5:
+                    dup = True
+                    break
+            if not dup:
+                uniq.append((cx, cy, r))
+        result = []
+        for (cx, cy, r) in uniq:
+            result.append({
+                'x': round(cx / (w * scale), 4),
+                'y': round(cy / (h * scale), 4),
+                'rx': round(r / (w * scale), 4),
+                'ry': round(r / (h * scale), 4),
+            })
+        return result
+    except Exception:
+        current_app.logger.exception('圆柱端面检测失败: %s', image_path)
+        return []
 
 
 def _build_suggestion_text(img: dict, record: dict | None) -> str:
@@ -95,6 +160,13 @@ def loading_orders():
         start_date = start.isoformat()
         end_date = end.isoformat()
     groups = LoadingOrderRecord.get_grouped(start_date, end_date)
+
+    # 2026-09-09: 摆放图按 record 预加载(数点匹配 + 模板按记录渲染靠它),
+    # 与 shipping 一致:用单独的 placement_by_record 而非混入 OCR/AI 图。
+    placement_by_record = {}
+    for grp in groups:
+        for rec in grp.get('records', []):
+            placement_by_record[rec['id']] = LoadingPlacementImage.get_by_record(rec['id'])
 
     units = ProductUnit.get_all()
     unit_list = [{
@@ -141,6 +213,31 @@ def loading_orders():
             else:
                 item['piece_hint'] = ''
                 item['piece_mismatch'] = ''
+
+            # 2026-09-09: 数点匹配标记 —— 供操作列「点数」按钮加绿框。
+            # 匹配 = 该记录有摆放图,且 支合计==备注支期望, 且(无散码期望 或 散码合计==备注散码期望)
+            # 装柜独有 is_unload(卸载货物 → 支数取负),与出货页 _eff_zhi 唯一差异点。
+            _pimgs = placement_by_record.get(item['id']) or []
+            _pm = False
+            if _pimgs:
+                _remark = item.get('remark') or ''
+                _qty = item.get('quantity') or ''
+                _unit = item.get('unit') or ''
+                _total = 0
+                _loose = 0
+                for p in _pimgs:
+                    _base = p['manual_count'] if p['manual_count'] is not None else (p.get('n_marks') or 0)
+                    _total += -_base if p.get('is_unload') else _base
+                    _loose += p.get('loose_count') or 0
+                _exp_zhi, _has_zhi = compute_placement_expected_zhi(_remark, _qty, _unit)
+                _san_m = list(SANMA_RE.finditer(_remark))
+                _exp_san = sum(int(x.group(1)) for x in _san_m)
+                _has_san = len(_san_m) > 0
+                _matched_zhi = (not _has_zhi) or (abs(_total - _exp_zhi) <= 0.01)
+                _matched_san = (not _has_san) or (abs(_loose - _exp_san) <= 0.01)
+                if (_has_zhi or _has_san) and _matched_zhi and _matched_san:
+                    _pm = True
+            item['placement_match'] = _pm
         group.update(summarize_remarks(group['records']))
 
     order_images = LoadingOrderImage.get_all_by_orders(
@@ -1023,6 +1120,307 @@ def _summarize_loading_group(group: dict) -> dict:
     return {**group, "total": total, "has_image": has_image, "stats": stats}
 
 
+# ── 摆放图 + 交互式点数清点(对齐出货页 placement 体系,库表用 loading_placement_marks) ──
+def _compute_loading_placement_match(record_pk):
+    """按装柜记录已上传的所有摆放图,计算支数+散码累计与目标是否吻合(供端点 mutation 即时回传)。"""
+    rec = LoadingOrderRecord.get_by_id(record_pk)
+    if not rec:
+        return False
+    images = LoadingPlacementImage.get_by_record(record_pk)
+    total = 0
+    loose = 0
+    for im in images:
+        eff = im['manual_count'] if im['manual_count'] is not None else im['n_marks']
+        total += -eff if im.get('is_unload') else eff
+        loose += im.get('loose_count') or 0
+    remark = rec.get('remark') or ''
+    exp_zhi, has_zhi = compute_placement_expected_zhi(
+        remark, rec.get('quantity') or '', rec.get('unit') or ''
+    )
+    san_m = list(SANMA_RE.finditer(remark))
+    exp_san = sum(int(x.group(1)) for x in san_m)
+    has_san = len(san_m) > 0
+    matched_zhi = (not has_zhi) or (abs(total - exp_zhi) <= 0.01)
+    matched_san = (not has_san) or (abs(loose - exp_san) <= 0.01)
+    return (has_zhi or has_san) and matched_zhi and matched_san
+
+
+def _placement_match_response(img: dict):
+    """placement 端点 mutation 后的标准回报字段(供 5 个端点末尾调用)。
+
+    返回 dict,直接 merge 进 jsonify({...})。
+    """
+    record_pk = img.get('record_pk')
+    return {
+        'record_id': record_pk,
+        'placement_match': _compute_loading_placement_match(record_pk) if record_pk else False,
+    }
+
+
+@bp.route('/api/v1/loading-orders/records/<int:record_id>/placement-images', methods=['POST'])
+def api_v1_loading_orders_record_placement_upload(record_id):
+    """上传装柜商品行的摆放图(多文件/单 base64),不触发 OCR,source='placement' → 201"""
+    set_log_context(biz='loading', record_id=record_id)
+    record = LoadingOrderRecord.get_by_id(record_id)
+    if not record:
+        return jsonify({'success': False, 'error': '记录不存在'}), 404
+    order = LoadingOrder.get_by_id(record['order_pk'])
+    if order and order.get('is_locked'):
+        return jsonify({'success': False, 'error': '该订单已锁定，无法上传摆放图'}), 403
+
+    upload_dir, month_str = _get_upload_dir()
+    saved = []
+    files = request.files.getlist('image')
+    if files:
+        for f in files:
+            try:
+                filepath, original_name = _save_one_uploaded_file(f, upload_dir)
+            except ValueError as e:
+                return jsonify({'success': False, 'error': str(e)}), 400
+            rotate_deg = request.form.get('rotate_deg')
+            try:
+                filepath = apply_user_rotation(filepath, rotate_deg)
+            except ValueError as e:
+                return jsonify({'success': False, 'error': str(e)}), 400
+            image_id = LoadingPlacementImage.create(
+                order_pk=record['order_pk'], record_pk=record_id,
+                file_path=filepath, original_name=original_name,
+            )
+            rel_path = os.path.join(month_str, os.path.basename(filepath)).replace('\\', '/')
+            img = LoadingPlacementImage.get_by_id(image_id)
+            saved.append({
+                'image_id': image_id, 'image': rel_path, 'original_name': original_name,
+                'sort_order': img['sort_order'], 'circles': [],
+            })
+    elif request.is_json:
+        data = request.get_json() or {}
+        try:
+            filepath, original_name = _save_one_base64_image(data.get('image', ''), upload_dir)
+        except ValueError as e:
+            return jsonify({'success': False, 'error': str(e)}), 400
+        rotate_deg = data.get('rotate_deg')
+        try:
+            filepath = apply_user_rotation(filepath, rotate_deg)
+        except ValueError as e:
+            return jsonify({'success': False, 'error': str(e)}), 400
+        image_id = LoadingPlacementImage.create(
+            order_pk=record['order_pk'], record_pk=record_id,
+            file_path=filepath, original_name=original_name,
+        )
+        rel_path = os.path.join(month_str, os.path.basename(filepath)).replace('\\', '/')
+        saved.append({
+            'image_id': image_id, 'image': rel_path, 'original_name': original_name,
+            'circles': [],
+        })
+    else:
+        return jsonify({'success': False, 'error': '未提供图片'}), 400
+
+    for s in saved:
+        AuditLog.log('upload_placement_image', 'loading_order', record['order_pk'],
+                     detail={'filename': s['image'], 'record_id': record_id})
+    return jsonify({'success': True, 'images': saved, 'count': len(saved)}), 201
+
+
+@bp.route('/api/v1/loading-orders/records/<int:record_id>/placement-images', methods=['GET'])
+def api_v1_loading_orders_record_placement_list(record_id):
+    """列出某装柜商品行所有摆放图(含计数点)。"""
+    images = LoadingPlacementImage.get_by_record(record_id)
+    return jsonify({'success': True, 'images': images})
+
+
+@bp.route('/api/v1/loading-orders/placement-images/<int:image_id>', methods=['DELETE'])
+def api_v1_loading_orders_placement_delete(image_id):
+    """删除一张摆放图(连带计数点 + 物理文件)。"""
+    ok = LoadingPlacementImage.delete(image_id)
+    if not ok:
+        return jsonify({'success': False, 'error': '摆放图不存在'}), 404
+    return jsonify({'success': True})
+
+
+@bp.route('/api/v1/loading-orders/placement-images/<int:image_id>', methods=['GET'])
+def api_v1_loading_orders_placement_get(image_id):
+    """获取单张摆放图(含计数点)。"""
+    img = LoadingPlacementImage.get_by_id(image_id)
+    if not img:
+        return jsonify({'success': False, 'error': '摆放图不存在'}), 404
+    return jsonify({'success': True, 'image': img})
+
+
+@bp.route('/api/v1/loading-orders/placement-images/<int:image_id>/detect', methods=['POST'])
+def api_v1_loading_orders_placement_detect(image_id):
+    """重新用 OpenCV 检测圆柱端面(可反复重试以提高召回)。返回 circles。"""
+    img = LoadingPlacementImage.get_by_id(image_id)
+    if not img:
+        return jsonify({'success': False, 'error': '摆放图不存在'}), 404
+    circles = _detect_cylinder_circles(img['file_path'])
+    LoadingPlacementImage.set_circles(image_id, circles)
+    return jsonify({'success': True, 'circles': circles})
+
+
+@bp.route('/api/v1/loading-orders/placement-images/<int:image_id>/mark-scale', methods=['POST'])
+def api_v1_loading_orders_placement_mark_scale(image_id):
+    """设置该摆放图计数数字的整体系缩放比例(弹框放大/缩小按钮)。body: {scale}。"""
+    img = LoadingPlacementImage.get_by_id(image_id)
+    if not img:
+        return jsonify({'success': False, 'error': '摆放图不存在'}), 404
+    data = request.get_json() or {}
+    try:
+        scale = float(data.get('scale', 1))
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'error': 'scale 必须是数字'}), 400
+    scale = LoadingPlacementImage.set_mark_scale(image_id, scale)
+    return jsonify({'success': True, 'scale': scale, 'marks': LoadingPlacementImage.get_marks(image_id), **_placement_match_response(img)})
+
+
+@bp.route('/api/v1/loading-orders/placement-images/<int:image_id>/loose-count', methods=['POST'])
+def api_v1_loading_orders_placement_loose_count(image_id):
+    """设置该摆放图的散码数量(点数弹框内「散码」按钮录入)。body: {count}。"""
+    img = LoadingPlacementImage.get_by_id(image_id)
+    if not img:
+        return jsonify({'success': False, 'error': '摆放图不存在'}), 404
+    data = request.get_json() or {}
+    try:
+        count = int(round(float(data.get('count', 0))))
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'error': 'count 必须是数字'}), 400
+    count = LoadingPlacementImage.set_loose_count(image_id, count)
+    return jsonify({'success': True, 'count': count, **_placement_match_response(img)})
+
+
+@bp.route('/api/v1/loading-orders/placement-images/<int:image_id>/manual-count', methods=['POST'])
+def api_v1_loading_orders_placement_manual_count(image_id):
+    """设置该摆放图直接输入的支数(点数弹框内「输入支数」按钮录入)。body: {count}。
+
+    count 为 null / 空字符串 → 清除直接输入,回退到点击计数(n_marks);
+    为整数(含 0) → 以该值为准,并清空点击计数点(二者互斥)。
+    """
+    img = LoadingPlacementImage.get_by_id(image_id)
+    if not img:
+        return jsonify({'success': False, 'error': '摆放图不存在'}), 404
+    data = request.get_json() or {}
+    raw = data.get('count')
+    if raw is None or raw == '':
+        count = None
+    else:
+        try:
+            count = int(round(float(raw)))
+        except (TypeError, ValueError):
+            return jsonify({'success': False, 'error': 'count 必须是数字'}), 400
+    count = LoadingPlacementImage.set_manual_count(image_id, count)
+    return jsonify({'success': True, 'manual_count': count, **_placement_match_response(img)})
+
+
+@bp.route('/api/v1/loading-orders/placement-images/<int:image_id>/marks', methods=['POST'])
+def api_v1_loading_orders_placement_mark_add(image_id):
+    """在摆放图上点一枚计数点。body: {x_ratio, y_ratio, r}(0~1)。返回最新计数点列表。"""
+    img = LoadingPlacementImage.get_by_id(image_id)
+    if not img:
+        return jsonify({'success': False, 'error': '摆放图不存在'}), 404
+    data = request.get_json() or {}
+    try:
+        x = float(data.get('x_ratio'))
+        y = float(data.get('y_ratio'))
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'error': 'x_ratio/y_ratio 必须是数字'}), 400
+    if not (0 <= x <= 1) or not (0 <= y <= 1):
+        return jsonify({'success': False, 'error': 'x_ratio/y_ratio 需在 0~1 区间'}), 400
+    r = data.get('r')
+    if r is not None:
+        try:
+            r = float(r)
+        except (TypeError, ValueError):
+            r = 0.0
+        if not (0 <= r <= 1):
+            r = 0.0
+    else:
+        r = 0.0
+    LoadingPlacementImage.add_mark(image_id, x, y, mark_r=r)
+    return jsonify({'success': True, 'marks': LoadingPlacementImage.get_marks(image_id), **_placement_match_response(img)})
+
+
+@bp.route('/api/v1/loading-orders/placement-images/<int:image_id>/marks/last', methods=['DELETE'])
+def api_v1_loading_orders_placement_mark_undo(image_id):
+    """撤销最近一枚计数点(连续可撤销)。返回剩余计数点列表。"""
+    img = LoadingPlacementImage.get_by_id(image_id)
+    if not img:
+        return jsonify({'success': False, 'error': '摆放图不存在'}), 404
+    marks = LoadingPlacementImage.delete_last_mark(image_id)
+    return jsonify({'success': True, 'marks': marks, **_placement_match_response(img)})
+
+
+# ─────────────────────────────────────────────────────────
+# Task 4 (2026-09-09): 装柜 record 级别拷贝纸/日本纸 上传端点(对齐出货 9/9)
+# ─────────────────────────────────────────────────────────
+
+@bp.route('/api/v1/loading-orders/records/<int:rid>/copy-paper-images', methods=['POST'])
+def api_v1_loading_orders_record_copy_paper_upload(rid):
+    """上传装柜商品行的拷贝纸/日本纸 标签照 → 写 loading_order_images(source='copy_paper_label')。
+
+    完全跳过 OCR pipeline(不做 OCR/AI 比对,仅供人工留档)。
+    支持 multipart(字段名 `image`)与 JSON base64(`image` 字段)。
+    锁单 → 403;记录不存在 → 404;无图 → 400。
+    """
+    set_log_context(biz='loading', record_id=rid, evt_src='copy_paper_upload')
+    record = LoadingOrderRecord.get_by_id(rid)
+    if not record:
+        return jsonify({'success': False, 'error': '记录不存在'}), 404
+    order = LoadingOrder.get_by_id(record['order_pk'])
+    if order and order.get('is_locked'):
+        return jsonify({'success': False, 'error': '该订单已锁定,无法上传拷贝纸/日本纸'}), 403
+
+    upload_dir, month_str = _get_upload_dir()
+
+    if request.is_json:
+        _payload = request.get_json(silent=True) or {}
+        source = (_payload.get('source') or '').strip()
+    else:
+        source = (request.form.get('source') or '').strip()
+    if source not in ('', 'label'):
+        return jsonify({'success': False, 'error': 'source 只支持 label'}), 400
+
+    files = request.files.getlist('image') or request.files.getlist('file')
+    if files:
+        try:
+            filepath, original_name = _save_one_uploaded_file(files[0], upload_dir)
+        except ValueError as e:
+            return jsonify({'success': False, 'error': str(e)}), 400
+    elif request.is_json:
+        _payload = request.get_json(silent=True) or {}
+        try:
+            filepath, original_name = _save_one_base64_image(
+                _payload.get('image', ''), upload_dir)
+        except ValueError as e:
+            return jsonify({'success': False, 'error': str(e)}), 400
+    else:
+        return jsonify({'success': False, 'error': '未提供图片(image)'}), 400
+
+    new_id = LoadingOrderImage.create(
+        record['order_pk'], filepath, original_name,
+        source=COPY_PAPER_LABEL_SOURCE, record_pk=rid)
+    img = LoadingOrderImage.get_by_id(new_id)
+    rel_path = os.path.join(month_str, os.path.basename(filepath)).replace('\\', '/')
+    img['file_path'] = filepath
+    img['relative_path'] = rel_path
+    AuditLog.log('upload_copy_paper_image', 'loading_order', record['order_pk'],
+                 detail={'filename': rel_path,
+                         'source': COPY_PAPER_LABEL_SOURCE, 'record_id': rid})
+    return jsonify({'success': True, 'image': img})
+
+
+@bp.route('/api/v1/loading-orders/placement-images/<int:image_id>/unload', methods=['POST'])
+def api_v1_loading_orders_placement_unload(image_id):
+    """勾选/取消「卸载货物」:持久化到库并即时重算该记录的比对角标。body: {unload}。"""
+    img = LoadingPlacementImage.get_by_id(image_id)
+    if not img:
+        return jsonify({'success': False, 'error': '摆放图不存在'}), 404
+    data = request.get_json() or {}
+    flag = bool(data.get('unload', False))
+    LoadingPlacementImage.set_unload(image_id, flag)
+    record_pk = img.get('record_pk')
+    pm = _compute_loading_placement_match(record_pk) if record_pk is not None else False
+    return jsonify({'success': True, 'is_unload': flag, 'placement_match': pm, 'record_id': record_pk})
+
+
 @bp.route("/m/loading")
 def mobile_loading():
     """移动端装柜今日列表(布局参照 /m/shipping-today)。"""
@@ -1084,3 +1482,9 @@ def api_v1_loading_orders_image_match_status(image_id):
             "human_verified": bool(img.get("human_verified")),
         },
     })
+
+
+# 2026-09-09: 之前的 _migration_site1/2/3 三个 stub 已删除 —
+# 数点匹配逻辑已合并到 /loading-orders 主 handler 的 record 富集循环里,
+# 摆放图渲染仍由前端 placementImageUploaded → refreshRecordBlock(GET /placement-images) 驱动,
+# 无需 server-side placement_groups 预渲染。

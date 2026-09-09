@@ -1,4 +1,11 @@
-// 拷贝纸/日本纸 行级图 + 张数 (2026-09-06)
+// 拷贝纸/日本纸 标签图 (2026-09-06 创建 / 2026-09-09 重构)
+//
+// **2026-09-09 重构**:点数已统一走 placement 体系(存 shipping_images(source='placement'),
+// 见 placement_count.js),标签图也迁入 shipping_images(source='copy_paper_label'),
+// copy_paper_images 表已废弃。本文件**只保留标签图(留档,不做 OCR/AI)路径**:
+//   - 标签图上传 → POST /records/<rid>/copy-paper-images (落 shipping_images)
+//   - 标签图删除 → DELETE /images/<id>  (通用订单图端点,自带锁单防御 + 审计)
+// 已删除:张数录入弹框 / sheet-count PATCH / .copy-paper-area 相关 DOM 操作(随点数走 placement 废弃)
 (function () {
     'use strict';
 
@@ -14,17 +21,11 @@
         window.openPlacementImageModal(recordPk, orderPk);
     }
 
-    // 接管 placement 上传回调（如果现有 placementImageUploaded 不可重入，可改写 placement_count.js
-    // 让它检测 window._copyPaperUploadSource 走 copy-paper 分支）
+    // 接管 placement 上传回调（placement_count.js 检测 _copyPaperUploadSource 分流到此）
     window.copyPaperImageUploaded = function (data, recordPk) {
         if (!data || !data.success) {
             alert('上传失败: ' + ((data && data.error) || '未知错误'));
             return;
-        }
-        var source = window._copyPaperUploadSource;
-        if (source === 'count' && data.image) {
-            // 弹张数输入框
-            openCopyPaperCountModal(data.image.id);
         }
         refreshCopyPaperBlock(recordPk);
         window._copyPaperUploadSource = null;
@@ -35,109 +36,24 @@
         openUploadModal(recordPk, orderPk, source);
     };
 
-    window.openCopyPaperCountModal = function (imageId) {
-        var modal = document.getElementById('copyPaperCountModal');
-        var input = document.getElementById('copyPaperCountInput');
-        var hidden = document.getElementById('copyPaperCountImageId');
-        if (!modal || !input || !hidden) return;
-        hidden.value = imageId;
-        input.value = '';
-        modal.style.display = 'flex';
-        setTimeout(function () { input.focus(); }, 50);
-    };
-
-    window.closeCopyPaperCountModal = function () {
-        var modal = document.getElementById('copyPaperCountModal');
-        if (modal) modal.style.display = 'none';
-    };
-
-    window.saveCopyPaperCount = function () {
-        var hidden = document.getElementById('copyPaperCountImageId');
-        var input = document.getElementById('copyPaperCountInput');
-        if (!hidden || !input || !hidden.value) return;
-        var val = input.value.trim();
-        var body = { sheet_count: val === '' ? null : parseInt(val, 10) };
-        fetch('/api/v1/shipping-orders/copy-paper-images/' + hidden.value + '/sheet-count', {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
-        }).then(function (r) { return r.json(); }).then(function (j) {
-            if (!j.success) { alert('保存失败: ' + (j.error || '')); return; }
-            closeCopyPaperCountModal();
-            // 找出该 image 所在 record 并刷新
-            var thumb = document.querySelector('.copy-paper-thumb[data-image-id="' + hidden.value + '"]');
-            if (thumb) {
-                var block = thumb.closest('.record-block');
-                if (block) {
-                    var recId = block.getAttribute('data-record-id');
-                    if (recId) refreshCopyPaperBlock(parseInt(recId, 10));
-                }
-            }
-        }).catch(function (err) {
-            alert('保存失败: ' + err);
-        });
-    };
-
     window.refreshCopyPaperBlock = function (recordPk) {
-        // 简化方案:整行刷新（防止局部替换搞错 DOM）
-        var block = document.querySelector('.record-block[data-record-id="' + recordPk + '"]');
-        if (!block) { location.reload(); return; }
-        location.reload();  // TODO: 后续可优化为局部刷新
+        // 简化方案:整页刷新（防止局部替换搞错 DOM）
+        // TODO: 后续可优化为局部刷新
+        location.reload();
     };
 
-    // 绑定缩略图上的删除按钮 + 张数输入框
     document.addEventListener('DOMContentLoaded', function () {
-        document.body.addEventListener('click', function (e) {
-            var del = e.target.closest('.copy-paper-delete-btn');
-            if (del) {
-                if (!confirm('删除这张图片?')) return;
-                var iid = del.getAttribute('data-image-id');
-                fetch('/api/v1/shipping-orders/copy-paper-images/' + iid, { method: 'DELETE' })
-                    .then(function (r) { return r.json(); }).then(function (j) {
-                        if (!j.success) { alert('删除失败'); return; }
-                        var thumb = del.closest('.copy-paper-thumb');
-                        if (thumb) {
-                            var block = thumb.closest('.record-block');
-                            var recId = block && block.getAttribute('data-record-id');
-                            if (recId) refreshCopyPaperBlock(parseInt(recId, 10));
-                        }
-                    });
-                return;
-            }
-        });
-        document.body.addEventListener('change', function (e) {
-            var inp = e.target.closest('.copy-paper-count-input');
-            if (inp) {
-                var iid = inp.getAttribute('data-image-id');
-                var val = inp.value.trim();
-                var body = { sheet_count: val === '' ? null : parseInt(val, 10) };
-                fetch('/api/v1/shipping-orders/copy-paper-images/' + iid + '/sheet-count', {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(body)
-                }).then(function (r) { return r.json(); }).then(function (j) {
-                    if (!j.success) { alert('保存失败'); return; }
-                    var thumb = inp.closest('.copy-paper-thumb');
-                    if (thumb) {
-                        var block = thumb.closest('.record-block');
-                        var recId = block && block.getAttribute('data-record-id');
-                        if (recId) refreshCopyPaperBlock(parseInt(recId, 10));
-                    }
-                });
-            }
-        });
-
-        // 2026-09-09: 拷贝纸标签图删除 (普通商品图区, 独立 handler)
+        // 2026-09-09: 拷贝纸标签图删除 (渲染在普通商品图区, 独立 handler)
         document.body.addEventListener('click', function (e) {
             var btn = e.target.closest('.copy-paper-label-del-btn');
             if (!btn) return;
             if (!confirm('删除这张标签图？')) return;
             var iid = btn.getAttribute('data-image-id');
-            fetch('/api/v1/shipping-orders/copy-paper-images/' + iid, { method: 'DELETE' })
+            // 2026-09-09: 标签图已存 shipping_images,复用通用订单图删除端点
+            fetch('/api/v1/shipping-orders/images/' + iid, { method: 'DELETE' })
                 .then(function (r) { return r.json(); })
                 .then(function (j) {
                     if (!j.success) { alert('删除失败: ' + (j.error || '')); return; }
-                    // 简单方案:整行刷新(后续可优化为局部)
                     location.reload();
                 })
                 .catch(function (err) { alert('删除失败: ' + err); });

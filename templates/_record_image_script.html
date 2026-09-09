@@ -92,6 +92,8 @@ function _ensureMatchColumn(table, targetRow, badgeHtml) {
     // 3) 表内其他兄弟行:插空 td(对齐)
     table.querySelectorAll('tbody tr').forEach(function (tr) {
         if (tr === targetRow) return;
+        // 警告行(record-warn-row)是 colspan 大 cell,不能追加空 td
+        if (tr.classList.contains('record-warn-row')) return;
         if (tr.querySelector('td.match-col')) return;
         var emptyTd = document.createElement('td');
         emptyTd.className = 'match-col';
@@ -106,8 +108,11 @@ function _ensureMatchColumn(table, targetRow, badgeHtml) {
 // 与 refreshRowMatchBadge 的区别:refresh =「更新」(假定 td 已存在);
 //                            init   =「创建」(先 _ensureMatchColumn 插列,再 refresh 填徽章)。
 function initRowMatchColumn(recordPk) {
-    var imgs = document.querySelectorAll('.img-item-record[data-record-pk="' + recordPk + '"]');
-    if (!imgs.length) return false;  // 没图就没徽章,不创建列
+    // 2026-09-09: 拷贝纸/日本纸的 label 图(img-item-copy-paper-label)只做留档、不做 OCR/AI 比对,
+    // 因此统计"可比对图"时要排除它。一个 record 若只剩 label 图(拷贝纸行的常态),
+    // 则不建 match-col —— AI 比对区域留空,避免出现误报的红色 ✗ 徽章。
+    var imgs = document.querySelectorAll('.img-item-record[data-record-pk="' + recordPk + '"]:not(.img-item-copy-paper-label)');
+    if (!imgs.length) return false;  // 没有可比对图就没徽章,不创建列
     var tr = document.querySelector('.record-table tr[data-record-id="' + recordPk + '"]');
     if (!tr) return false;
     var table = tr.closest('table');
@@ -472,6 +477,10 @@ function applyAsyncMatchResult(imageId, img, recordPk) {
     var source = img.match_source || 'local_fuzzy';
     if (status) {
         updateImageBadge(imageId, status, img.match_score, img.reason, source);
+    }
+    // 2026-08-21: 上传后跑 OCR + AI 时,若 DeepSeek 不可用,弹一次提示
+    if (img.deepseek_failed) {
+        _showDeepseekFallbackToast('⚠️ DeepSeek 不可用,本次 OCR 后用本地 RapidFuzz 匹配(准确度低于 AI)');
     }
     // 3) 背景色标签
     if (img.bg_color && !row1.querySelector('.bg-color-tag')) {
@@ -1039,7 +1048,24 @@ function bindFuzzyMatchButtons() {
 }
 
 // 22. bindAiJudgeButtons — AI 判别按钮
-// DeepSeek 比对 OCR 文字 vs 品名+规格，刷新判别图标
+// DeepSeek 比对 OCR 文字 vs 品名+规格,刷新判别图标
+// 2026-08-21: 失败回退本地时给用户弹一个非阻塞 toast,避免误以为 AI 没跑
+function _showDeepseekFallbackToast(msg) {
+    var t = document.getElementById('deepseekFallbackToast');
+    if (!t) {
+        t = document.createElement('div');
+        t.id = 'deepseekFallbackToast';
+        t.style.cssText = 'position:fixed;top:18px;left:50%;transform:translateX(-50%);'
+            + 'background:#fab1a0;color:#2d3436;padding:0.6rem 1.2rem;border-radius:8px;'
+            + 'font-size:0.9rem;font-weight:600;z-index:2500;box-shadow:0 4px 16px rgba(0,0,0,0.2);'
+            + 'max-width:90vw;text-align:center;';
+        document.body.appendChild(t);
+    }
+    t.textContent = msg;
+    t.style.display = 'block';
+    if (t._hideTimer) clearTimeout(t._hideTimer);
+    t._hideTimer = setTimeout(function () { t.style.display = 'none'; }, 4500);
+}
 function bindAiJudgeButtons() {
     document.querySelectorAll('.ai-judge-btn:not([data-bound])').forEach(function(btn){
         btn.setAttribute('data-bound','1');
@@ -1056,6 +1082,10 @@ function bindAiJudgeButtons() {
                     if (!data.success) { alert('AI 判别失败: ' + (data.error || '')); return; }
                     if (!refreshImageMatchUI(imgId, data.match_status, data.match_score, data.reason, data.match_source)) {
                         alert('AI判别结果: ' + (data.match_status || '无') + ' (界面未找到元素,请刷新)');
+                    }
+                    // 2026-08-21: DeepSeek 失败回退本地时给用户一个提示,避免用户误以为 AI 没跑
+                    if (data.deepseek_failed) {
+                        _showDeepseekFallbackToast('⚠️ DeepSeek 不可用,本次用本地 RapidFuzz 匹配(准确度低于 AI)');
                     }
                 })
                 .catch(function(){ self.disabled = false; self.textContent = 'AI判别'; alert('请求失败,请检查网络'); });

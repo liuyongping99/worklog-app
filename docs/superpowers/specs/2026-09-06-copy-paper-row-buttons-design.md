@@ -1,226 +1,160 @@
-# 拷贝纸 / 日本纸 行级双按钮设计（2026-09-06）
+# 拷贝纸 / 日本纸 行级标签图 + 点数（最终设计）
+
+> 本文档描述 `/shipping-records`（PC 端）与 `/m/shipping-today/order/<oid>`（移动端出货）中
+> **拷贝纸 / 日本纸** 两类商品行的实际实现状态。
+>
+> ⚠️ 历史说明：本功能初版（2026-09-06）曾设计独立表 `copy_paper_images` + `CopyPaperImage`
+> 模型 + 张数录入（`sheet_count` / `copy_paper_match` 徽章）。经 2026-09-09 两次重构，
+> **`copy_paper_images` 表已彻底废弃删除**，标签图直接存 `shipping_images`，点数复用 placement 体系。
+> 本文档为重构后的最终口径，不再适用旧表设计。
 
 ## 背景
 
-`/shipping-records`（PC 端）和 `/m/shipping-today/order/<oid>`（移动端出货）的操作列目前有 5 类按钮：移动 / 编辑 / 删除 / 行级图片（OCR + AI 比对）/ 点数（摆放图点击计数 + 散码）。
+`拷贝纸`（category_code=`0107`，单位 `令`）和 `日本纸`（category_code=`0105`，单位 `张`）两类商品的
+标签是**全手写体**，现有 OCR / AI 比对流水线对手写体基本无效；摆放图的「点击计数 / 散码」交互对纸类
+（整令 / 整张）也不适用。
 
-`拷贝纸`（category_code=`0107`，单位 `令`）和 `日本纸`（category_code=`0105`，单位 `张`）两类商品的标签是**全手写体**，现有 OCR / AI 比对流水线对手写体基本无效，摆放图的「点击计数 / 散码」交互对纸类（整令 / 整张）也不适用。
-
-需要在操作列给这两类商品的明细行新增两个**专用按钮**：
-1. **📷 标签**：跳过 OCR / AI 的纯上传，标签照片作为人工参考
-2. **📊 张数**：可反复上传图，每次上传后弹小弹框录入张数（整数），与 `quantity` 字段比对出徽章
+因此这两类商品行在出货页有两个专用能力：
+1. **🖼️ 标签**：跳过 OCR / AI 的纯上传，标签照片作为人工参考，混排在普通商品图区。
+2. **点数**：复用通用的摆放图计数体系（`shipping_images(source='placement')` +
+   `placement_count.js`），单位=令/张，无散码。
 
 ## 目标 / 非目标
 
 **目标**：
-- 仅在 `拷贝纸` / `日本纸` 行渲染这两个按钮，其他类别不受影响
-- 完全脱离现有 `ocr_pipeline.RecordImageProcessor`（不跑 PaddleOCR / DeepSeek）
+- 仅在 `拷贝纸` / `日本纸` 行渲染专用按钮，其他类别不受影响
+- 标签图**完全脱离** OCR pipeline（不跑 PaddleOCR / DeepSeek，不进 AI 比对列）
 - 锁单状态下隐藏（沿用 `lock-hide` 模式）
 - PC + 移动端出货同步支持
-- 数据模型独立，新表 `copy_paper_images`
+- 标签图与普通出货图**同表** `shipping_images`，靠 `source='copy_paper_label'` 区分
+- 点数复用 placement 体系（不要为纸类再造一套计数）
 
 **非目标**：
-- 不入库 / 不装柜移动端（仅 PC + 出货移动端）
+- 不建独立表（已废弃 `copy_paper_images`）
 - 不做 OCR 文字提取（手写体不可靠）
-- 不做备注 `X支` / `X令` / `X张` 解析（直接与 `quantity` 字段比对）
-- 不做按图的张数核对（仅行级汇总）
-- 不动现有 `PlacementImage` / `ShippingImage` 表
+- 不做「张数录入」(`sheet_count`) —— 点数已统一走 placement
+- 不动现有 `PlacementImage` / `ShippingImage` 表结构
 
 ## 数据模型
 
-### 新表 `copy_paper_images`
+**无独立表。** 标签图与普通出货图共存于 `shipping_images`：
 
 ```sql
-CREATE TABLE copy_paper_images (
+-- shipping_images（既有表，不新增结构）
+CREATE TABLE shipping_images (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    record_pk     INTEGER NOT NULL,
-    file_path     TEXT NOT NULL,
+    order_pk      INTEGER,
+    record_pk     INTEGER,          -- 关联到 shipping_records.id
+    file_path     TEXT,
     original_name TEXT,
-    source        TEXT NOT NULL CHECK (source IN ('label','count')),
-    sheet_count   INTEGER,
+    source        TEXT,             -- 普通图/placement/copy_paper_label/...
     created_at    TEXT DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (record_pk) REFERENCES shipping_records(id) ON DELETE CASCADE
+    ...
 );
-CREATE INDEX idx_copy_paper_record ON copy_paper_images(record_pk);
 ```
 
-字段语义：
-- `source='label'`：仅作参考照片，无 `sheet_count`（前端不渲染张数输入框）
-- `source='count'`：人工录入的张数（`sheet_count` 为非 NULL 整数时计入行级汇总）
+区分依据：
+- 标签图：`source = 'copy_paper_label'`（常量 `COPY_PAPER_LABEL_SOURCE = 'copy_paper_label'`）
+- 点数图：`source = 'placement'`（与普通按支商品共用 placement 体系）
 
 ## 后端
+
+### 常量（`blueprints/shipping.py:54`）
+
+```python
+COPY_PAPER_LABEL_SOURCE = 'copy_paper_label'
+```
 
 ### 类别检测（`blueprints/shipping.py`）
 
 ```python
-def _is_copy_paper_record(item: dict) -> bool:
-    """category_code ∈ {'0105','0107'}"""
-    code = _get_category_code(item)
-    return code in ('0105', '0107')
+def _is_copy_paper_item(item: dict) -> bool:
+    """category_code ∈ {'0105','0107'}，或品名含 '拷贝'/'日本纸' 兜底。"""
+    ...
 ```
 
-每条 record 进模板前多带字段：
+### 记录富化（`_enrich_copy_paper_for_item`，shipping.py:1999）
+
+每条 record 进模板前多带 3 个字段：
+
 - `item.is_copy_paper: bool`
-- `item.copy_paper_images: list[dict]` — `{id, file_path, source, sheet_count, created_at}`
-- `item.copy_paper_total: int` — `sum(img.sheet_count for img in images if img.sheet_count is not None)`
-- `item.copy_paper_match: 'green' | 'yellow' | 'partial' | None`
+- `item.label_images: list[dict]` — 该 record 下 `source='copy_paper_label'` 的
+  `shipping_images` 行（移动端缩略图用；PC 端由 order-images-area 按 source 直接渲染，不读此字段）
+- `item.has_label_image: bool` — 已上传标签图（标签按钮红框反馈）
 
-### 期望值计算（`blueprints/_helpers.py` 新增）
+> 优先复用调用方注入的 `item['_record_imgs_cache']`（PC 端图片分组循环已查好本行图），避免重复查库；
+> 否则回退 `ShippingImage.get_by_record(item['id'])`。
 
-```python
-def compute_copy_paper_expected_quantity(quantity, unit):
-    """直接从 quantity 取期望数；unit ∈ {'令','张'}"""
-    if unit not in ('令', '张'):
-        return (0.0, False)
-    try:
-        q = float(quantity)
-    except (ValueError, TypeError):
-        return (0.0, False)
-    return (q, q > 0)
-```
-
-**不**回退到 `compute_placement_expected_zhi`（语义不同：拷贝纸/日本纸本身以单位为计，quantity 就是期望值）。
-
-### 匹配判定（每行渲染时）
-
-```python
-total = sum(img['sheet_count'] for img in images if img['sheet_count'] is not None)
-counted_images = sum(1 for img in images if img['source'] == 'count' and img['sheet_count'] is not None)
-total_count_images = sum(1 for img in images if img['source'] == 'count')
-expected, has_expected = compute_copy_paper_expected_quantity(item['quantity'], item['unit'])
-if not has_expected:
-    match = None                          # 没填 quantity → 不出徽章
-elif total_count_images > 0 and counted_images < total_count_images:
-    match = 'partial'                     # 有图但部分还没录张数 → 黄灰徽章「未录完」
-elif total == expected:
-    match = 'green'                       # 一致（quantity 浮点会精确比较，拷贝纸/日本纸 通常整数）
-else:
-    match = 'yellow'                      # 不一致
-```
-
-### 端点（4 个，全部 `blueprints/shipping.py`）
+### 端点
 
 | Method | Path | 行为 |
 |---|---|---|
-| `POST` | `/api/v1/shipping-orders/records/<rid>/copy-paper-images` | 上传图（multipart）。body: `source ∈ {'label','count'}`；走 `_helpers.save_uploaded_image()`；跳过 OCR pipeline；锁单检查 |
-| `GET` | `/api/v1/shipping-orders/records/<rid>/copy-paper-images` | 列图（按 source 分组、created_at 升序） |
-| `DELETE` | `/api/v1/shipping-orders/copy-paper-images/<id>` | 删图 + 删磁盘文件；锁单检查 |
-| `PATCH` | `/api/v1/shipping-orders/copy-paper-images/<id>/sheet-count` | `{sheet_count: int\|null}`；null = 清空 |
+| `POST` | `/api/v1/shipping-orders/records/<rid>/copy-paper-images` | 上传标签图（multipart 或 JSON base64）；写 `ShippingImage.create(..., source=COPY_PAPER_LABEL_SOURCE, record_pk=rid)`；**跳过 OCR pipeline**；锁单 → 403 |
+| `DELETE` | `/api/v1/shipping-orders/images/<id>` | 通用删除端点（自带锁单防御 + 审计），标签图删除走这里（不再有 copy-paper 专用 DELETE 端点） |
 
-**锁单防御**：进入每个端点前查 `ShippingOrder.get_by_id(record.order_pk)` → 若 `is_locked=1` → 返回 403。
-
-**移动端**：4 个端点路径不变（`/m/shipping-today/order/<oid>` 也走 `/api/v1/...`），由 `mobile_shipping.py` 内部已经处理好的路由分发。
+**锁单防御**：写入/删除前查 `ShippingOrder.get_by_id(record.order_pk)` → 若 `is_locked=1` → 返回 403。
 
 ## 前端
 
 ### PC 端（`templates/shipping-records.html`）
 
-操作列（lines 914-924）内**仅 `is_copy_paper=True` 时**渲染：
+操作列（约 line 920-932）**仅 `is_copy_paper=True` 时**渲染两个按钮：
 
 ```html
 {% if item.is_copy_paper %}
-  <button class="copy-paper-label-btn lock-hide"
-          data-record-id="{{ item.id }}" data-order-id="{{ group.id }}"
-          title="上传标签图（拷贝纸/日本纸，无需 OCR）"
-          onclick="openCopyPaperUpload('{{ item.id }}', '{{ group.id }}', 'label')">📷 标签</button>
-  <button class="copy-paper-count-btn lock-hide"
-          data-record-id="{{ item.id }}" data-order-id="{{ group.id }}"
-          title="上传点数图并录入张数"
-          onclick="openCopyPaperUpload('{{ item.id }}', '{{ group.id }}', 'count')">📊 张数</button>
+<button class="btn btn-sm copy-paper-label-btn lock-hide{% if item.has_label_image %} has-label-image{% endif %}"
+        data-record-id="{{ item.id }}" data-order-id="{{ group.id }}" data-source="label"
+        onclick="openCopyPaperUpload('{{ item.id }}','{{ group.id }}','label')">🖼️</button>
+<button class="placement-add-btn lock-hide{% if item.placement_match %} placement-ok{% endif %}"
+        data-record-id="{{ item.id }}" data-order-id="{{ group.id }}"
+        onclick="openPlacementImageModal('{{ item.id }}','{{ group.id }}')">点数</button>
 {% endif %}
 ```
 
-每行底部新增缩略图区（紧接现有 placement-area 之后；仅在有图时渲染）：
-
-```html
-{% if item.is_copy_paper and item.copy_paper_images %}
-  <div class="copy-paper-area">
-    {% if item.copy_paper_match == 'green' %}
-      <span class="copy-paper-badge green">✓ 张数 {{ total }}/{{ expected }}</span>
-    {% elif item.copy_paper_match == 'yellow' %}
-      <span class="copy-paper-badge yellow">⚠ 张数不符 {{ total }}≠{{ expected }}</span>
-    {% elif item.copy_paper_match == 'partial' %}
-      <span class="copy-paper-badge partial">⊕ 部分已录 {{ total }}</span>
-    {% endif %}
-    {% for img in item.copy_paper_images %}
-      <div class="copy-paper-thumb" data-image-id="{{ img.id }}">
-        <img src="/upload/{{ img.file_path }}">
-        <span class="copy-paper-tag tag-{{ img.source }}">
-          {{ '标签' if img.source == 'label' else '点数' }}
-        </span>
-        {% if img.source == 'count' %}
-          <input class="copy-paper-count-input" type="number" min="0"
-                 value="{{ img.sheet_count if img.sheet_count is not none else '' }}"
-                 data-image-id="{{ img.id }}" placeholder="张数">
-        {% endif %}
-        <button class="copy-paper-delete-btn" data-image-id="{{ img.id }}">×</button>
-      </div>
-    {% endfor %}
-  </div>
-{% endif %}
-```
-
-### 弹框流程（`static/js/copy_paper.js` + `templates/_copy_paper_count_modal.html`）
-
-1. 点击 `📷 标签` 或 `📊 张数` → 复用 `_image_upload_modal.html` 弹上传框
-2. 上传 `source='count'` 的图成功后 → 自动打开新建的 `_copy_paper_count_modal.html`（单数字输入 + 保存按钮）
-3. 上传 `source='label'` 的图 → 直接关闭弹框，不弹张数输入
-4. 缩略图上的 `×` 按钮 → DELETE，刷新该行
-5. 缩略图上的张数输入框 `change` → PATCH 写回，刷新该行徽章
+- 行 `<tr>` 上带 `data-count-unit`（拷贝纸=`item.unit` 即令/张；否则 `支`）与 `data-has-loose`
+  （拷贝纸=`0`；否则 `1`），供 `placement_count.js` 参数化弹框。
+- 标签图渲染在普通商品图区 `order-images-area`，class 为 `.img-item-copy-paper-label`，
+  带 `.copy-paper-label-del-btn` 删除按钮（调用通用 `DELETE /images/<id>`）。
+- AI 比对列对 `copy_paper_label` 图**特判为空**（`initRowMatchColumn` 查询排除
+  `.img-item-copy-paper-label`），不渲染 match-badge / 人工核查按钮。
+- 订单锁定后若 `item.placement_match` 命中，操作列显示 `✓ 点数` 标记（与纯胶行一致）。
 
 ### 移动端（`templates/mobile/shipping-order.html`）
 
-仅 `/m/shipping-today/order/<oid>` 加同样的两个按钮 + 缩略图区。
-张数输入用 `prompt()` 或 inline `<input type=number>`（避免再造 mobile modal）。
-后端走同一套 `/api/v1/shipping-orders/...` 端点。
+- `📷 标签` 按钮（`m-copy-paper-label-btn`）→ 调相机/相册 → `POST .../copy-paper-images`。
+- `.m-copy-paper-area` 块渲染 `rec.label_images`，用 `img.relative_path` 拼 `/upload/...` URL。
+- 点数走独立点数页：`point-entry` 链接到 `shipping_placement_count(oid, record_id)`。
+- `blueprints/mobile_shipping.py:176` 在算 OCR 图时排除 `placement` 与 `copy_paper_label`，
+  避免标签图被误当作「最后一张 OCR 图」影响状态/详情。
 
-## 文件改动清单
+### JS
 
-| 文件 | 改动 |
+- `static/js/copy_paper.js`：**仅**处理标签图上传 + 删除（删除走通用 `/images/<id>`）。
+- `static/js/placement_count.js`：点数计数（参数化 `currentCountUnit` / `currentHasLoose`，
+  弹框显示「清点令数」/「清点张数」，拷贝纸无散码）。
+
+## 点数（复用 placement 体系）
+
+- 点数图存 `shipping_images(source='placement')`，与普通按支商品**同一条计数管线**。
+- `compute_placement_expected_zhi(remark, quantity_str, unit)`（helpers.py:421）已扩展到
+  `unit in ('支','令','张')`：无备注「X支」时，令/张直接以 `float(quantity_str)` 兜底为期望值。
+- 弹框标题/单位随 `data-count-unit` 动态切换为「清点令数」/「清点张数」。
+- 锁单后的「✓ 点数」标记由 `item.placement_match` 驱动，拷贝纸行同样适用。
+
+## 已废弃并移除（勿再引用）
+
+| 旧设计 | 说明 |
 |---|---|
-| `models/_init.py` | + `copy_paper_images` 表 DDL + 索引 |
-| `models/orders.py` | + `CopyPaperImage` 模型类（`create` / `get_by_record` / `list_by_record` / `delete` / `update_count`） |
-| `models/__init__.py` | re-export `CopyPaperImage` |
-| `blueprints/_helpers.py` | + `compute_copy_paper_expected_quantity(quantity, unit)` |
-| `blueprints/shipping.py` | + 4 端点 + `_is_copy_paper_record` + 每行渲染时附加 4 字段 |
-| `templates/shipping-records.html` | + 2 按钮 + 缩略图区 + 引用 `copy_paper.js` |
-| `templates/_copy_paper_count_modal.html` | **新建**：张数输入小弹框 |
-| `static/js/copy_paper.js` | **新建**：上传 / 录入 / 删除 / 徽章刷新 |
-| `static/css/app.css` | + `.copy-paper-*` 样式 |
-| `templates/mobile/shipping-order.html` | + 2 按钮 + 缩略图区 + inline 张数输入 |
-| `static/css/mobile.css` | + 移动端样式 |
-| `tests/test_copy_paper_images.py` | **新建**：表 CRUD + 4 端点 + 比较函数 + 锁单测试 |
+| 表 `copy_paper_images` | 2026-09-09 删除（DDL 移除 + DB `DROP TABLE`） |
+| 模型 `CopyPaperImage` | 2026-09-09 删除类及导出 |
+| `sheet_count` 字段 | 点数改走 placement，该字段恒为 NULL 会渲染误导徽章，已废弃 |
+| `copy_paper_total` / `copy_paper_match` / `copy_paper_expected` | 原「张数录入」产物，随点数走 placement 废弃 |
+| `compute_copy_paper_expected_quantity` | 2026-09-09 删除 |
+| `GET /copy-paper-images`、专用 `DELETE /copy-paper-images/<id>`、`PATCH .../sheet-count` | 2026-09-09 删除；删除改走通用 `DELETE /images/<id>` |
+| `templates/_copy_paper_count_modal.html` | 2026-09-09 删除 |
+| PC `.copy-paper-area` / `.copy-paper-badge` / `.copy-paper-thumb` / `.copy-paper-tag` 整块 CSS | 2026-09-09 清理（移动端 `.m-copy-paper-*` 仍在用） |
 
-## 测试计划
+## 验证
 
-`tests/test_copy_paper_images.py` 覆盖：
-
-1. **DDL**：表创建后字段齐全（断言 `pragma table_info`）
-2. **`CopyPaperImage.create`**：插入后 `id` 自增、`source` 校验
-3. **`CopyPaperImage.get_by_record` / `list_by_record`**：返回按 source 分组 / created_at 排序
-4. **`CopyPaperImage.update_count`**：接受 int 与 null
-5. **`CopyPaperImage.delete`**：级联清理磁盘文件（用 tmpdir fixture）
-6. **`compute_copy_paper_expected_quantity`**：
-   - `unit='令', q=5 → (5.0, True)`
-   - `unit='张', q=500 → (500.0, True)`
-   - `unit='支' → (0.0, False)`（不适用）
-   - `q=0 / None / 'abc' → (0.0, False)`
-7. **HTTP 端点**（用 `app.test_client`）：
-   - 上传 `source='label'` → 201，列图能查到
-   - 上传 `source='count'` → 201
-   - PATCH `sheet_count=100` → 行级 total=100
-   - 锁单后再上传 → 403
-   - DELETE → 200，行级缩略图消失
-8. **匹配判定**（fixture 构造 record + images）：
-   - 拷贝纸 (q=5令) + 3 张图 sheet_count=2+2+1 → match='green'
-   - 拷贝纸 (q=5令) + 1 张图 sheet_count=4 → match='yellow'
-   - 日本纸 (q=500张) + 无图 → match=None
-   - 拷贝纸 (q=0) + 有图 → match=None
-   - 拷贝纸 (q=5令) + 2 张 count 图（1 张 sheet_count=2，1 张 sheet_count=NULL）→ match='partial'
-
-## 风险 / 回滚
-
-- 新表 `copy_paper_images` 失败 → 删除 DDL 即可（无依赖）
-- 端点命名冲突 → 4 个路径都带 `copy-paper-images` 后缀，足够区分
-- 若 `classify_record()` 对 `拷贝纸/日本纸` 检测遗漏 → 用直接 JOIN `product_categories` 兜底
-- 回滚：删除 `_helpers.compute_copy_paper_expected_quantity`、4 端点、模板按钮、JS、CSS、新表
+`tools/verify_copy_paper_label_merge.py`（PC + 移动端渲染校验，无 JS 错误）与
+`tools/verify_label_merge_e2e.py`（上传→`shipping_images`、删→移除 回环测试）覆盖核心链路。

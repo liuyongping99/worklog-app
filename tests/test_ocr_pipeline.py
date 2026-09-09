@@ -82,19 +82,23 @@ class ExtractOcrTests(unittest.TestCase):
         self.tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
         self.tmp.write(_PNG())
         self.tmp.close()
-        self.processor = RecordImageProcessor(_StubImageModel)
 
     def tearDown(self):
         os.unlink(self.tmp.name)
 
+    def _makeprocessor(self, paddle_mock):
+        """构造一个 RecordImageProcessor, getter 返回给定的 paddle_mock。"""
+        return RecordImageProcessor(
+            _StubImageModel, ocr_engine_getter=lambda name: paddle_mock)
+
     @mock.patch('blueprints.ocr_pipeline.detect_bg_color')
-    @mock.patch('blueprints.ocr_pipeline.get_ocr_engine')
-    def test_returns_text_and_appends_bg_color_black(self, mock_factory, mock_bg):
+    def test_returns_text_and_appends_bg_color_black(self, mock_bg):
         """OCR + bg_color='black' → ocr_text 末尾追加 [标签背景: 黑色]。"""
-        mock_factory.return_value = _stub_paddle('磅布三文治 厚度1.0mm', 0.95)
+        paddle = _stub_paddle('磅布三文治 厚度1.0mm', 0.95)
+        processor = self._makeprocessor(paddle)
         mock_bg.return_value = 'black'
 
-        result = self.processor.extract_ocr(
+        result = processor.extract_ocr(
             self.tmp.name, record={'product_name': '磅布三文治'})
 
         self.assertEqual(result['bg_color'], 'black')
@@ -106,12 +110,12 @@ class ExtractOcrTests(unittest.TestCase):
         self.assertEqual(_StubImageModel.last_bg_color, {})
 
     @mock.patch('blueprints.ocr_pipeline.detect_bg_color')
-    @mock.patch('blueprints.ocr_pipeline.get_ocr_engine')
-    def test_writes_bg_color_when_image_id_given(self, mock_factory, mock_bg):
-        mock_factory.return_value = _stub_paddle('某商品', 0.8)
+    def test_writes_bg_color_when_image_id_given(self, mock_bg):
+        paddle = _stub_paddle('某商品', 0.8)
+        processor = self._makeprocessor(paddle)
         mock_bg.return_value = 'white'
 
-        self.processor.extract_ocr(
+        processor.extract_ocr(
             self.tmp.name, record=None, image_id=42)
 
         self.assertEqual(_StubImageModel.last_bg_color,
@@ -119,29 +123,30 @@ class ExtractOcrTests(unittest.TestCase):
 
     @mock.patch('blueprints.ocr_pipeline._read_cached_ocr')
     @mock.patch('blueprints.ocr_pipeline.detect_bg_color')
-    @mock.patch('blueprints.ocr_pipeline.get_ocr_engine')
-    def test_uses_cache_when_available(self, mock_factory, mock_bg, mock_cached):
+    def test_uses_cache_when_available(self, mock_bg, mock_cached):
         """缓存命中时不调用 PaddleOCR。"""
         mock_cached.return_value = 'cached_ocr_text'
         mock_bg.return_value = None
+        # 即使 getter 返回的 paddle 也应不被调用
+        paddle = mock.MagicMock()
+        processor = self._makeprocessor(paddle)
 
-        result = self.processor.extract_ocr(
+        result = processor.extract_ocr(
             self.tmp.name, record=None, image_id=99, use_cached=True)
 
         self.assertTrue(result['from_cache'])
         self.assertEqual(result['ocr_text'], 'cached_ocr_text')
-        mock_factory.assert_not_called()
+        paddle.extract_text_with_conf.assert_not_called()
 
     @mock.patch('blueprints.ocr_pipeline.detect_bg_color')
-    @mock.patch('blueprints.ocr_pipeline.get_ocr_engine')
-    def test_handles_paddle_exception(self, mock_factory, mock_bg):
+    def test_handles_paddle_exception(self, mock_bg):
         """PaddleOCR 抛异常时返回空 ocr_text + avg_conf=1.0,不阻断。"""
         paddle = mock.MagicMock()
         paddle.extract_text_with_conf.side_effect = RuntimeError('boom')
-        mock_factory.return_value = paddle
+        processor = self._makeprocessor(paddle)
         mock_bg.return_value = None
 
-        result = self.processor.extract_ocr(self.tmp.name, record=None)
+        result = processor.extract_ocr(self.tmp.name, record=None)
 
         self.assertEqual(result['ocr_text'], '')
         self.assertEqual(result['avg_conf'], 1.0)
@@ -151,16 +156,19 @@ class ExtractOcrTests(unittest.TestCase):
 # ── classify ──────────────────────────────────────────────────────
 
 class ClassifyTests(unittest.TestCase):
-    def setUp(self):
-        self.processor = RecordImageProcessor(_StubImageModel)
+    def _makeprocessor(self, paddle_mock, ds_mock):
+        """构造一个 RecordImageProcessor, getter 按 name 返回 paddle 或 deepseek。"""
+        return RecordImageProcessor(
+            _StubImageModel,
+            ocr_engine_getter=_engine_factory(paddle_mock, ds_mock))
 
-    @mock.patch('blueprints.ocr_pipeline.get_ocr_engine')
-    def test_returns_local_fuzzy_when_no_deepseek_key(self, mock_factory):
+    def test_returns_local_fuzzy_when_no_deepseek_key(self):
         """DeepSeek API_KEY 为空 → 走本地 RapidFuzz。"""
+        paddle = _stub_paddle()
         ds = _stub_deepseek(api_key='')
-        mock_factory.side_effect = _engine_factory(_stub_paddle(), ds)
+        processor = self._makeprocessor(paddle, ds)
 
-        result = self.processor.classify(
+        result = processor.classify(
             '磅布三文治 厚度1.0mm',
             {'product_name': '磅布三文治', 'specification': '1.0mm'})
 
@@ -169,22 +177,22 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(result['raw_response'], '')
         self.assertIn(result['status'], ('green', 'yellow', 'red'))
 
-    @mock.patch('blueprints.ocr_pipeline.get_ocr_engine')
-    def test_falls_back_to_local_on_deepseek_exception(self, mock_factory):
+    def test_falls_back_to_local_on_deepseek_exception(self):
         """DeepSeek.compare_single_record 抛异常 → fallback 到本地。"""
+        paddle = _stub_paddle()
         ds = _stub_deepseek(api_key='sk-test',
                             side_effect=RuntimeError('network down'))
-        mock_factory.side_effect = _engine_factory(_stub_paddle(), ds)
+        processor = self._makeprocessor(paddle, ds)
 
-        result = self.processor.classify(
+        result = processor.classify(
             '磅布三文治 厚度1.0mm',
             {'product_name': '磅布三文治', 'specification': '1.0mm'})
 
         self.assertEqual(result['source'], 'local_fuzzy')
 
-    @mock.patch('blueprints.ocr_pipeline.get_ocr_engine')
-    def test_uses_deepseek_when_available(self, mock_factory):
+    def test_uses_deepseek_when_available(self):
         """DeepSeek 返回 green → 走 deepseek 分支,prompt/raw_response 都带。"""
+        paddle = _stub_paddle()
         ds = _stub_deepseek(api_key='sk-test', compare_return={
             'match_status': 'green',
             'match_score': 95.0,
@@ -192,9 +200,9 @@ class ClassifyTests(unittest.TestCase):
             'prompt_text': 'PROMPT_TEXT',
             'raw_response': '{"ok": true}',
         })
-        mock_factory.side_effect = _engine_factory(_stub_paddle(), ds)
+        processor = self._makeprocessor(paddle, ds)
 
-        result = self.processor.classify(
+        result = processor.classify(
             '磅布三文治 厚度1.0mm',
             {'product_name': '磅布三文治', 'specification': '1.0mm'})
 
@@ -202,15 +210,20 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(result['status'], 'green')
         self.assertEqual(result['prompt_text'], 'PROMPT_TEXT')
 
-    @mock.patch('blueprints.ocr_pipeline.get_ocr_engine')
-    def test_returns_empty_when_ocr_text_blank(self, mock_factory):
+    def test_returns_empty_when_ocr_text_blank(self):
         """OCR 为空 → 跳过所有引擎,不打徽章。"""
-        result = self.processor.classify(
+        paddle = mock.MagicMock()
+        ds = mock.MagicMock()
+        processor = self._makeprocessor(paddle, ds)
+
+        result = processor.classify(
             '', {'product_name': 'X', 'specification': 'Y'})
 
         self.assertEqual(result['status'], '')
         self.assertEqual(result['source'], '')
-        mock_factory.assert_not_called()
+        # 都没调用
+        ds.compare_single_record.assert_not_called()
+        paddle.extract_text_with_conf.assert_not_called()
 
 
 # ── persist_match ─────────────────────────────────────────────────
@@ -274,7 +287,11 @@ class ProcessFullTests(unittest.TestCase):
         self.tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
         self.tmp.write(_PNG())
         self.tmp.close()
-        self.processor = RecordImageProcessor(_StubImageModel)
+        self.paddle = _stub_paddle('磅布三文治', 0.9)
+        self.ds = _stub_deepseek(api_key='')  # 走本地
+        self.processor = RecordImageProcessor(
+            _StubImageModel,
+            ocr_engine_getter=_engine_factory(self.paddle, self.ds))
 
     def tearDown(self):
         os.unlink(self.tmp.name)

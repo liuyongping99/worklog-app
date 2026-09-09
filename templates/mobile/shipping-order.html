@@ -104,22 +104,21 @@
       </div>
       <input type="file" accept="image/*" capture="environment" data-role="record-input" hidden>
       {% endif %}
+      {# 2026-09-09: 「📊 张数」按钮已删 —— 点数统一走下方独立点数页(point-entry,行 ~131),
+          与 PC 的 placement 体系同源;此处只保留标签图上传(不做 OCR/AI)。 #}
       {% if rec.is_copy_paper %}
       <button type="button" class="m-copy-paper-label-btn" data-record-id="{{ rec.id }}" data-source="label">📷 标签</button>
-      <button type="button" class="m-copy-paper-count-btn" data-record-id="{{ rec.id }}" data-source="count">📊 张数</button>
       {% endif %}
-      {% if rec.is_copy_paper and rec.copy_paper_images %}
+      {% if rec.is_copy_paper and rec.label_images %}
       <div class="m-copy-paper-area">
-        {% if rec.copy_paper_match == 'green' %}<span class="m-copy-paper-badge green">✓ {{ rec.copy_paper_total }}/{{ rec.copy_paper_expected }}</span>
-        {% elif rec.copy_paper_match == 'yellow' %}<span class="m-copy-paper-badge yellow">⚠ {{ rec.copy_paper_total }}≠{{ rec.copy_paper_expected }}</span>
-        {% elif rec.copy_paper_match == 'partial' %}<span class="m-copy-paper-badge partial">⊕ 部分已录</span>{% endif %}
-        {% for img in rec.copy_paper_images %}
+        {# 2026-09-09: 标签图已迁入 shipping_images(source='copy_paper_label'),
+           用 relative_path 拼 URL(原来直接塞全路径 file_path 会是 /upload/C:\... 死链);
+           已删 copy_paper_match 徽章(依赖废弃的 sheet_count,恒为 yellow 误导),
+           点数结果改由下方 place-result 展示(与 placement 体系同源)。 #}
+        {% for img in rec.label_images %}
         <div class="m-copy-paper-thumb">
-          <img src="/upload/{{ img.file_path }}">
-          <span class="m-copy-paper-tag tag-{{ img.source }}">{{ '标签' if img.source == 'label' else '点数' }}</span>
-          {% if img.source == 'count' %}
-          <input class="m-copy-paper-count-input" type="number" min="0" data-image-id="{{ img.id }}" value="{{ img.sheet_count if img.sheet_count is not none else '' }}">
-          {% endif %}
+          <img src="/upload/{{ img.relative_path }}">
+          <span class="m-copy-paper-tag tag-label">标签</span>
         </div>
         {% endfor %}
       </div>
@@ -187,11 +186,10 @@
 <script src="{{ url_for('static', filename='js/mobile_blur.js') }}"></script>
 <script src="{{ url_for('static', filename='js/mobile_detail.js') }}"></script>
 <script>
-// 拷贝纸/日本纸 (2026-09-06)
+// 拷贝纸/日本纸 标签图 (2026-09-06 创建 / 2026-09-09 精简)
+// 「📊 张数」按钮已删(点数走独立点数页),此处只处理标签图上传。
 document.body.addEventListener('click', function (e) {
-    var lblBtn = e.target.closest('.m-copy-paper-label-btn');
-    var cntBtn = e.target.closest('.m-copy-paper-count-btn');
-    var btn = lblBtn || cntBtn;
+    var btn = e.target.closest('.m-copy-paper-label-btn');
     if (!btn) return;
     var rid = btn.getAttribute('data-record-id');
     var source = btn.getAttribute('data-source');
@@ -209,35 +207,11 @@ document.body.addEventListener('click', function (e) {
             method: 'POST', body: fd
         }).then(function (r) { return r.json(); }).then(function (j) {
             if (!j.success) { alert('上传失败: ' + (j.error || '')); return; }
-            if (source === 'count') {
-                var ans = prompt('请输入张数（拷贝纸按令、日本纸按张）', '');
-                if (ans !== null && ans.trim() !== '') {
-                    var val = parseInt(ans.trim(), 10);
-                    fetch('/api/v1/shipping-orders/copy-paper-images/' + j.image.id + '/sheet-count', {
-                        method: 'PATCH',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ sheet_count: val })
-                    });
-                }
-            }
+            // 2026-09-09: count 分支(张数录入 sheet-count PATCH)随点数走 placement 废弃,已删
             location.reload();
         });
     };
     input.click();
-});
-
-document.body.addEventListener('change', function (e) {
-    var inp = e.target.closest('.m-copy-paper-count-input');
-    if (!inp) return;
-    var iid = inp.getAttribute('data-image-id');
-    var val = inp.value.trim();
-    fetch('/api/v1/shipping-orders/copy-paper-images/' + iid + '/sheet-count', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sheet_count: val === '' ? null : parseInt(val, 10) })
-    }).then(function (r) { return r.json(); }).then(function (j) {
-        if (!j.success) alert('保存失败');
-    });
 });
 </script>
 {% endblock %}

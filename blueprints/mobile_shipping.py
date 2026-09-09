@@ -7,7 +7,7 @@ from flask import Blueprint, render_template
 
 from models.orders import ShippingOrder, ShippingRecord, ShippingImage, PlacementImage, OcrMatchEvent
 from blueprints.ocr_log import set_log_context
-from blueprints.shipping import _enrich_copy_paper_for_item
+from blueprints.shipping import _enrich_copy_paper_for_item, COPY_PAPER_LABEL_SOURCE
 
 bp = Blueprint("mobile_shipping", __name__)
 
@@ -169,7 +169,12 @@ def shipping_order_detail(oid: int):
         # 2026-09-06: enrich copy-paper 字段(同步 PC shipping-records 的 _enrich_copy_paper_for_item)
         _enrich_copy_paper_for_item(rec)
         imgs = record_images[rec["id"]]
-        ocr_imgs = [i for i in imgs if i.get("source") != "placement"]
+        # 2026-09-09: 拷贝纸标签图(source='copy_paper_label')不做 OCR,不算 OCR 图,
+        # 否则会被当成"最后一张 OCR 图"影响状态/详情链接
+        ocr_imgs = [
+            i for i in imgs
+            if i.get("source") not in ("placement", COPY_PAPER_LABEL_SOURCE)
+        ]
         last_ocr = ocr_imgs[-1] if ocr_imgs else None
         base = (last_ocr.get("match_status") or "green") if last_ocr else None
         human_confirmed = bool(

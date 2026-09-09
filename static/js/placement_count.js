@@ -16,6 +16,32 @@
     var currentMarkScale = 1;           // 当前图计数数字的整体系缩放(放大/缩小按钮,持久化到库)
     var SCALE_STEP = 1.2;               // 每次点击缩放步进(约 ±20%)
     var SCALE_MIN = 0.3, SCALE_MAX = 4.0;
+    // 2026-09-09: 计数单位参数化(支/令/张),从 record tr[data-count-unit] 读;
+    //   拷贝纸=令 / 日本纸=张 / 普通支基产品=支。散码(has-loose)拷贝纸/日本纸=false。
+    var currentCountUnit = '支';
+    var currentHasLoose = true;
+
+    // 读 record tr 上的计数配置(单位 + 是否有散码)
+    function readCountConfig(recordId) {
+        if (!recordId) return;
+        var tr = document.querySelector('tr[data-record-id="' + recordId + '"]');
+        if (!tr) return;
+        var u = tr.getAttribute('data-count-unit');
+        if (u) currentCountUnit = u;
+        var hl = tr.getAttribute('data-has-loose');
+        currentHasLoose = (hl !== '0');
+        // 散码入口按 has-loose 显隐
+        var looseBtn = el('pcmLoose');
+        if (looseBtn) looseBtn.style.display = currentHasLoose ? '' : 'none';
+        // 2026-09-09: 弹框静态文字参数化 — 标题/KPI unit/title/act-hint 按 currentCountUnit(支/令/张) 更新
+        var cu2 = currentCountUnit;
+        var t = el('pcmTitle'); if (t) t.textContent = '🧮 清点' + cu2 + '数';
+        var cuu = el('pcmCurUnit'); if (cuu) cuu.textContent = cu2;
+        var cmu = el('pcmCumUnit'); if (cmu) cmu.textContent = cu2;
+        var man = el('pcmManual'); if (man) man.title = '直接输入' + cu2 + '数 (M) — 与点击计数等效';
+        var unw = el('pcmUnloadWrap'); if (unw) unw.title = '勾选后,本图清点' + cu2 + '数以负数计入累计(卸载/退货) (U)';
+        var hint = el('pcmActHint'); if (hint) hint.textContent = '点击图个位置计 1 ' + cu2 + '、数字键 1–9 直输';
+    }
 
     // ── 工具 ──
     function el(id) { return document.getElementById(id); }
@@ -31,17 +57,20 @@
         while ((m = re.exec(t)) != null) { san += parseInt(m[1], 10); hasSan = true; }
         return { zhi: zhi, hasZhi: hasZhi, san: san, hasSan: hasSan };
     }
-    // 单类对比角标:label 为「支」/「散」
+    // 单类对比角标:label 为单位名(支/令/张)或「散」
     function oneCompareBadge(label, actual, expected, hasExpected) {
         if (!hasExpected) return '<span class="placement-compare-badge none">备注无' + label + '</span>';
         if (actual === expected) return '<span class="placement-compare-badge ok">✓ ' + label + ' ' + actual + ' = 备注 ' + expected + '</span>';
         if (actual < expected) return '<span class="placement-compare-badge bad">✗ ' + label + ' ' + actual + ' &lt; 备注 ' + expected + '（差 ' + (expected - actual) + '）</span>';
         return '<span class="placement-compare-badge warn">⚠ ' + label + ' ' + actual + ' &gt; 备注 ' + expected + '（多 ' + (actual - expected) + '）</span>';
     }
-    // 返回支、散码两个独立对比角标的 HTML
-    function compareBadgesHtml(zhiTotal, sanmaTotal, remarkText) {
+    // 返回支(或令/张)、散码两个独立对比角标的 HTML
+    // 2026-09-09: unit/hasLoose 参数化 — 拷贝纸/日本纸无散码,只显示主单位角标
+    function compareBadgesHtml(zhiTotal, sanmaTotal, remarkText, unit, hasLoose) {
         var p = parseRemark(remarkText);
-        return oneCompareBadge('支', zhiTotal, p.zhi, p.hasZhi) + oneCompareBadge('散', sanmaTotal, p.san, p.hasSan);
+        var mainBadge = oneCompareBadge(unit || '支', zhiTotal, p.zhi, p.hasZhi);
+        if (!hasLoose) return mainBadge;
+        return mainBadge + oneCompareBadge('散', sanmaTotal, p.san, p.hasSan);
     }
 
     function findPlacementArea(recordId) {
@@ -95,6 +124,9 @@
         var recTr = document.querySelector('tr[data-record-id="' + recordId + '"]');
         var recName = recTr ? (recTr.querySelector('.product-name-cell') || {}).textContent || '' : '';
         var recSpec = recTr ? (recTr.querySelector('.spec-cell') || {}).textContent || '' : '';
+        // 2026-09-09: 读本 record 的计数单位(支/令/张)与是否有散码
+        var unit = (recTr && recTr.getAttribute('data-count-unit')) || '支';
+        var hasLoose = (!recTr || recTr.getAttribute('data-has-loose') !== '0');
         var total = 0;
         var looseTotal = 0;
         // 支数:直接输入优先,无则回退点击计数点(二者等效参与比对)。
@@ -110,11 +142,11 @@
         });
         // 支与支累加、散码与散码累加,分别与备注中的支、散码分开比较
         var remarkText = recTr ? (recTr.querySelector('.remark-cell') || {}).textContent || '' : '';
-        var cmpHtml = compareBadgesHtml(total, looseTotal, remarkText);
+        var cmpHtml = compareBadgesHtml(total, looseTotal, remarkText, unit, hasLoose);
 
         var html = '<div class="placement-record-head">'
             + '<span class="placement-record-name">' + escHtml(recName) + (recSpec ? ' · ' + escHtml(recSpec) : '') + '</span>'
-            + '<span class="placement-count-badge" data-total="' + total + '">已点 ' + total + ' 支</span>'
+            + '<span class="placement-count-badge" data-total="' + total + '">已点 ' + total + ' ' + unit + '</span>'
             + cmpHtml
             + '</div><div class="placement-images">';
         images.forEach(function (im, idx) {
@@ -125,13 +157,13 @@
             var recUnit = recTr ? (recTr.querySelector('.unit-cell') || {}).textContent || '' : '';
             var yardLabel = recQty ? (' / ' + recQty.trim() + ' ' + (recUnit || '').trim()) : '';
             var countLabel = im.is_unload
-                ? '<span class="placement-thumb-count unload">⬇ 卸载 ' + Math.abs(cnt) + ' 支</span>'
-                : '<span class="placement-thumb-count">' + cnt + ' 支</span>'
+                ? '<span class="placement-thumb-count unload">⬇ 卸载 ' + Math.abs(cnt) + ' ' + unit + '</span>'
+                : '<span class="placement-thumb-count">' + cnt + ' ' + unit + '</span>'
                   + (yardLabel ? '<span class="placement-thumb-yard">' + yardLabel + '</span>' : '');
             html += '<div class="placement-thumb-wrap" data-image-id="' + im.id + '" data-record-id="' + recordId + '" data-img-index="' + (idx + 1) + '">'
                 + '<img class="placement-thumb" src="/upload/' + im.relative_path + '" data-image-id="' + im.id + '" alt="摆放图">'
                 + countLabel
-                + (im.loose_count ? '<span class="placement-thumb-loose">散码 ' + im.loose_count + ' y</span>' : '')
+                + (hasLoose && im.loose_count ? '<span class="placement-thumb-loose">散码 ' + im.loose_count + ' y</span>' : '')
                 + '<button type="button" class="placement-del-btn lock-hide" data-image-id="' + im.id + '" title="删除此摆放图">×</button>'
                 + '</div>';
         });
@@ -157,6 +189,7 @@
         currentCountImageId = imageId;
         currentRecordId = recordId || currentUploadRecordIdFor(imageId);
         currentManualCount = null;
+        readCountConfig(currentRecordId);  // 2026-09-09: 读单位(支/令/张)+散码显隐
         el('pcmImg').src = src;
         // 重置(图片加载完会按真实尺寸重排徽章)
         el('pcmMarks').innerHTML = '';
@@ -253,14 +286,15 @@
 
         var chip = el('pcmDiffChip');
         if (chip) {
-            if (!hasZhi) { chip.className = 'pcm-diff-chip none'; chip.textContent = '备注无支数'; }
-            else if (total === expected) { chip.className = 'pcm-diff-chip ok'; chip.textContent = '已齐 ' + total + ' 支'; }
-            else if (total < expected) { chip.className = 'pcm-diff-chip bad'; chip.textContent = '差 ' + (expected - total) + ' 支'; }
-            else { chip.className = 'pcm-diff-chip warn'; chip.textContent = '多 ' + (total - expected) + ' 支'; }
+            var u = currentCountUnit;
+            if (!hasZhi) { chip.className = 'pcm-diff-chip none'; chip.textContent = '备注无' + u + '数'; }
+            else if (total === expected) { chip.className = 'pcm-diff-chip ok'; chip.textContent = '已齐 ' + total + ' ' + u; }
+            else if (total < expected) { chip.className = 'pcm-diff-chip bad'; chip.textContent = '差 ' + (expected - total) + ' ' + u; }
+            else { chip.className = 'pcm-diff-chip warn'; chip.textContent = '多 ' + (total - expected) + ' ' + u; }
         }
 
         var diffTxt = hasZhi
-            ? (total === expected ? '已齐' : (total < expected ? '差 ' + (expected - total) : '多 ' + (total - expected)) + ' 支')
+            ? (total === expected ? '已齐' : (total < expected ? '差 ' + (expected - total) : '多 ' + (total - expected)) + ' ' + currentCountUnit)
             : '无目标';
         var progTxt = el('pcmProgText');
         // v3: 主数字已经在卡片值显示,这里只保留 diff + 共几张
@@ -277,8 +311,11 @@
         var lv = el('pcmLooseVal');
         if (lv) {
             // v3: KPI 散码卡片自带 label + unit,这里只写数字,常显(0 时也显示)
+            // 2026-09-09: 拷贝纸/日本纸无散码 → 隐藏散码卡片
             lv.textContent = (looseTotal || 0);
-            lv.style.display = '';
+            lv.style.display = currentHasLoose ? '' : 'none';
+            var looseCard = lv.closest('.pcm-kpi-card');
+            if (looseCard) looseCard.style.display = currentHasLoose ? '' : 'none';
         }
 
         var posTxt = imgCount ? ('本图第 ' + curIdx + '/' + imgCount + ' 张') : '本图第 -/- 张';
@@ -647,7 +684,7 @@
                 case 'Escape': closePlacementCount(); break;
                 case 'z': case 'Z': e.preventDefault(); clickIf('pcmUndo'); break;
                 case 'u': case 'U': e.preventDefault(); clickIf('pcmUnload'); break;
-                case 'l': case 'L': e.preventDefault(); openLooseModal(); break;
+                case 'l': case 'L': e.preventDefault(); if (currentHasLoose) openLooseModal(); break;
                 case 'm': case 'M': e.preventDefault(); openManualModal(); break;
                 case '+': case '=': e.preventDefault(); if (currentCountImageId) adjustMarkScale(SCALE_STEP); break;
                 case '-': case '_': e.preventDefault(); if (currentCountImageId) adjustMarkScale(1 / SCALE_STEP); break;

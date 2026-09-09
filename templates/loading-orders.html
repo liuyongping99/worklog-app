@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 
 {% block content %}
 <style>
@@ -26,8 +26,8 @@
 .date-group[data-locked="1"] .lock-hide { display: none !important; }
 .date-group[data-locked="1"] .lock-show { display: inline-block !important; }
 .img-count-badge { background: var(--page-accent); color: white; padding: 0.15rem 0.4rem; border-radius: var(--radius-lg); font-size: var(--font-xs); }
-.loading-page .record-table th { font-size: var(--font-lg); }
-.loading-page .record-table td { font-size: var(--font-lg); }
+.loading-page .record-table th { font-size: var(--font-sm); }
+.loading-page .record-table td { font-size: var(--font-base); }
 .loading-page .img-area .img-item { position: relative; overflow: hidden; border-radius: var(--radius-lg); }
 .loading-page .img-area .img-item:hover .del-img-btn { opacity: 1; }
 .loading-page .ai-images-area .ai-img-wrap:hover .del-img-btn { opacity: 1 !important; }
@@ -96,58 +96,273 @@
 .manual-undo-btn { padding: 2px 8px; font-size: .7rem; background: #10b981; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
 .bg-color-tag { display: inline-block; }
 .loading-page .record-table .match-col { text-align: center; padding: .25rem; }
+/* 2026-08-29: 与出货/入库对齐 - 环保产品行 + 加面工艺 + 数量异常样式 */
+.loading-page .record-table tr.row-eco:not(.row-out-of-stock):not(.row-warn):not(.row-info) td { background-color: #f0f9f3; }
+.loading-page .record-table tr.row-eco:not(.row-out-of-stock):not(.row-warn):not(.row-info):hover td { background-color: #e3f5e8; }
+.loading-page .record-table tr.row-eco td:first-child { border-left-color: #2d8c4a; }
+.loading-page .eco-icon { color: #2d8c4a; margin-right: 0.25rem; font-size: 0.95rem; vertical-align: middle; }
+.loading-page .eco-icon + .jia-mian-icon { margin-left: 0.15rem; }
+.loading-page .jia-mian-icon { display: inline-block; color: #868e96; vertical-align: middle; line-height: 0; }
+.loading-page .record-table .eco-col { text-align: center; padding: 0.25rem; }
+.loading-page .record-table.no-eco .eco-col { display: none; }
+.loading-page .record-table tr.row-out-of-stock td { background: #ffe5e5; }
+.loading-page .record-table tr.row-out-of-stock td:first-child { border-left-color: #ff7675; }
+.loading-page .record-table tr.row-out-of-stock:hover td { background: #ffcccc; }
+.loading-page .record-table tr.row-out-of-stock .stock-icon { color: #ff7675; font-size: 1rem; margin-right: 2px; vertical-align: middle; }
+.loading-page .record-table tr.row-out-of-stock .qty-badge { background: #fab1a0; color: #ff7675; }
+
+/* 2026-08-15: 装柜页 摆放图(点数)功能 — 与出货页对齐 */
+.loading-page .record-table .actions-cell { white-space: nowrap; }
+.loading-page .record-table .edit-record-btn,
+.loading-page .record-table .del-record-btn,
+.loading-page .record-table .record-image-btn {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.8rem;
+    line-height: 1.2;
+    min-height: 26px;
+    box-sizing: border-box;
+    vertical-align: middle;
+}
+.loading-page .record-table .record-image-btn.has-image {
+    border: 2px solid #dc2626;
+}
+.loading-page .record-table .actions-cell .status-badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.18rem 0.5rem;
+    border-radius: 8px;
+    line-height: 1.2;
+    margin-right: 0.2rem;
+    white-space: nowrap;
+}
+.loading-page .record-table .actions-cell .placement-badge {
+    background: #e6f9ec;
+    color: #1e7e34;
+    border: 1px solid #27ae60;
+}
+.loading-page .placement-area {
+    margin: 0.5rem 0 0.25rem; padding: 0.6rem 0.75rem;
+    background: #fff9ec; border: 1px dashed #f0b94e; border-radius: 8px;
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.6rem; align-items: start;
+}
+.loading-page .placement-record-block {
+    background: #fff; border: 1px solid #ffeaa7; border-radius: 6px; padding: 0.5rem;
+}
+.loading-page .placement-record-head {
+    display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;
+    margin-bottom: 0.4rem; font-size: 0.85rem;
+}
+.loading-page .placement-record-name { font-weight: 600; color: #2d3436; }
+.loading-page .placement-count-badge {
+    background: #fdcb6e; color: #2d3436; padding: 0.15rem 0.5rem; border-radius: 10px;
+    font-size: 0.72rem; font-weight: 700;
+}
+.loading-page .placement-images { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.4rem; }
+.loading-page .placement-thumb-wrap {
+    position: relative; aspect-ratio: 1; overflow: hidden; border-radius: 4px; cursor: pointer;
+    border: 1px solid #ddd;
+}
+.loading-page .placement-thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
+.loading-page .placement-thumb-count {
+    position: absolute; top: 4px; left: 4px; background: rgba(220, 38, 38, 0.9); color: #fff;
+    padding: 1px 6px; border-radius: 8px; font-size: 0.7rem; font-weight: 700;
+}
+.loading-page .placement-thumb-count.unload { background: rgba(116, 185, 255, 0.95); }
+.loading-page .placement-thumb-yard { display: block; color: #636e72; font-size: 0.7rem; margin-top: 1px; }
+.loading-page .placement-del-btn {
+    position: absolute; top: 4px; right: 4px; background: rgba(200,30,30,0.85); color: white;
+    border: none; border-radius: 3px; padding: 1px 5px; font-size: 0.65rem; cursor: pointer;
+}
+.loading-page .placement-compare-badge {
+    display: inline-block; padding: 0.1rem 0.45rem; border-radius: 8px;
+    font-size: 0.72rem; font-weight: 600; margin-right: 0.25rem;
+}
+.loading-page .placement-compare-badge.ok    { background: #d3f3df; color: #1e7e34; }
+.loading-page .placement-compare-badge.bad   { background: #ffd3d3; color: #c0392b; }
+.loading-page .placement-compare-badge.warn  { background: #fff0c2; color: #8a6d00; }
+.loading-page .placement-compare-badge.none  { background: #f0f0f0; color: #636e72; }
+
+/* placement count modal — 复用出货页同款样式 */
+.loading-page .placement-count-modal {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 1100;
+    justify-content: center; align-items: center;
+}
+.loading-page .placement-count-modal.show { display: flex; }
+.loading-page .placement-count-modal .pcm-inner {
+    background: #1a1a1a; color: #f5f5f5; border-radius: 12px; max-width: 92vw; max-height: 94vh;
+    display: flex; flex-direction: column; overflow: hidden;
+    box-shadow: 0 25px 70px rgba(0,0,0,0.5);
+}
+.loading-page .placement-count-modal .pcm-identity {
+    display: flex; justify-content: space-between; align-items: center; padding: 0.6rem 0.85rem;
+    background: #2d3436; border-bottom: 1px solid #444;
+}
+.loading-page .placement-count-modal .pcm-title { font-weight: 700; font-size: 1.05rem; }
+.loading-page .placement-count-modal .pcm-id-record { color: #b2bec3; margin-left: 0.5rem; font-size: 0.85rem; }
+.loading-page .placement-count-modal .pcm-close-btn {
+    background: transparent; border: none; color: #fff; font-size: 1.2rem; cursor: pointer;
+    padding: 0.2rem 0.5rem; border-radius: 4px;
+}
+.loading-page .placement-count-modal .pcm-kpi {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; padding: 0.6rem 0.85rem;
+    background: #2d3436;
+}
+.loading-page .placement-count-modal .pcm-kpi-card {
+    background: rgba(255,255,255,0.05); padding: 0.5rem; border-radius: 8px; text-align: center;
+}
+.loading-page .placement-count-modal .pcm-kpi-label { font-size: 0.7rem; color: #b2bec3; }
+.loading-page .placement-count-modal .pcm-kpi-value { font-size: 1.4rem; font-weight: 700; }
+.loading-page .placement-count-modal .pcm-kpi-unit { font-size: 0.75rem; color: #b2bec3; margin-left: 2px; }
+.loading-page .placement-count-modal .pcm-body {
+    position: relative; flex: 1; min-height: 0; background: #000;
+}
+.loading-page .placement-count-modal .pcm-img-wrap { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+.loading-page .placement-count-modal .pcm-img { max-width: 100%; max-height: 100%; }
+.loading-page .placement-count-modal .pcm-marks { position: absolute; inset: 0; pointer-events: none; }
+.loading-page .placement-count-modal .pcm-mark {
+    position: absolute; transform: translate(-50%, -50%);
+    background: rgba(220, 38, 38, 0.95); color: #fff; border-radius: 50%;
+    width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;
+    font-size: 0.75rem; font-weight: 700;
+}
+.loading-page .placement-count-modal .pcm-actions {
+    display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.85rem;
+    background: #2d3436;
+}
+.loading-page .placement-count-modal .pcm-tb-btn {
+    background: rgba(255,255,255,0.08); color: #f5f5f5; border: 1px solid #555;
+    padding: 0.3rem 0.7rem; border-radius: 6px; font-size: 0.8rem; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 0.3rem;
+}
+.loading-page .placement-count-modal .pcm-tb-btn:hover { background: rgba(255,255,255,0.15); }
+.loading-page .placement-count-modal .pcm-tb-key {
+    background: rgba(255,255,255,0.15); padding: 0 5px; border-radius: 3px; font-size: 0.65rem;
+}
+.loading-page .placement-count-modal .pcm-tb-undo { background: rgba(253, 203, 110, 0.25); border-color: #b9770e; }
+.loading-page .placement-count-modal .pcm-tb-manual { background: rgba(116, 185, 255, 0.18); }
+.loading-page .placement-count-modal .pcm-tb-loose  { background: rgba(0, 184, 148, 0.15); }
+.loading-page .placement-count-modal .pcm-act-spacer { flex: 1; }
+.loading-page .placement-count-modal .pcm-act-hint { color: #b2bec3; font-size: 0.75rem; }
+.loading-page .placement-count-modal .pcm-side-zoom {
+    position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+    display: flex; flex-direction: column; gap: 4px;
+}
+.loading-page .placement-count-modal .pcm-corner-undo {
+    position: absolute; left: 12px; bottom: 12px;
+}
+.loading-page .placement-count-modal .pcm-shortcuts {
+    padding: 0.4rem 0.85rem; background: #2d3436; color: #b2bec3; font-size: 0.72rem;
+    text-align: center; border-top: 1px solid #444;
+}
+.loading-page .placement-count-modal .pcm-shortcuts b { color: #fdcb6e; }
+.loading-page .placement-count-modal .pcm-tb-toggle {
+    display: inline-flex; align-items: center; gap: 0.25rem;
+    background: rgba(255,255,255,0.08); padding: 0.3rem 0.6rem; border-radius: 6px;
+    border: 1px solid #555; font-size: 0.78rem; cursor: pointer;
+}
+.loading-page .placement-count-modal .pcm-tb-toggle.checked {
+    background: rgba(116, 185, 255, 0.25); border-color: #74b9ff;
+}
+.loading-page .placement-count-modal .pcm-kpi-bar {
+    height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; margin-top: 4px; overflow: hidden;
+}
+.loading-page .placement-count-modal .pcm-kpi-fill {
+    height: 100%; background: #00b894; transition: width 0.3s; width: 0%;
+}
+.loading-page .placement-count-modal .pcm-kpi-fill.over { background: #fdcb6e; }
+
+/* 散码 / 直输 弹框 */
+.loading-page .loose-count-modal, .loading-page .manual-count-modal {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1200;
+    justify-content: center; align-items: center;
+}
+.loading-page .loose-count-modal.show, .loading-page .manual-count-modal.show { display: flex; }
+.loading-page .loose-count-modal .lcm-inner,
+.loading-page .manual-count-modal .mcm-inner {
+    background: #fff; padding: 1.2rem; border-radius: 10px; min-width: 320px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+}
+.loading-page .loose-count-modal .lcm-title,
+.loading-page .manual-count-modal .mcm-title {
+    font-weight: 700; margin-bottom: 0.6rem; color: #2d3436;
+}
+.loading-page .loose-count-modal .lcm-body,
+.loading-page .manual-count-modal .mcm-body { margin-bottom: 0.6rem; }
+.loading-page .loose-count-modal input,
+.loading-page .manual-count-modal input {
+    width: 100%; padding: 0.5rem; border: 1px solid #dfe6e9; border-radius: 6px;
+    font-size: 1rem; box-sizing: border-box;
+}
+.loading-page .loose-count-modal .lcm-actions,
+.loading-page .manual-count-modal .mcm-actions {
+    display: flex; justify-content: flex-end; gap: 0.5rem;
+}
+.loading-page .loose-count-modal .lcm-cancel,
+.loading-page .loose-count-modal .lcm-save,
+.loading-page .manual-count-modal .mcm-cancel,
+.loading-page .manual-count-modal .mcm-save,
+.loading-page .manual-count-modal .mcm-clear {
+    padding: 0.4rem 0.9rem; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem;
+}
+.loading-page .loose-count-modal .lcm-cancel,
+.loading-page .manual-count-modal .mcm-cancel { background: #f0f0f0; color: #555; }
+.loading-page .loose-count-modal .lcm-save,
+.loading-page .manual-count-modal .mcm-save   { background: #00b894; color: #fff; }
+.loading-page .manual-count-modal .mcm-clear  { background: #fab1a0; color: #fff; }
+.loading-page .manual-count-modal .mcm-hint   { font-size: 0.75rem; color: #636e72; margin-top: 0.4rem; }
 </style>
 
-<div class="loading-page">
-    <div class="page-header">
-        <h2 class="card-title">📦 新建装柜记录</h2>
-        <div style="margin-left: auto; display: flex; gap: 0.5rem;">
+<div class="loading-page" data-page-node-id="G33VaFqDD278UO3hQWCpoB">
+    <div class="page-header" data-page-node-id="3oeUS09PH5hC3A01lPqMut">
+        <h2 class="card-title" data-page-node-id="emBBP1uhX6nuIcRw7Z7ghW">📦 新建装柜记录</h2>
+        <div style="margin-left: auto; display: flex; gap: 0.5rem;" data-page-node-id="gAyGABB2MdAobRdSGqRe1F">
 
         </div>
     </div>
 
     <!-- 日期筛选弹框 -->
-    <div class="date-range-modal" id="dateRangeModal">
-        <div class="date-range-content">
-            <h3>选择日期范围</h3>
-            <label>开始日期（当月1日）</label>
-            <input type="date" id="startDate" required>
-            <label>结束日期（当月最后一天）</label>
-            <input type="date" id="endDate" required>
-            <div class="date-range-error" id="dateError"></div>
-            <div class="date-range-actions">
-                <button class="btn btn-cancel" id="dateRangeCancel">取消</button>
-                <button class="btn btn-sm" id="dateRangeReset" style="background: #f1f3f5; color: #333;">重置为近10天</button>
-                <button class="btn btn-primary" id="dateRangeConfirm">确认</button>
+    <div class="date-range-modal" id="dateRangeModal" data-page-node-id="vNOm8E2b0Ig450wQuTkfsh">
+        <div class="date-range-content" data-page-node-id="RjsRQ4uHKFp6HtINn4mYBo">
+            <h3 data-page-node-id="hOD4q1Yx3dnaggoXDYAFgu">选择日期范围</h3>
+            <label data-page-node-id="LwdjiK1mBaynUADtyDFYCM">开始日期（当月1日）</label>
+            <input type="date" id="startDate" required data-page-node-id="YtdFaPWElPCosvbQvv5b5Z">
+            <label data-page-node-id="GUwg28XucHK2KaqMcc7pjB">结束日期（当月最后一天）</label>
+            <input type="date" id="endDate" required data-page-node-id="9wbJuC8xhWlv1EfUINHQcw">
+            <div class="date-range-error" id="dateError" data-page-node-id="OXoowlc2rUOz3pfP4tdeLG"></div>
+            <div class="date-range-actions" data-page-node-id="Dzs8uecOeASss9mlNhgtHT">
+                <button class="btn btn-cancel" id="dateRangeCancel" data-page-node-id="55XylIlL4WJFjqwcUz5Fda">取消</button>
+                <button class="btn btn-sm" id="dateRangeReset" style="background: #f1f3f5; color: #333;" data-page-node-id="0YpdmqbA6l6YVROeToEcMB">重置为近10天</button>
+                <button class="btn btn-primary" id="dateRangeConfirm" data-page-node-id="D7Q2RYX5bBSfDUTsvfCXb4">确认</button>
             </div>
         </div>
     </div>
 
     <!-- 新建装柜单 -->
-    <div style="background: #f8f9fa; padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem;">
-        <div id="addOrderForm" style="display: flex; gap: 1rem; align-items: flex-end;">
-            <div>
-                <label style="display: block; font-weight: 600; font-size: 0.85rem; margin-bottom: 0.25rem;">日期</label>
-                <input type="date" name="date" value="{{ today }}" required style="padding: 0.4rem 0.6rem; border: 1px solid #dfe6e9; border-radius: 6px; font-size: 0.9rem;">
+    <div style="background: #f8f9fa; padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem;" data-page-node-id="kqG3LtlxJc1maIG5BVAEys">
+        <div id="addOrderForm" style="display: flex; gap: 1rem; align-items: flex-end;" data-page-node-id="31PbfBPIbezszJIs3hVgdj">
+            <div data-page-node-id="dlBbALgsKEkJpATO5NDh6H">
+                <label style="display: block; font-weight: 600; font-size: 0.85rem; margin-bottom: 0.25rem;" data-page-node-id="39jay71W8CzwQ6OcxrDCxv">日期</label>
+                <input type="date" name="date" value="{{ today }}" required style="padding: 0.4rem 0.6rem; border: 1px solid #dfe6e9; border-radius: 6px; font-size: 0.9rem;" data-page-node-id="9i9xHTepVRn6BIvbbQGL9M">
             </div>
-            <div>
-                <label style="display: block; font-weight: 600; font-size: 0.85rem; margin-bottom: 0.25rem;">客户名称</label>
-                <input type="text" name="customer" value="央士" placeholder="客户名称（可选）" style="padding: 0.4rem 0.6rem; border: 1px solid #dfe6e9; border-radius: 6px; font-size: 0.9rem; width: 240px;">
+            <div data-page-node-id="VHFmCFlm3QLLyJ8MWjWQxs">
+                <label style="display: block; font-weight: 600; font-size: 0.85rem; margin-bottom: 0.25rem;" data-page-node-id="6HPwRsgBOwngJP0LarfqFD">客户名称</label>
+                <input type="text" name="customer" value="央士" placeholder="客户名称（可选）" style="padding: 0.4rem 0.6rem; border: 1px solid #dfe6e9; border-radius: 6px; font-size: 0.9rem; width: 240px;" data-page-node-id="C4KHRkGa4C5YZQ0h6TnPOt">
             </div>
-            <div style="display: flex; align-items: flex-end;">
-                <button type="button" id="addOrderBtn" class="btn btn-primary">创建订单</button>
+            <div style="display: flex; align-items: flex-end;" data-page-node-id="RFXIGX6ca7LhANtFuEBG6q">
+                <button type="button" id="addOrderBtn" class="btn btn-primary" data-page-node-id="WTaHe85XG6gY2AMykYcabw">创建订单</button>
             </div>
         </div>
     </div>
 
     <!-- 订单列表 -->
     <!-- 装柜明细全局标题 -->
-    <div style="display:flex; align-items:center; justify-content:space-between; padding:0.4rem 1rem; background:#f8f9fa; border-bottom:1px solid #dfe6e9; margin-bottom:0.5rem;">
-        <span style="font-size:1.5rem; font-weight:600; color:#00b894;">📋 装柜明细</span>
-        <div style="display:flex; align-items:center; gap:0.5rem;">
-            <input type="text" id="searchInput" placeholder="🔍 搜索客户/商品" style="padding:0.3rem 0.6rem; border:1px solid #dfe6e9; border-radius:6px; font-size:0.82rem; width:150px;">
-            <span style="font-size:0.8rem; color:#636e72;">{{ start_date }} ~ {{ end_date }}</span>
-            <button id="dateRangeBtn" class="btn btn-sm lock-hide" style="background:#f1f3f5; color:#333;" onclick="openDateRangeModal()">⚙️</button>
+    <div style="display:flex; align-items:center; justify-content:space-between; padding:0.4rem 1rem; background:#f8f9fa; border-bottom:1px solid #dfe6e9; margin-bottom:0.5rem;" data-page-node-id="sGFwXdXtcwywHotIbYnfQR">
+        <span style="font-size:1.5rem; font-weight:600; color:#00b894;" data-page-node-id="4lXr7kkKAwsHnY6RmBr9HE">📋 装柜明细</span>
+        <div style="display:flex; align-items:center; gap:0.5rem;" data-page-node-id="GwBYQHJQm88Fv4o3faVvuI">
+            <input type="text" id="searchInput" placeholder="🔍 搜索客户/商品" style="padding:0.3rem 0.6rem; border:1px solid #dfe6e9; border-radius:6px; font-size:0.82rem; width:150px;" data-page-node-id="jXw4iES3PxdAnvEowl5aMM">
+            <span style="font-size:0.8rem; color:#636e72;" data-page-node-id="F44H8cVD8gYPIz5EzwCWvo">{{ start_date }} ~ {{ end_date }}</span>
+            <button id="dateRangeBtn" class="btn btn-sm lock-hide" style="background:#f1f3f5; color:#333;" onclick="openDateRangeModal()" data-page-node-id="mUAtLvG7XqZyznQK2RfwuQ">⚙️</button>
         </div>
     </div>
 
@@ -156,8 +371,8 @@
         var kw = this.value.trim().toLowerCase();
         document.querySelectorAll('.loading-page .date-group').forEach(function(g) {
             var customer = (g.querySelector('.group-customer') || {}).textContent || '';
-            var productNames = Array.from(g.querySelectorAll('.record-table td:nth-child(2)')).map(function(td) { return td.textContent; }).join(' ');
-            var specs = Array.from(g.querySelectorAll('.record-table td:nth-child(3)')).map(function(td) { return td.textContent; }).join(' ');
+            var productNames = Array.from(g.querySelectorAll('.record-table td.product-name-cell')).map(function(td) { return td.textContent; }).join(' ');
+            var specs = Array.from(g.querySelectorAll('.record-table td.spec-cell')).map(function(td) { return td.textContent; }).join(' ');
             var match = !kw || customer.toLowerCase().includes(kw) || productNames.toLowerCase().includes(kw) || specs.toLowerCase().includes(kw);
             g.style.display = match ? '' : 'none';
         });
@@ -165,196 +380,205 @@
     </script>
     {% if groups %}
         {% for group in groups %}
-        <div class="date-group" data-order-pk="{{ group.order_pk }}" data-locked="{{ '1' if group.is_locked else '0' }}" data-img-cols="{{ group.img_cols | default(3) }}">
-            <div class="group-header" style="display:flex; align-items:center; justify-content:space-between; gap:0.5rem;">
-                <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
-                    <span class="group-date">{{ group.date }}</span>
+        <div class="date-group" data-order-pk="{{ group.order_pk }}" data-locked="{{ '1' if group.is_locked else '0' }}" data-img-cols="{{ group.img_cols | default(3) }}" data-page-node-id="KYRZE35gum9i3ehvcTGEYP">
+            <div class="group-header" style="display:flex; align-items:center; justify-content:space-between; gap:0.5rem;" data-page-node-id="35UBexSx2RAWvT5yPttT8K">
+                <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;" data-page-node-id="fb1E4YW4PWCosbIon1oDI0">
+                    <span class="group-date" data-page-node-id="A9HbqfNpvKqYtTo5Urbk8T">{{ group.date }}</span>
                     {% if group.customer %}
-                    <span class="group-customer">{{ group.customer }}</span>
+                    <span class="group-customer" data-page-node-id="rEuUsYOGYUr2L3AjSNDr5y">{{ group.customer }}</span>
                     {% endif %}
-                    <span class="order-num">订单 #{{ group.order_num }}</span>
-                    {% if group.doc_number %}<span id="docNumber{{ group.order_pk }}" style="font-size:0.75rem;color:#0984e3;background:#e8f4fd;padding:0.15rem 0.5rem;border-radius:10px;margin-left:0.25rem;">{{ group.doc_number }}</span>{% endif %}
+                    <span class="order-num" data-page-node-id="TwHoJEjriCgcGKgtCQ3Xey">订单 #{{ group.order_num }}</span>
+                    {% if group.doc_number %}<span id="docNumber{{ group.order_pk }}" style="font-size:0.75rem;color:#0984e3;background:#e8f4fd;padding:0.15rem 0.5rem;border-radius:10px;margin-left:0.25rem;" data-page-node-id="vuxq1ZjZ09HxtSrhho5la2">{{ group.doc_number }}</span>{% endif %}
                     {% set img_count = order_images.get(group.order_pk, []) | length %}
                     {% if img_count > 0 %}
-                    <span class="img-count-badge">{{ img_count }}张图片</span>
+                    <span class="img-count-badge" data-page-node-id="pj9yqLGtlEzBPt5yCyGnch">{{ img_count }}张图片</span>
                     {% endif %}
-                    <button type="button" class="smart-add-btn lock-hide" style="background:#ffeaa7; color:#2d3436; border:none; border-radius:4px; padding:0.3rem 0.6rem; font-size:0.78rem; cursor:pointer;" data-pk="{{ group.order_pk }}" data-date="{{ group.date }}" data-customer="{{ group.customer or '' }}">🧠 智能添加</button>
-                    <button type="button" class="note-btn lock-hide" style="background:#a29bfe; color:#fff; border:none; border-radius:4px; padding:0.3rem 0.6rem; font-size:0.78rem; cursor:pointer;{% if group.order_note %} box-shadow: 0 0 0 2px #6c5ce7;{% endif %}" data-pk="{{ group.order_pk }}" data-note="{{ group.order_note|e }}" title="{% if group.order_note %}修改备注{% else %}添加备注{% endif %}">📝 备注</button>
-                    <button type="button" class="upload-btn-sm lock-hide" onclick="openImageModal({{ group.order_pk }})">📷 图片</button>
+                    <button type="button" class="smart-add-btn lock-hide" style="background:#ffeaa7; color:#2d3436; border:none; border-radius:4px; padding:0.3rem 0.6rem; font-size:0.78rem; cursor:pointer;" data-pk="{{ group.order_pk }}" data-date="{{ group.date }}" data-customer="{{ group.customer or '' }}" data-page-node-id="59yFP8Ga1n201w4xLuPYBA">🧠 智能添加</button>
+                    <button type="button" class="note-btn lock-hide" style="background:#a29bfe; color:#fff; border:none; border-radius:4px; padding:0.3rem 0.6rem; font-size:0.78rem; cursor:pointer;{% if group.order_note %} box-shadow: 0 0 0 2px #6c5ce7;{% endif %}" data-pk="{{ group.order_pk }}" data-note="{{ group.order_note|e }}" title="{% if group.order_note %}修改备注{% else %}添加备注{% endif %}" data-page-node-id="8VNFvheHpgPQXiNCF3jDTD">📝 备注</button>
+                    <button type="button" class="upload-btn-sm lock-hide" onclick="openImageModal({{ group.order_pk }})" data-page-node-id="LYDLKAvk9lRJj7WYLJtDkL">📷 图片</button>
                 </div>
-                <div style="display:flex; align-items:center; gap:0.5rem; margin-left:auto;">
-                    <button type="button" class="lock-btn lock-hide" onclick="toggleLock({{ group.order_pk }})">🔒 锁定</button>
-                    <button type="button" class="unlock-btn lock-show" onclick="toggleLock({{ group.order_pk }})">🔓 解锁</button>
-                    <span class="locked-tag lock-show">已锁定</span>
-                    <button type="button" class="del-btn lock-hide" onclick="deleteOrder({{ group.order_pk }})">删除</button>
+                <div style="display:flex; align-items:center; gap:0.5rem; margin-left:auto;" data-page-node-id="8sMRATcnQhXCsmGVtEVhSL">
+                    <button type="button" class="lock-btn lock-hide" onclick="toggleLock({{ group.order_pk }})" data-page-node-id="uYs1DkFC3FWrJAt1p2SIzY">🔒 锁定</button>
+                    <button type="button" class="unlock-btn lock-show" onclick="toggleLock({{ group.order_pk }})" data-page-node-id="6zZu5uJEg6HnBC12MfsQbi">🔓 解锁</button>
+                    <span class="locked-tag lock-show" data-page-node-id="5qLxPgbNxV20BFATYwzYjA">已锁定</span>
+                    <button type="button" class="del-btn lock-hide" onclick="deleteOrder({{ group.order_pk }})" data-page-node-id="NQ6PhOhJ0QO5Q731AwUL6R">删除</button>
                 </div>
             </div>
 
             {% if group.order_note %}
-            <div class="order-note-row" id="orderNote{{ group.order_pk }}" style="background:linear-gradient(90deg, #fff5e1 0%, #ffeaa7 100%); border-left:4px solid #fdcb6e; padding:0.5rem 0.75rem; margin:0.25rem 0; border-radius:6px; font-size:0.9rem; color:#2d3436; display:flex; align-items:flex-start; gap:0.5rem;">
-                <span style="font-weight:600; flex-shrink:0;">📝 备注：</span>
-                <span class="note-text" style="flex:1; white-space:pre-wrap; word-break:break-word;">{{ group.order_note }}</span>
+            <div class="order-note-row" id="orderNote{{ group.order_pk }}" style="background:linear-gradient(90deg, #fff5e1 0%, #ffeaa7 100%); border-left:4px solid #fdcb6e; padding:0.5rem 0.75rem; margin:0.25rem 0; border-radius:6px; font-size:0.9rem; color:#2d3436; display:flex; align-items:flex-start; gap:0.5rem;" data-page-node-id="W88XSUSTvLjuzsp5Nr868m">
+                <span style="font-weight:600; flex-shrink:0;" data-page-node-id="IU5kcpdrv6UDWp4yDDSBLD">📝 备注：</span>
+                <span class="note-text" style="flex:1; white-space:pre-wrap; word-break:break-word;" data-page-node-id="njchThkP3lWMKFKBjC0yUb">{{ group.order_note }}</span>
             </div>
             {% endif %}
 
             <!-- AI 识别图片(商品行上方,独立区) -->
             {% set ai_imgs = ai_images.get(group.order_pk, []) %}
             {% if ai_imgs %}
-            <div class="ai-images-area" data-order-id="{{ group.order_pk }}">
-                <h4>🤖 AI 识别图片 ({{ ai_imgs|length }}张)</h4>
+            <div class="ai-images-area" data-order-id="{{ group.order_pk }}" data-page-node-id="BMsmbUEXkPewUVZSO4hEP3">
+                <h4 data-page-node-id="Ybr1tFKK1F0mF8YwJ8Zi6G">🤖 AI 识别图片 ({{ ai_imgs|length }}张)</h4>
                 {% for img in ai_imgs %}
-                <div class="ai-img-wrap">
-                    <img src="/upload/{{ img.relative_path }}" alt="AI识别图片" onclick="showImgPreview('/upload/{{ img.relative_path }}')">
-                    <button class="del-img-btn" data-image-id="{{ img.id }}" style="position:absolute;top:4px;right:4px;background:rgba(200,30,30,0.85);color:#fff;border:none;border-radius:3px;padding:2px 6px;cursor:pointer;font-size:12px;opacity:0;transition:opacity 0.2s;">✕ 删除</button>
+                <div class="ai-img-wrap" data-page-node-id="5c9PHhEooNMZoMFrPCQ43k">
+                    <img src="/upload/{{ img.relative_path }}" alt="AI识别图片" onclick="showImgPreview('/upload/{{ img.relative_path }}')" data-page-node-id="X7RKu1rYx64jUR7Bu0kCFY">
+                    <button class="del-img-btn" data-image-id="{{ img.id }}" style="position:absolute;top:4px;right:4px;background:rgba(200,30,30,0.85);color:#fff;border:none;border-radius:3px;padding:2px 6px;cursor:pointer;font-size:12px;opacity:0;transition:opacity 0.2s;" data-page-node-id="OIZWtM5iNxJDChxDsSLKvy">✕ 删除</button>
                 </div>
                 {% endfor %}
             </div>
             {% endif %}
 
-            <table class="record-table" style="table-layout:fixed; width:100%;">
-                <colgroup>
-                    <col style="width:40px;">
-                    <col style="width:20%;">
-                    <col style="width:14%;">
-                    <col style="width:12%;">
-                    <col style="width:7%;">
-                    <col style="width:14%;">
-                    <col style="width:13%;">
-                    <col style="width:55px;">
-                    <col style="width:85px;">
+            {% set has_eco = group.has_eco|default(false) %}
+            {% set has_jia_mian = group.has_jia_mian|default(false) %}
+            <table class="record-table{% if not has_eco and not has_jia_mian %} no-eco{% endif %}" style="table-layout:fixed; width:100%;" data-page-node-id="GtO2kHTdzBAe1tgMw233TI">
+                <colgroup data-page-node-id="Jbmc2UMzuH2arCUy9LQVRr">
+                    <col style="width:40px;" data-page-node-id="EhpxjDnjJYvEurcQNQr3ko">
+                    <col class="eco-col" style="width:35px;{% if not has_eco and not has_jia_mian %} display:none;{% endif %}" data-page-node-id="Uvwflh2qiA6LKLl33wtqvD">
+                    <col style="width:18%;" data-page-node-id="6Ryn6RHfTkwAPQzfK7QUwR">
+                    <col style="width:18%;" data-page-node-id="6zHAeb38G3UrtAQ4gB0NqI">
+                    <col style="width:10%;" data-page-node-id="SQlKIUEZ2EZKaRTYSYSB0U">
+                    <col style="width:8%;" data-page-node-id="B3bQiNRvanY2XJUW147XhZ">
+                    <col style="width:12%;" data-page-node-id="HkafZRCPnLgkrDNsQmGnxs">
+                    <col style="width:10%;" data-page-node-id="sIOnL7t9Q4pX59mExNPB7U">
+                    <col style="width:230px;" data-page-node-id="2A4ztXhniyEuZEz5sQDVdj">
                 </colgroup>
-                <thead>
-                    <tr>
-                        <th style="text-align:center;">序</th>
-                        <th>品名</th>
-                        <th>规格</th>
-                        <th>数量</th>
-                        <th>单位</th>
-                        <th>备注</th>
-                        <th>辅助单位提示</th>
-                        <th>操作</th>
+                <thead data-page-node-id="1LHN8KfiwHRQgmGrd9Sjc2">
+                    <tr data-page-node-id="HuzwdykJL4KCkng0ErBZ4b">
+                        <th style="text-align:center;" data-page-node-id="s0AXJ9FAIB2JNu5MKJVv7U">序号</th>
+                        <th class="eco-col" data-page-node-id="VJUQ3d4DqpdgDEjsVAe1aE">重点</th>
+                        <th data-page-node-id="c3l6zWAfSQ6UV1PXUuVvwS">品名</th>
+                        <th data-page-node-id="WdojPEcxOxoDEYgTgcMbS0">规格</th>
+                        <th data-page-node-id="oZOhYfM5LJKZqZsw9ccEn2">数量</th>
+                        <th data-page-node-id="jBzCDHeJlKLtyVkQk0AuNH">单位</th>
+                        <th data-page-node-id="EQFuXXZqkRtXTKnEh1KJXZ">备注</th>
+                        <th data-page-node-id="Kuwp02XbsXIsHVv8xXhVeh">辅助单位提示</th>
+                        <th data-page-node-id="tgFAfYivnnnpPj48wpTatg">操作</th>
                     </tr>
                 </thead>
-                <tbody>
+                <tbody data-page-node-id="FIdNZijR1dM82ZhcsxKJGV">
                     {% for record in group.records %}
-                    <tr class="{% if record.mismatch == 'warn' or record.piece_mismatch == 'warn' %}row-warn{% elif record.mismatch == 'info' or record.piece_mismatch == 'info' %}row-info{% endif %}"
+                    <tr class="{% if record.qty_invalid %}row-out-of-stock{% elif record.mismatch == 'warn' or record.piece_mismatch == 'warn' %}row-warn{% elif record.mismatch == 'info' or record.piece_mismatch == 'info' %}row-info{% endif %}{% if '环保' in record.product_name %} row-eco{% endif %}"
                         data-record-id="{{ record.id }}"
                         data-verified="{{ '1' if record.verified else '0' }}"
-                        data-verified-warnings="{{ record.verified_warnings or '{}' }}">
-                        <td style="width:40px; text-align:center; color:#868e96; font-size:0.85rem;">{% if record.mismatch == 'warn' or record.piece_mismatch == 'warn' %}❌ {% elif record.mismatch == 'info' or record.piece_mismatch == 'info' %}💡 {% endif %}{{ loop.index }}</td>
-                        <td class="product-name-cell">{{ record.product_name }}</td>
-                        <td class="spec-cell">{{ record.specification or '-' }}</td>
-                        <td><span class="qty-badge">{{ record.quantity }}</span></td>
-                        <td><span class="unit-badge">{{ record.unit }}</span></td>
-                        <td class="remark-cell {{ 'has-content' if record.remark }}">
+                        data-verified-warnings="{{ record.verified_warnings or '{}' }}" data-page-node-id="XVh9Ayi55lJ43uzCT8dsNk">
+                        <td style="text-align:center; color:#868e96; font-size:0.85rem;" data-page-node-id="T0BKhDMDBG5Z3OrAAxXIyz">{% if record.qty_invalid %}<span class="stock-icon" title="数量异常" data-page-node-id="6vYvCw8Ay5PulsFp1CLWpJ">⚠️</span>{% elif record.mismatch == 'warn' or record.piece_mismatch == 'warn' %}❌ {% elif record.mismatch == 'info' or record.piece_mismatch == 'info' %}💡 {% endif %}{{ loop.index }}</td>
+                        <td class="eco-col" data-page-node-id="teHbBCKJTYVCsSRHqEXHIx">{% if '环保' in record.product_name %}<span class="eco-icon" title="环保产品" data-page-node-id="UXPm1TI3CiZ2vEDQBFvhwg">🌿</span>{% endif %}{% if '杂胶' in record.product_name and '加面' in (record.specification or '') %}<svg class="jia-mian-icon" viewBox="0 0 16 16" width="14" height="14" title="加面工艺" data-page-node-id="fAQOnuWVppaSOntkekenBA"><defs data-page-node-id="N4m0g6kAM8l6DeQAtMClif"><pattern id="jm-mesh-load-{{ record.id }}" width="3" height="3" patternUnits="userSpaceOnUse" data-page-node-id="OYeWGycTvTDtgPMlBr2RwM"><path d="M0,3 L3,0" stroke="currentColor" stroke-width="0.6" data-page-node-id="3ZkzzdjauoMjVbFJHSWloG"/><path d="M0,0 L3,3" stroke="currentColor" stroke-width="0.6" data-page-node-id="BUzDiCrK8x3XeJUEO2JBcA"/></pattern></defs><rect width="16" height="16" fill="url(#jm-mesh-load-{{ record.id }})" data-page-node-id="3vgmYOyPQqhndhFwdKooVS"/></svg>{% endif %}</td>
+                        <td class="product-name-cell" style="font-size:0.9rem;" data-page-node-id="ATCnu12xEFBlvONuXB3X9P">{{ record.product_name }}</td>
+                        <td class="spec-cell" style="color:#636e72; font-size:0.9rem;" data-page-node-id="cZI7kTvFfOhNUVPbcLRxfY">{{ record.specification or '-' }}</td>
+                        <td data-page-node-id="Ji52GFshvGUnttUh1eCUmT"><span class="qty-badge" data-page-node-id="cVJqiqh59eTJxDqURZ0FZx">{{ record.quantity }}</span></td>
+                        <td data-page-node-id="3D6Lv9yB6s49chszYZKUAU"><span class="unit-badge" data-page-node-id="83QmykmYpFiWDq19X90fek">{{ record.unit }}</span></td>
+                        <td class="remark-cell {{ 'has-content' if record.remark }}" data-page-node-id="FSI8kayeyzDU3puTwEB5r0">
                             {{ record.remark or '-' }}
                         </td>
-                        <td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">{{ record.unit_hint or '—' }}{% if record.piece_hint %}<br><span style="color:#0984e3;">{{ record.piece_hint }}</span>{% endif %}</td>
-                        <td style="white-space: nowrap;">
-                            <button type="button" class="move-up-btn lock-hide" data-id="{{ record.id }}" onclick="moveRecord({{ record.id }}, 'up', this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;" title="上移">▲</button>
-                            <button type="button" class="move-down-btn lock-hide" data-id="{{ record.id }}" onclick="moveRecord({{ record.id }}, 'down', this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;margin-right:0.3rem;" title="下移">▼</button>
-                            <button type="button" class="edit-record-btn lock-hide" data-id="{{ record.id }}" onclick="editRecord({{ record.id }}, this)" style="background: none; border: none; color: #00b894; cursor: pointer; font-size: 0.85rem; margin-right: 0.4rem;" title="修改">✏️</button>
-                            <button type="button" class="del-record-btn lock-hide" data-id="{{ record.id }}" onclick="deleteRecord({{ record.id }}, this)" style="background: none; border: none; color: #ff7675; cursor: pointer; font-size: 0.85rem;" title="删除">🗑️</button>
-                            <button type="button" class="btn btn-sm record-image-btn lock-hide{% if record.has_image %} has-image{% endif %}" data-record-id="{{ record.id }}">🖼️</button>
-                            <input type="file" class="record-image-input" data-record-id="{{ record.id }}" accept="image/*" multiple style="display:none;">
+                        <td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;" data-page-node-id="OXOGFC7aROG2PTY3qQ54v8">{{ record.unit_hint or '—' }}{% if record.piece_hint %}<br data-page-node-id="HKBu3X2I0CURplVdDNPFiy"><span style="color:#0984e3;" data-page-node-id="GItSu7Ju5vnjtnzFdyNrYz">{{ record.piece_hint }}</span>{% endif %}</td>
+                        <td class="actions-cell" data-page-node-id="JJZN1eR1Bu1yIw2kcvLEK5">
+                            <button type="button" class="move-up-btn lock-hide" data-id="{{ record.id }}" onclick="moveRecord({{ record.id }}, 'up', this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.75rem;padding:0.1rem 0.35rem;border-radius:4px;" title="上移" data-page-node-id="tsfwfXMJ8jt2g35rhV1UY3">▲</button>
+                            <button type="button" class="move-down-btn lock-hide" data-id="{{ record.id }}" onclick="moveRecord({{ record.id }}, 'down', this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.75rem;padding:0.1rem 0.35rem;border-radius:4px;margin-right:0.3rem;" title="下移" data-page-node-id="tmlfJVyomVjHelJeOAk2fQ">▼</button>
+                            <button type="button" class="edit-record-btn lock-hide" data-id="{{ record.id }}" onclick="editRecord({{ record.id }}, this)" style="background:none;border:none;color:#00b894;cursor:pointer;font-size:0.85rem;margin-right:0.4rem;" title="修改" data-page-node-id="fQHVgBHjLcxAZ5uCB6XQiQ">✏️</button>
+                            <button type="button" class="del-record-btn lock-hide" data-id="{{ record.id }}" onclick="deleteRecord({{ record.id }}, this)" style="background:none;border:none;color:#ff7675;cursor:pointer;font-size:0.85rem;" title="删除" data-page-node-id="oaH34LVtHTfsHVAdWA3lRR">🗑️</button>
+                            <button type="button" class="btn btn-sm record-image-btn lock-hide{% if record.has_image %} has-image{% endif %}" data-record-id="{{ record.id }}" title="上传图片到此商品{% if record.has_image %}（已上传）{% endif %}" style="background:#74b9ff;color:#fff;" data-page-node-id="2o3ypdCVCZCa35OEIjHXlU">🖼️</button>
+                            {% if '支' in (record.unit_hint or '') or '支' in (record.piece_hint or '') %}<button type="button" class="placement-add-btn lock-hide{% if record.placement_match %} placement-ok{% endif %}" data-record-id="{{ record.id }}" data-order-id="{{ group.order_pk }}" title="添加摆放图(供清点支数)" onclick="openPlacementImageModal('{{ record.id }}','{{ group.order_pk }}')" data-page-node-id="5KfdPqnmDEdkBAuE6gZKR4">点数</button>{% endif %}
+                            <input type="file" class="record-image-input" data-record-id="{{ record.id }}" accept="image/*" multiple style="display:none;" data-page-node-id="qdw753L0DRzPkeqIOnflJd">
+                            {% if record.placement_match %}<span class="status-badge placement-badge lock-show" title="该行已添加摆放图" data-page-node-id="wQRKwTJ6arCsdU1IUiFSRR">✓ 点数</span>{% endif %}
                         </td>
                     </tr>
                     {% endfor %}
                     {% if group.summary_pieces > 0 or group.summary_loose_pieces > 0 or group.summary_unit_pieces > 0 %}
-                    <tr class="summary-row" style="background:#f0fdf4; font-weight:600; border-top:2px solid #00b894;">
-                        <td colspan="5" style="text-align:right; padding:0.6rem 0.75rem; color:#00b894; font-size:0.9rem;">📊 备注支数：</td>
-                        <td style="padding:0.6rem 0.75rem; color:#2d3436; font-size:0.9rem;">
+                    <tr class="summary-row" style="background:#f0fdf4; font-weight:600; border-top:2px solid #00b894;" data-page-node-id="pCf1vDmtCQnvgQZT8bnu5c">
+                        <td colspan="5" style="text-align:right; padding:0.6rem 0.75rem; color:#00b894; font-size:0.9rem;" data-page-node-id="f3baxHWFXRyfYQElmjBuos">📊 备注支数：</td>
+                        <td style="padding:0.6rem 0.75rem; color:#2d3436; font-size:0.9rem;" data-page-node-id="36CAOKMVtkAS6JSbrfRmjI">
                             {{ group.summary_pieces }}支
                             {% if group.summary_loose_pieces > 0 %}
                             +{{ group.summary_loose_pieces }}支散码
                             {% endif %}
                         </td>
-                        <td style="padding:0.6rem 0.75rem; color:#00b894; font-size:0.9rem;">
+                        <td style="padding:0.6rem 0.75rem; color:#00b894; font-size:0.9rem;" data-page-node-id="o10yrrkNObOokaIqRTzU3e">
                             📊 明细支数：{{ group.summary_unit_pieces }}支
                         </td>
-                        <td style="padding:0.6rem 0.75rem;"></td>
-                        <td style="padding:0.6rem 0.75rem;"></td>
+                        <td style="padding:0.6rem 0.75rem;" data-page-node-id="YDUvC2zUt7vJxooDNCHtRh"></td>
+                        <td style="padding:0.6rem 0.75rem;" data-page-node-id="c0fNDyUm4o0uHgm0gJCtbv"></td>
                     </tr>
                     {% endif %}
-                    <tr class="quick-add-row lock-hide">
-                        <td colspan="9" style="padding: 0; background: #fafafa;">
-                            <div class="quick-add" data-order-pk="{{ group.order_pk }}">
-                                <input type="text" name="product_name" placeholder="品名" required>
-                                <input type="text" name="specification" placeholder="规格">
-                                <input type="text" name="quantity" placeholder="数量" required>
-                                <select name="unit">
-                                    <option value="支">支</option>
-                                    <option value="kg">kg</option>
-                                    <option value="y">y</option>
-                                    <option value="桶">桶</option>
-                                    <option value="张">张</option>
-                                    <option value="件">件</option>
-                                    <option value="箱">箱</option>
-                                    <option value="卷">卷</option>
-                                    <option value="块">块</option>
-                                    <option value="令">令</option>
-                                    <option value="斤">斤</option>
+                    <tr class="quick-add-row lock-hide" data-page-node-id="VDClAlQeFTAugwDrlWxdK4">
+                        <td colspan="9" style="padding: 0; background: #fafafa;" data-page-node-id="ZCmgWJ3c1b7YEvwYRwuHwm">
+                            <div class="quick-add" data-order-pk="{{ group.order_pk }}" data-page-node-id="EA4DEmiNevXh5peeYcHNUW">
+                                <input type="text" name="product_name" placeholder="品名" required data-page-node-id="tTokEBVSUKUklnjk0cyGXI">
+                                <input type="text" name="specification" placeholder="规格" data-page-node-id="6OrshE0kXWLIzFbDHdF0tL">
+                                <input type="text" name="quantity" placeholder="数量" required data-page-node-id="yF8YtmVeqZzbLVjiFZyvcn">
+                                <select name="unit" data-page-node-id="qv4G9xD8GLUrk8fUrSoVYF">
+                                    <option value="支" data-page-node-id="Dg4CPZMX5G1KwriMWaNkrJ">支</option>
+                                    <option value="kg" data-page-node-id="YhPnCv1zY9jcui6P8kuVYl">kg</option>
+                                    <option value="y" data-page-node-id="oYyg1vs1o99vICRn0vAcC7">y</option>
+                                    <option value="桶" data-page-node-id="tpwU74GVagZg5LEyFbvzGg">桶</option>
+                                    <option value="张" data-page-node-id="Gu3Eotr87OHhc7lNS9bHc3">张</option>
+                                    <option value="件" data-page-node-id="BkiMSXDRmn56zlkBCmbQ9C">件</option>
+                                    <option value="箱" data-page-node-id="wXCVTu8JNyZJDc5xj1ggp1">箱</option>
+                                    <option value="卷" data-page-node-id="ABS1SYeGsFwpHnAbutMBid">卷</option>
+                                    <option value="块" data-page-node-id="DkHQSdqCagEQovzDVmy0pO">块</option>
+                                    <option value="令" data-page-node-id="IvYsuaQUkuvNcA0CqHIGs0">令</option>
+                                    <option value="斤" data-page-node-id="FyJ4fzBvceW4w6HmZuD6ze">斤</option>
                                 </select>
-                                <input type="text" name="remark" placeholder="备注" oninput="autoFillQtyFromRemark(this)">
-                                <button type="button" class="btn btn-primary btn-sm quick-add-btn">添加</button>
+                                <input type="text" name="remark" placeholder="备注" oninput="autoFillQtyFromRemark(this)" data-page-node-id="azr0mDFa6qWntTjMZd5t2A">
+                                <button type="button" class="btn btn-primary btn-sm quick-add-btn" data-page-node-id="zjum7uJ4gzv5gZAjpEMwwi">添加</button>
                             </div>
                         </td>
                     </tr>
                 </tbody>
             </table>
             
+            <!-- 摆放图(点数)缩略图区 -->
+            <div class="placement-area" data-record-ids="{% for record in group.records %}{{ record.id }}{% if not loop.last %},{% endif %}{% endfor %}" data-page-node-id="uvtxgoghLMzWQtauCc6Djx"></div>
+            
             <!-- 图片区域 -->
             {% set imgs = order_images.get(group.order_pk, []) %}
             {% if imgs %}
-            <div class="img-area cols-{{ group.img_cols | default(3) }}" id="imgArea{{ group.order_pk }}">
-                <div style="display: flex; gap: 0.25rem; margin-bottom: 0.5rem; grid-column: 1 / -1;">
-                    <button class="img-col-btn {% if group.img_cols == 1 %}active{% endif %}" onclick="setImgCols(this, 1)">1</button>
-                    <button class="img-col-btn {% if group.img_cols == 2 %}active{% endif %}" onclick="setImgCols(this, 2)">2</button>
-                    <button class="img-col-btn {% if group.img_cols == 3 %}active{% endif %}" onclick="setImgCols(this, 3)">3</button>
-                    <button class="img-col-btn {% if group.img_cols == 4 %}active{% endif %}" onclick="setImgCols(this, 4)">4</button>
-                    <button class="img-col-btn {% if group.img_cols == 5 %}active{% endif %}" onclick="setImgCols(this, 5)">5</button>
+            <div class="img-area cols-{{ group.img_cols | default(3) }}" id="imgArea{{ group.order_pk }}" data-page-node-id="eY2xRTxmECmpcCqwnS1gpq">
+                <div style="display: flex; gap: 0.25rem; margin-bottom: 0.5rem; grid-column: 1 / -1;" data-page-node-id="NveKgudpDJcLmbZL4owad6">
+                    <button class="img-col-btn {% if group.img_cols == 1 %}active{% endif %}" onclick="setImgCols(this, 1)" data-page-node-id="nwKQrFuO9nddyXpruDMiQF">1</button>
+                    <button class="img-col-btn {% if group.img_cols == 2 %}active{% endif %}" onclick="setImgCols(this, 2)" data-page-node-id="imszRdDOwVF4HlYBHMiend">2</button>
+                    <button class="img-col-btn {% if group.img_cols == 3 %}active{% endif %}" onclick="setImgCols(this, 3)" data-page-node-id="KjF2eKI1jGCvwfNCx9YtFy">3</button>
+                    <button class="img-col-btn {% if group.img_cols == 4 %}active{% endif %}" onclick="setImgCols(this, 4)" data-page-node-id="7eJw8slNgkYwSAQzrjztHW">4</button>
+                    <button class="img-col-btn {% if group.img_cols == 5 %}active{% endif %}" onclick="setImgCols(this, 5)" data-page-node-id="rlyKwrDue1m4gGY5Iqdi0f">5</button>
                 </div>
                 {% for img in imgs %}
-                <div class="img-item{% if img.record_pk %} img-item-record{% else %} img-item-order{% endif %}"{% if img.record_pk %} data-record-pk="{{ img.record_pk }}"{% endif %} data-image-id="{{ img.id }}">
-                    <div class="img-photo">
-                        <img src="/upload/{{ img.relative_path }}" alt="{{ img.original_name or '图片' }}" onclick="showImgPreview('/upload/{{ img.relative_path }}')">
-                        <button class="del-img-btn lock-hide" data-image-id="{{ img.id }}">× 删除</button>
+                <div class="img-item{% if img.record_pk %} img-item-record{% else %} img-item-order{% endif %}"{% if img.record_pk %} data-record-pk="{{ img.record_pk }}"{% endif %} data-image-id="{{ img.id }}" data-page-node-id="5ktNUMrKx9Akfg1Jm61k2u">
+                    <div class="img-photo" data-page-node-id="OQs5YwKPUNO8KR9yW6lFEW">
+                        <img src="/upload/{{ img.relative_path }}" alt="{{ img.original_name or '图片' }}" onclick="showImgPreview('/upload/{{ img.relative_path }}')" data-page-node-id="kp9VntYE1IoPm9E92OtGa1">
+                        <button class="del-img-btn lock-hide" data-image-id="{{ img.id }}" data-page-node-id="9qf9su9KV80iF34TDl7glJ">× 删除</button>
                     </div>
                     {% if img.record_pk %}
-                    <div class="img-meta">
+                    <div class="img-meta" data-page-node-id="xa2WgABgigATa6BG3C7zF5">
                         {% set _ms = img.match_source or 'local_fuzzy' %}
                         {% set _source_label = '云端 DeepSeek' if _ms == 'deepseek' else '本地 RapidFuzz' %}
                         {% set _hv = img.human_verified %}
                         {% set _eff = _hv and img.match_status in ('yellow','red') %}
-                        <div class="img-meta-row img-meta-row-1">
+                        <div class="img-meta-row img-meta-row-1" data-page-node-id="gz9snD6G5WLsvuu5hSLTr4">
                             {% if img.match_status == 'green' %}
-                                <span class="match-badge match-badge-{{ _ms }}" data-match-status="green" data-match-source="{{ _ms }}" title="图文相符({{ _source_label }}){% if img.reason %} — {{ img.reason }}{% endif %}" style="color:#16a34a;">{{ '⊛' if _ms == 'deepseek' else '✓' }}</span>
+                                <span class="match-badge match-badge-{{ _ms }}" data-match-status="green" data-match-source="{{ _ms }}" title="图文相符({{ _source_label }}){% if img.reason %} — {{ img.reason }}{% endif %}" style="color:#16a34a;" data-page-node-id="QoKHuADc6nC4U7aJgavVvm">{{ '⊛' if _ms == 'deepseek' else '✓' }}</span>
                             {% elif _eff %}
-                                <span class="match-badge match-badge-{{ _ms }} match-badge-overridden" data-match-status="green" data-match-source="{{ _ms }}" data-overridden-by-human="1" title="人工确认通过(覆盖原始 {{ img.match_status }})" style="color:#10b981;">👤</span>
+                                <span class="match-badge match-badge-{{ _ms }} match-badge-overridden" data-match-status="green" data-match-source="{{ _ms }}" data-overridden-by-human="1" title="人工确认通过(覆盖原始 {{ img.match_status }})" style="color:#10b981;" data-page-node-id="TCfd7baisSIxNLkG5tEBfe">👤</span>
                             {% elif img.match_status == 'yellow' %}
-                                <span class="match-badge match-badge-{{ _ms }}" data-match-status="yellow" data-match-source="{{ _ms }}" title="存疑，请人工核对({{ _source_label }}){% if img.reason %} — {{ img.reason }}{% endif %}" style="color:#d97706;">{{ '◇' if _ms == 'deepseek' else '⚠' }}</span>
+                                <span class="match-badge match-badge-{{ _ms }}" data-match-status="yellow" data-match-source="{{ _ms }}" title="存疑，请人工核对({{ _source_label }}){% if img.reason %} — {{ img.reason }}{% endif %}" style="color:#d97706;" data-page-node-id="Q8mF5MYug6ocjPgV3qU5jl">{{ '◇' if _ms == 'deepseek' else '⚠' }}</span>
                             {% elif img.match_status == 'red' %}
-                                <span class="match-badge match-badge-{{ _ms }}" data-match-status="red" data-match-source="{{ _ms }}" title="可能不符({{ _source_label }}){% if img.reason %} — {{ img.reason }}{% endif %}" style="color:#dc2626;">{{ '◆' if _ms == 'deepseek' else '✗' }}</span>
+                                <span class="match-badge match-badge-{{ _ms }}" data-match-status="red" data-match-source="{{ _ms }}" title="可能不符({{ _source_label }}){% if img.reason %} — {{ img.reason }}{% endif %}" style="color:#dc2626;" data-page-node-id="CF38bCxoCcJAOLueNRF6zv">{{ '◆' if _ms == 'deepseek' else '✗' }}</span>
                             {% endif %}
                             {% if img.match_status in ['red', 'yellow'] %}
                                 {% if img.human_verified %}
-                                    <button class="manual-undo-btn lock-hide" data-verified-marker="{{ img.id }}" data-undo-btn="{{ img.id }}" title="人工已确认(覆盖 {{ img.match_status }});点击撤销">👤 已确认</button>
+                                    <button class="manual-undo-btn lock-hide" data-verified-marker="{{ img.id }}" data-undo-btn="{{ img.id }}" title="人工已确认(覆盖 {{ img.match_status }});点击撤销" data-page-node-id="2IgJvGLdlzpvwYOGBJQD49">👤 已确认</button>
                                 {% else %}
-                                    <button class="manual-confirm-btn lock-hide" data-image-id="{{ img.id }}" data-confirm-btn="{{ img.id }}">✓ 确认通过</button>
+                                    <button class="manual-confirm-btn lock-hide" data-image-id="{{ img.id }}" data-confirm-btn="{{ img.id }}" data-page-node-id="9KUzFqbVo7RhcTKKPDyQPO">✓ 确认通过</button>
                                 {% endif %}
                             {% endif %}
-                            {% if img.bg_color %}<span class="bg-color-tag" title="自动识别背景色" style="padding:1px 6px;font-size:0.65rem;border-radius:3px;{% if img.bg_color == 'black' %}background:#2d3436;color:#fff;{% else %}background:#f1f3f5;color:#2d3436;border:1px solid #ced4da;{% endif %}">{% if img.bg_color == 'black' %}⬛ 黑底{% else %}⬜ 白底{% endif %}</span>{% endif %}
+                            {% if img.bg_color %}<span class="bg-color-tag" title="自动识别背景色" style="padding:1px 6px;font-size:0.65rem;border-radius:3px;{% if img.bg_color == 'black' %}background:#2d3436;color:#fff;{% else %}background:#f1f3f5;color:#2d3436;border:1px solid #ced4da;{% endif %}" data-page-node-id="pHdpjkar1aWU5rAfmR5kDS">{% if img.bg_color == 'black' %}⬛ 黑底{% else %}⬜ 白底{% endif %}</span>{% endif %}
                         </div>
-                        <div class="img-meta-row img-meta-row-2">
+                        <div class="img-meta-row img-meta-row-2" data-page-node-id="zeaNNaAtkUl8Hi3kW7x2F4">
                             <button type="button" class="fuzzy-match-btn lock-hide" data-fuzzy-match="{{ img.id }}"
                                 title="用 RapidFuzz 对该图 OCR 文字与商品名/规格做本地模糊匹配"
-                                style="padding:.1rem .5rem;font-size:.7rem;background:#74b9ff;color:#fff;border:none;border-radius:4px;cursor:pointer;">模糊匹配</button>
+                                style="padding:.1rem .5rem;font-size:.7rem;background:#74b9ff;color:#fff;border:none;border-radius:4px;cursor:pointer;" data-page-node-id="r9gEARIr3WRzvq2KZMSJJX">模糊匹配</button>
                             <button type="button" class="ai-judge-btn lock-hide" data-ai-judge="{{ img.id }}"
                                 title="将 OCR 文字发给 DeepSeek 大模型进行 AI 判别"
-                                style="padding:.1rem .5rem;font-size:.7rem;background:#a29bfe;color:#fff;border:none;border-radius:4px;cursor:pointer;">AI判别</button>
+                                style="padding:.1rem .5rem;font-size:.7rem;background:#a29bfe;color:#fff;border:none;border-radius:4px;cursor:pointer;" data-page-node-id="BNDNtHpgxcANBpGKQAX61b">AI判别</button>
                             <button type="button" class="ocr-detail-btn lock-hide" data-ocr-detail="{{ img.id }}"
                                 title="查看 OCR 原文 / 提示词 / 推理结果"
-                                style="padding:.1rem .5rem;font-size:.7rem;background:#dfe6e9;color:#2d3436;border:1px solid #b2bec3;border-radius:4px;cursor:pointer;">详情</button>
+                                style="padding:.1rem .5rem;font-size:.7rem;background:#dfe6e9;color:#2d3436;border:1px solid #b2bec3;border-radius:4px;cursor:pointer;" data-page-node-id="fvTqFgucVrNhDGqRKkvG3n">详情</button>
                         </div>
                     </div>
                     {% endif %}
@@ -365,33 +589,114 @@
         </div>
         {% endfor %}
     {% else %}
-        <div class="empty-state">
-            <div class="icon">📦</div>
-            <p>暂无装柜记录</p>
+        <div class="empty-state" data-page-node-id="MUAs3edAcuAE39d9vaVMrA">
+            <div class="icon" data-page-node-id="kIOTocPBSHnVMrlHctE9V6">📦</div>
+            <p data-page-node-id="RDFu6D0xHS2mbPukL6t9HG">暂无装柜记录</p>
         </div>
     {% endif %}
-</div>
 
 {% with smart_add_api="/api/v1/loading-orders" %}{% include "_smart_add_modal.html" %}{% endwith %}
 {% with image_api="/api/v1/loading-orders" %}{% include "_image_upload_modal.html" %}{% endwith %}
 
-<!-- 备注弹框 -->
-<div class="note-modal" id="noteModal">
-    <div class="note-dialog">
-        <h3 id="noteModalTitle">📝 订单备注</h3>
-        <p id="noteModalOrderInfo" class="order-info"></p>
-        <div style="margin-bottom:0.6rem;">
-            <label style="display:block; font-size:0.85rem; color:#636e72; margin-bottom:0.25rem; font-weight:600;">客户</label>
-            <input type="text" id="noteCustomerInput" placeholder="客户名称" style="width:100%; padding:0.5rem; border:1px solid #dfe6e9; border-radius:6px; font-size:0.9rem; box-sizing:border-box;">
+<!-- 摆放图(点数)弹框 — 与出货页同款 -->
+<div id="placementCountModal" class="placement-count-modal" data-page-node-id="F9GM5xTw1gd0lWIuRqlmBs">
+    <div class="pcm-inner" data-page-node-id="7B2ubGPoJjK35EdexV62El">
+        <div class="pcm-identity" data-page-node-id="7Kfm1PrwDHBGOJQ0Yux24D">
+            <div class="pcm-id-left" data-page-node-id="JEvhlUDjhU97rnbFHYWzaK">
+                <span class="pcm-title" data-page-node-id="tiocUaC5Hjv7LNmuia3tlb">🧮 清点支数</span>
+                <span class="pcm-id-record" id="pcmRecordName" data-page-node-id="lnFMahXpHwk46jowcZQRyn">—</span>
+            </div>
+            <div class="pcm-id-right" data-page-node-id="iJEhtYDD3IYZBe8TS9vuP6">
+                <span class="pcm-id-imgpos" id="pcmImgPosLabel" data-page-node-id="Fo9ECTCV6NkxVHqxFx2RiS">本图第 -/- 张</span>
+                <button type="button" id="pcmClose" class="pcm-close-btn" title="关闭 (Esc)" data-page-node-id="DngFyR9SvILp98hokkXF9u">✕</button>
+            </div>
         </div>
-        <div>
-            <label style="display:block; font-size:0.85rem; color:#636e72; margin-bottom:0.25rem; font-weight:600;">订单备注</label>
+        <div class="pcm-kpi" data-page-node-id="iJPCaBRrGcguOEuHiTDMsa">
+            <div class="pcm-kpi-card" data-page-node-id="TGfK4x0zU9UKPdSSQ8Mnrx">
+                <div class="pcm-kpi-label" data-page-node-id="Ttuw8f4ubkt04AZoa4Zapp">本图</div>
+                <div class="pcm-kpi-value" data-page-node-id="4SULeYyRGvCQEz6J9ABl0L"><span id="pcmCount" data-page-node-id="F51rxEaPblPVuPAlJ8iuwV">0</span><span class="pcm-kpi-unit" data-page-node-id="K9ZOlvyaFQp6EMsiWdfa1R">支</span></div>
+            </div>
+            <div class="pcm-kpi-card" data-page-node-id="uCqJb8SZvSdONVAaYBSBFi">
+                <div class="pcm-kpi-label" data-page-node-id="mMJDAHB0g1n3P1WxLI23Oj">累计 / 目标</div>
+                <div class="pcm-kpi-value" data-page-node-id="AxEqrDOCDWhzcvckuygkHO"><span id="pcmCumulative" data-page-node-id="XZgbL0Ev5uVQswUVh1IMrj">0 / —</span><span class="pcm-kpi-unit" data-page-node-id="hVw9DCnzaIegw50LLl8srD">支</span></div>
+                <div class="pcm-kpi-sub" id="pcmProgText" data-page-node-id="Ad2UKZGSpd6a2NJsAD7Wex">本记录累计 0 / 目标 — · 共 0 张</div>
+                <div class="pcm-kpi-bar" data-page-node-id="SyfrLwAvXVLDoOnewMSfuc"><div class="pcm-kpi-fill" id="pcmProgBar" data-page-node-id="iiRi4FIFARkJGOR1jDKz9e"></div></div>
+            </div>
+            <div class="pcm-kpi-card" data-page-node-id="bvcMaTURUKnohYVsUBhXCG">
+                <div class="pcm-kpi-label" data-page-node-id="CPNMB7pWFnOUkeBo3c9qdK">散码</div>
+                <div class="pcm-kpi-value" data-page-node-id="VGIG50FsRN45WGZBekApl5"><span id="pcmLooseVal" data-page-node-id="PebQGz7HEDIEIAGyzj4k6K">0</span><span class="pcm-kpi-unit" data-page-node-id="nk291FH5PKCSGlxgHuAcyv">y</span></div>
+            </div>
+        </div>
+        <div class="pcm-actions" id="pcmActions" data-page-node-id="cFtmAA43EDFL5CF0gfqbR4">
+            <button type="button" id="pcmManual" class="pcm-tb-btn pcm-tb-manual" title="直接输入支数 (M)" data-page-node-id="gISAAMmeTCvMpbkp2uHy80"><span data-page-node-id="WpGAjn6opF4fQN2DZHyJ3M">✎ 直输</span><span class="pcm-tb-key" data-page-node-id="xEigYkTcYT0a2pxxAwY6Ez">M</span></button>
+            <button type="button" id="pcmLoose" class="pcm-tb-btn pcm-tb-loose" title="录入散码数量 (L)" data-page-node-id="vGoK3wheWiUb0u1e6eX6sk"><span data-page-node-id="pdbZwlRtsl81yAgjfSBEa9">散码</span><span class="pcm-tb-key" data-page-node-id="JxACqBR3ILqobnq2imC4Vd">L</span></button>
+            <label class="pcm-tb-toggle" id="pcmUnloadWrap" title="勾选后,本图清点支数以负数计入累计 (U)" data-page-node-id="VngjB37bHCfUZsx44d2pYf"><input type="checkbox" id="pcmUnload" data-page-node-id="8jsiLcAPb0D9ftm9qZn9Np"><span data-page-node-id="LupPupqTbSi2fpSg0GRxvA">⬇ 卸载</span><span class="pcm-tb-key" data-page-node-id="0aexf6R1L87tnwcJci1DFA">U</span></label>
+            <span class="pcm-act-spacer" data-page-node-id="g7Q3RE44OEqKrWVvd32SHZ"></span>
+            <span class="pcm-act-hint" data-page-node-id="Dtdd6JyPMqfKiZDs0VHQt2">点击图任意位置计 1 支、数字键 1–9 直输</span>
+        </div>
+        <div class="pcm-body" id="pcmBody" data-page-node-id="6UdqogpLrRkUnJPnNkEQof">
+            <div class="pcm-side-zoom" id="pcmSideZoom" data-page-node-id="ly7DNCeiYFk2Xpu3vzDACL">
+                <button type="button" id="pcmBigger" class="pcm-tb-btn" title="数字 +1 (+)" data-page-node-id="Uem7D5TQ5S4NbFYcJxVHHz">+</button>
+                <button type="button" id="pcmSmaller" class="pcm-tb-btn" title="数字 -1 (−)" data-page-node-id="Vp4VTRAwvs7lty1AAZq91C">−</button>
+            </div>
+            <div class="pcm-corner-undo" id="pcmCornerUndo" data-page-node-id="sCS2TMRlAGozDQpT5LLpdt">
+                <button type="button" id="pcmUndo" class="pcm-tb-btn pcm-tb-undo" title="撤销最近一次点击 (Z)" data-page-node-id="zAbRWHiNvYgB7uUDS36Xug"><span data-page-node-id="qWcxUJQpve9VGKGlWAFrdN">↩</span><span data-page-node-id="3mTvgE0W8rs2ytnrukTLNc">撤销</span><span class="pcm-tb-key" data-page-node-id="bUhGSA9KCUeH0XG89l4JcI">Z</span></button>
+            </div>
+            <div class="pcm-img-wrap" id="pcmImgWrap" data-page-node-id="cANG7PFiab0Fyc9fYGYydO">
+                <img id="pcmImg" class="pcm-img" src="" alt="摆放图" data-page-node-id="qF5KbUKzVTYV23iD3H7f1B">
+                <div id="pcmMarks" class="pcm-marks" data-page-node-id="WBY8JvOeTN0aK3wjtF1ln3"></div>
+            </div>
+        </div>
+        <div class="pcm-shortcuts" data-page-node-id="544fgy9sB1RtWDYR5Dmckm"><b data-page-node-id="xSAHZt8TVlvMBJYSBiXwcN">Z</b> 撤销 · <b data-page-node-id="2iqUqQQ77Gy4q9p7KaTWEZ">U</b> 卸载 · <b data-page-node-id="F0rqtDC6584bMIkIolkY8Z">L</b> 散码 · <b data-page-node-id="qaXLNLOKyoJfkbTFvM3cf8">M</b> 直输 · <b data-page-node-id="ficFzlWPrSD9j1jbo21zNm">+/−</b> 字号 · <b data-page-node-id="4fM9Ivo0XamhRVBgyzjk4T">1-9</b> 直输 · <b data-page-node-id="AOXGFDJx4EUo2RXrgZE1VA">Esc</b> 关闭</div>
+    </div>
+</div>
+
+<div id="looseCountModal" class="loose-count-modal" data-page-node-id="UJpcWGV5Dsw2GvMGWRMePl">
+    <div class="lcm-inner" data-page-node-id="cOc0G2Eibel7KVlbShxIuy">
+        <div class="lcm-title" data-page-node-id="I6wSQmGAdg37q4YcxrpONg">散码数量</div>
+        <div class="lcm-body" data-page-node-id="2R4U6iV0J4fvAo7YTPqPwV">
+            <input type="number" id="looseCountInput" min="0" step="1" placeholder="请输入散码数量" inputmode="numeric" data-page-node-id="jHARhZX7QpTJibSCTIRDOH">
+        </div>
+        <div class="lcm-actions" data-page-node-id="mUO91XmVZEnCY1wFRhMM3b">
+            <button type="button" id="looseCountCancel" class="lcm-cancel" data-page-node-id="ymWRA83p5bPgXeZlNV3s7M">取消</button>
+            <button type="button" id="looseCountSave" class="lcm-save" data-page-node-id="1xzSQgWh4MfCeX534x2iwX">保存</button>
+        </div>
+    </div>
+</div>
+
+<div id="manualCountModal" class="manual-count-modal" data-page-node-id="sQGMmBJW2ueaNrvOKnSjcc">
+    <div class="mcm-inner" data-page-node-id="7XHipPZ92kBZbXdiPLf1tV">
+        <div class="mcm-title" data-page-node-id="ShVMAPBjRJjpgD59Cf4VwL">🖊️ 直接输入支数</div>
+        <div class="mcm-body" data-page-node-id="A4a1MQKN8zD7RPana6zRbU">
+            <input type="number" id="manualCountInput" min="0" step="1" placeholder="请输入支数" inputmode="numeric" data-page-node-id="Lqh6V2sHBimzq0WoYJqPWn">
+            <div class="mcm-hint" data-page-node-id="8QwonnONWICgxQPsuPwFgD">直接输入会清空这张图的点击计数点,二者互斥。「清空」可恢复点击计数。</div>
+        </div>
+        <div class="mcm-actions" data-page-node-id="IcCLIWEd2gPG14LeTF10xL">
+            <button type="button" id="manualCountClear" class="mcm-clear" data-page-node-id="m1XA2YqVChjDA2ylUO5idL">清空</button>
+            <button type="button" id="manualCountCancel" class="mcm-cancel" data-page-node-id="AYd4cEzmK0OOATVKqQbCCu">取消</button>
+            <button type="button" id="manualCountSave" class="mcm-save" data-page-node-id="uc7TP0nLA0uqGljHgNMOmq">保存</button>
+        </div>
+    </div>
+</div>
+</div>
+
+<!-- 备注弹框 -->
+<div class="note-modal" id="noteModal" data-page-node-id="ZigYPBXSnd1DEInuPIhQhN">
+    <div class="note-dialog" data-page-node-id="OfYxK5aWo1euvossdfOrbG">
+        <h3 id="noteModalTitle" data-page-node-id="ZGAd6GaEqCwvh8dvHAn40E">📝 订单备注</h3>
+        <p id="noteModalOrderInfo" class="order-info" data-page-node-id="hDFpA2HzDtFIJAMvmxHCpH"></p>
+        <div style="margin-bottom:0.6rem;" data-page-node-id="tLjtSzCf0xd7hEsmSfidFc">
+            <label style="display:block; font-size:0.85rem; color:#636e72; margin-bottom:0.25rem; font-weight:600;" data-page-node-id="jSREqzWcZpISqjKCwiJ8dv">客户</label>
+            <input type="text" id="noteCustomerInput" placeholder="客户名称" style="width:100%; padding:0.5rem; border:1px solid #dfe6e9; border-radius:6px; font-size:0.9rem; box-sizing:border-box;" data-page-node-id="9XUg9eQ0B2mKFihEdMDGzE">
+        </div>
+        <div data-page-node-id="AdP4ULUv5leme3Y2EskFQF">
+            <label style="display:block; font-size:0.85rem; color:#636e72; margin-bottom:0.25rem; font-weight:600;" data-page-node-id="VSTEm8YNXinSoDaRb0gHnE">订单备注</label>
             <textarea id="noteTextarea" placeholder="请输入备注信息（可记录特殊情况、注意事项等）"></textarea>
         </div>
-        <div class="actions">
-            <button type="button" class="btn" onclick="closeNoteModal()" style="background:#868e96;color:#fff;">取消</button>
-            <button type="button" class="btn" onclick="clearNote()" style="background:#fab1a0;color:#fff;">清空备注</button>
-            <button type="button" class="btn" onclick="saveNote()" style="background:#6c5ce7;color:#fff;">保存</button>
+        <div class="actions" data-page-node-id="qECrVCOR5Mpos6MoDOR4BF">
+            <button type="button" class="btn" onclick="closeNoteModal()" style="background:#868e96;color:#fff;" data-page-node-id="jMhebCwECQSmXoZehAYcs9">取消</button>
+            <button type="button" class="btn" onclick="clearNote()" style="background:#fab1a0;color:#fff;" data-page-node-id="5iGAgKOhfAFRBRKJXPjzlA">清空备注</button>
+            <button type="button" class="btn" onclick="saveNote()" style="background:#6c5ce7;color:#fff;" data-page-node-id="7xujpS6MnVbaLP7MDMYMiE">保存</button>
         </div>
     </div>
 </div>
@@ -400,194 +705,45 @@
 <script>
 {% include '_record_image_script.html' %}
 </script>
+<script src="{{ url_for('static', filename='js/product_row_utils.js') }}"></script>
+<script src="/static/js/loading_placement_count.js"></script>
 <script>
 var LOADING_UNIT_LIST = {{ unit_list | default([]) | tojson }};
 
 var PIECE_CONVERSIONS = {{ piece_conversions | tojson }};
 
-function findLoadingUnit(productName, spec) {
-    if (spec) {
-        for (var i = 0; i < LOADING_UNIT_LIST.length; i++) {
-            var u = LOADING_UNIT_LIST[i];
-            if (u.product_name === productName && u.spec_keyword && spec.indexOf(u.spec_keyword) !== -1) {
-                return u;
-            }
-        }
-    }
-    for (var i = 0; i < LOADING_UNIT_LIST.length; i++) {
-        var u = LOADING_UNIT_LIST[i];
-        if (u.product_name === productName && !u.spec_keyword) {
-            return u;
-        }
-    }
-    return null;
-}
-
-// ── 件数换算（件 → 张/只/令）──
+// 商品行明细功能委托给共享工具 (static/js/product_row_utils.js)
+// 三个页面共用同一份实现, 减少重复维护; 下方包装函数保持原页面调用方式不变
 function findPieceConversion(productName, spec) {
-    if (spec) {
-        for (var i = 0; i < PIECE_CONVERSIONS.length; i++) {
-            var pc = PIECE_CONVERSIONS[i];
-            if (pc.product_name === productName && pc.spec_keyword && spec.indexOf(pc.spec_keyword) !== -1) {
-                return pc;
-            }
-        }
-    }
-    for (var i = 0; i < PIECE_CONVERSIONS.length; i++) {
-        var pc = PIECE_CONVERSIONS[i];
-        if (pc.product_name === productName && !pc.spec_keyword) {
-            return pc;
-        }
-    }
-    return null;
+    return ProductRowUtils.findPieceConversion(productName, spec);
 }
-
 function extractPiecesFromRemark(remark) {
-    if (!remark) return null;
-    var m = remark.match(/(\d+)件/);
-    return m ? parseInt(m[1]) : null;
+    return ProductRowUtils.extractPiecesFromRemark(remark);
 }
-
 function getPieceHint(productName, spec) {
-    var pc = findPieceConversion(productName, spec);
-    if (pc) {
-        return pc.units_per_piece + pc.target_unit + '/件';
-    }
-    return '';
+    return ProductRowUtils.getPieceHint(productName, spec);
 }
-
 function calcPieceQuantity(remark, productName, spec) {
-    var pieces = extractPiecesFromRemark(remark);
-    if (pieces === null) return null;
-    var pc = findPieceConversion(productName, spec);
-    if (!pc) return null;
-    return pieces * pc.units_per_piece;
+    return ProductRowUtils.calcPieceQuantity(remark, productName, spec);
 }
-
 function checkPieceMismatch(remark, qty, productName, spec) {
-    var pieces = extractPiecesFromRemark(remark);
-    if (pieces === null) return '';
-    var pc = findPieceConversion(productName, spec);
-    if (!pc) return '';
-    var expected = pieces * pc.units_per_piece;
-    var actual = parseFloat(qty);
-    if (isNaN(actual)) return '';
-    if (Math.abs(expected - actual) <= 0.01) return '';
-    return pieces === 1 ? 'info' : 'warn';
+    return ProductRowUtils.checkPieceMismatch(remark, qty, productName, spec);
 }
-
 function getLoadingUnitHint(productName, spec, quantity, unit, remark) {
-    var qty = parseFloat(quantity);
-    if (isNaN(qty)) return '';
-    // 单位已经是支：直接以数量作为支数提示（无需 YPP 配置）
-    if (unit === '支') {
-        if (qty === Math.floor(qty)) return Math.floor(qty) + '支';
-        return qty + '支';
-    }
-    // 单位是码（或其他）：需要 unit config 才能换算
-    var u = findLoadingUnit(productName, spec);
-    if (u && u.is_usingyardforcounting && u.yards_per_piece > 0) {
-        var ypp = u.yards_per_piece;
-        var pieces = Math.floor(qty / ypp);
-        var remainder = qty - (pieces * ypp);
-        if (remainder < 0.01) return pieces + '支';
-        return pieces + '支+' + Math.round(remainder * 100) / 100 + '码';
-    }
-    // 兜底：从备注中提取支数（如 kg 计重的无纺布备注 "3支"）
-    if (remark) {
-        var rm = remark.match(/(\d+)支/);
-        if (rm) return rm[1] + '支';
-    }
-    return '';
+    return ProductRowUtils.getUnitHint(LOADING_UNIT_LIST, productName, spec, quantity, unit, remark);
 }
-
 function checkLoadingMismatch(remark, quantity, productName, spec) {
-    var u = findLoadingUnit(productName, spec);
-    if (!u || !u.is_usingyardforcounting || u.yards_per_piece <= 0) return '';
-    if (!remark) return '';
-    var m = remark.match(/(\d+)支/);
-    if (!m) {
-        var yardVals = remark.match(/(\d+(?:\.\d+)?)\s*[yY码]/g);
-        if (yardVals) {
-            var sumYards = 0;
-            for (var j = 0; j < yardVals.length; j++) {
-                sumYards += parseFloat(yardVals[j].match(/[\d.]+/)[0]);
-            }
-            var actualYards = parseFloat(quantity);
-            if (!isNaN(actualYards) && Math.abs(sumYards - actualYards) > 0.01) return 'warn';
-        }
-        return '';
-    }
-    var pieces = parseInt(m[1]);
-    var ypp = u.yards_per_piece;
-
-    // 解析每支码数（* 形式 → 乘法语义，期望 = pieces × ypp，不加 ypp 后的数字）
-    // 例如 "3支*48.5y" → 每支 48.5 码，期望 = 3 × ypp（ypp 应等于 48.5）
-    var perPieceYards = null;
-    var perPieceMatch = remark.match(/(\d+(?:\.\d+)?)\s*[yY码]\s*\*\s*(\d+)支/);
-    if (!perPieceMatch) {
-        perPieceMatch = remark.match(/(\d+)支\s*\*\s*(\d+(?:\.\d+)?)\s*[yY码]/);
-        if (perPieceMatch) perPieceYards = parseFloat(perPieceMatch[2]);
-    } else {
-        perPieceYards = parseFloat(perPieceMatch[1]);
-    }
-
-    // 散码累加：排除掉 * 形式里那两个数字，只算独立的 +Yy 或裸 Yy
-    var loose = 0;
-    // 先把 * 形式整段从备注里抠掉，剩下的码数才是真正的"散码"
-    var remarkWithoutMul = remark
-        .replace(/(\d+(?:\.\d+)?)\s*[yY码]\s*\*\s*(\d+)支/g, '')
-        .replace(/(\d+)支\s*\*\s*(\d+(?:\.\d+)?)\s*[yY码]/g, '');
-    var yardRe = /(\d+(?:\.\d+)?)\s*[yY码]/g;
-    var ym;
-    while ((ym = yardRe.exec(remarkWithoutMul)) !== null) {
-        loose += parseFloat(ym[1]);
-    }
-
-    // 期望 = pieces × 每支码数（来自 * 或来自 product_units 的 ypp）+ 散码
-    var yardsPerPiece = perPieceYards != null ? perPieceYards : ypp;
-    var expected = pieces * yardsPerPiece + loose;
-    var actual = parseFloat(quantity);
-    if (isNaN(actual)) return '';
-    if (Math.abs(expected - actual) <= 0.01) return '';
-    return pieces === 1 ? 'info' : 'warn';
+    return ProductRowUtils.checkMismatch(LOADING_UNIT_LIST, remark, quantity, productName, spec);
 }
-
 function loadingMismatchIcon(level) {
-    if (level === 'warn') return '❌ ';
-    if (level === 'info') return '💡 ';
-    return '';
+    return ProductRowUtils.mismatchIcon(level);
 }
-
 function applyLoadingMismatch(tr, level) {
-    tr.classList.remove('row-warn', 'row-info');
-    if (level) tr.classList.add(level === 'warn' ? 'row-warn' : 'row-info');
+    return ProductRowUtils.applyMismatchClass(tr, level);
 }
-
-// 备注件数自动填充数量
 function autoFillQtyFromRemark(inputEl) {
-    var row = inputEl.closest('tr');
-    var remark = inputEl.value.trim();
-    var pieces = extractPiecesFromRemark(remark);
-    if (pieces === null) return;
-    if (/[+*]/.test(remark)) return;
-    var tds = row.querySelectorAll('td');
-    var productName = (tds[1] && tds[1].textContent || '').trim();
-    var spec = (tds[2] && tds[2].textContent || '').trim();
-    // 编辑模式下从 input 读取
-    var nameInput = row.querySelector('input[name="name"]');
-    var specInput = row.querySelector('input[name="spec"]');
-    if (nameInput) productName = nameInput.value.trim();
-    if (specInput) spec = specInput.value.trim();
-    var pc = findPieceConversion(productName, spec);
-    if (!pc) return;
-    var qtyInput = row.querySelector('input[name="qty"]') || row.querySelector('input[name="quantity"]');
-    if (!qtyInput) return;
-    if (!qtyInput.dataset.userEdited) {
-        qtyInput.value = pieces * pc.units_per_piece;
-    }
+    return ProductRowUtils.autoFillQtyFromRemark(inputEl);
 }
-
 document.addEventListener('input', function(e) {
     if (e.target.name === 'qty') {
         e.target.dataset.userEdited = '1';
@@ -976,7 +1132,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 "<button type='button' class='move-down-btn lock-hide' data-id='"+tr.dataset.editId+"' onclick='moveRecord("+tr.dataset.editId+",\"down\",this)' style='background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;margin-right:0.3rem;' title='下移'>▼</button>" +
                 "<button type='button' class='edit-record-btn lock-hide' data-id='"+tr.dataset.editId+"' onclick='editRecord("+tr.dataset.editId+", this)' style='background:none;border:none;color:#00b894;cursor:pointer;font-size:0.85rem;margin-right:0.4rem;' title='修改'>✏️</button>" +
                 "<button type='button' class='del-record-btn lock-hide' data-id='"+tr.dataset.editId+"' onclick='deleteRecord("+tr.dataset.editId+", this)' style='background:none;border:none;color:#ff7675;cursor:pointer;font-size:0.85rem;' title='删除'>🗑️</button>" +
-                "<button type='button' class='btn btn-sm record-image-btn lock-hide' data-record-id='"+tr.dataset.editId+"'>🖼️</button>" +
+                "<button type='button' class='btn btn-sm record-image-btn lock-hide' data-record-id='"+tr.dataset.editId+"' title='上传图片到此商品' style='background:#74b9ff;color:#fff;'>🖼️</button>" +
                 "<input type='file' class='record-image-input' data-record-id='"+tr.dataset.editId+"' accept='image/*' multiple style='display:none;'>" +
             '</td>';
     };
@@ -1111,8 +1267,8 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     // ── 构建装柜明细行 ──
+    // ── 构建装柜明细行 ── (2026-08-29 与出货/入库对齐: 增加 eco/jia-mian/qty_invalid 支持)
     function buildLoadingRecordRow(rec, tbody) {
-        // 计算序号：现有数据行数 + 1
         var existingRows = tbody ? tbody.querySelectorAll('tr:not(.quick-add-row):not(.summary-row)').length : 0;
         var tr = document.createElement('tr');
         tr.setAttribute('data-record-id', rec.id);
@@ -1120,78 +1276,40 @@ document.addEventListener('DOMContentLoaded', function() {
         var mismatch = checkLoadingMismatch(rec.remark || '', rec.quantity, rec.product_name, rec.specification || '');
         var pieceHint = getPieceHint(rec.product_name, rec.specification || '');
         var pieceMismatch = checkPieceMismatch(rec.remark || '', rec.quantity, rec.product_name, rec.specification || '');
-        if (mismatch === 'warn' || pieceMismatch === 'warn') { tr.classList.add('row-warn'); }
-        else if (mismatch === 'info' || pieceMismatch === 'info') { tr.classList.add('row-info'); }
+        var qtyInvalid = ProductRowUtils.isInvalidQty(rec.quantity);
+        var isEco = (rec.product_name || '').indexOf('环保') !== -1;
+        var isJiaMian = (rec.product_name || '').indexOf('杂胶') !== -1 && (rec.specification || '').indexOf('加面') !== -1;
+        var combinedMismatch = '';
+        if (mismatch === 'warn' || pieceMismatch === 'warn') combinedMismatch = 'warn';
+        else if (mismatch === 'info' || pieceMismatch === 'info') combinedMismatch = 'info';
+        var iconHtml = qtyInvalid ? ProductRowUtils.invalidQtyIcon() : loadingMismatchIcon(combinedMismatch);
+        var ecoHtml = isEco ? '<span class="eco-icon" title="环保产品">🌿</span>' : '';
+        var jiaHtml = isJiaMian ? '<svg class="jia-mian-icon" viewBox="0 0 16 16" width="14" height="14" title="加面工艺"><defs><pattern id="jm-mesh-new-' + rec.id + '" width="3" height="3" patternUnits="userSpaceOnUse"><path d="M0,3 L3,0" stroke="currentColor" stroke-width="0.6"/><path d="M0,0 L3,3" stroke="currentColor" stroke-width="0.6"/></pattern></defs><rect width="16" height="16" fill="url(#jm-mesh-new-' + rec.id + ')"/></svg>' : '';
         tr.innerHTML =
-            '<td style="width:40px;text-align:center;color:#868e96;font-size:0.85rem;">' + loadingMismatchIcon(mismatch) + (existingRows + 1) + '</td>' +
-            '<td class="product-name-cell">' + escHtml(rec.product_name) + '</td>' +
-            '<td class="spec-cell">' + escHtml(rec.specification || '-') + '</td>' +
-            '<td><span class="qty-badge">' + escHtml(rec.quantity) + '</span></td>' +
-            '<td><span class="unit-badge">' + escHtml(rec.unit) + '</span></td>' +
+            '<td style="text-align:center;color:#868e96;font-size:0.85rem;">' + iconHtml + (existingRows + 1) + '</td>' +
+            '<td class="eco-col">' + ecoHtml + jiaHtml + '</td>' +
+            '<td class="product-name-cell" style="font-size:0.9rem;">' + escHtml(rec.product_name) + '</td>' +
+            '<td class="spec-cell" style="color:#636e72; font-size:0.9rem;">' + escHtml(rec.specification || '-') + '</td>' +
+            '<td class="qty-cell"><span class="qty-badge">' + escHtml(rec.quantity) + '</span></td>' +
+            '<td class="unit-cell"><span class="unit-badge">' + escHtml(rec.unit) + '</span></td>' +
             '<td class="remark-cell' + (rec.remark ? ' has-content' : '') + '">' + escHtml(rec.remark || '-') + '</td>' +
             '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">' + escHtml(unitHint) + (pieceHint ? '<br><span style="color:#0984e3;">' + escHtml(pieceHint) + '</span>' : '') + '</td>' +
             '<td style="white-space:nowrap;">' +
-                '<button type="button" class="move-up-btn lock-hide" data-id="' + rec.id + '" onclick="moveRecord(' + rec.id + ',\'up\',this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;" title="上移">▲</button>' +
-                '<button type="button" class="move-down-btn lock-hide" data-id="' + rec.id + '" onclick="moveRecord(' + rec.id + ',\'down\',this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;margin-right:0.3rem;" title="下移">▼</button>' +
+                '<button type="button" class="move-up-btn lock-hide" data-id="' + rec.id + '" onclick="moveRecord(' + rec.id + ",'" + 'up' + "'" + ',this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;" title="上移">▲</button>' +
+                '<button type="button" class="move-down-btn lock-hide" data-id="' + rec.id + '" onclick="moveRecord(' + rec.id + ",'" + 'down' + "'" + ',this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;margin-right:0.3rem;" title="下移">▼</button>' +
                 '<button type="button" class="edit-record-btn lock-hide" data-id="' + rec.id + '" onclick="editRecord(' + rec.id + ', this)" style="background:none;border:none;color:#00b894;cursor:pointer;font-size:0.85rem;margin-right:0.4rem;" title="修改">✏️</button>' +
                 '<button type="button" class="del-record-btn lock-hide" data-id="' + rec.id + '" onclick="deleteRecord(' + rec.id + ', this)" style="background:none;border:none;color:#ff7675;cursor:pointer;font-size:0.85rem;" title="删除">🗑️</button>' +
             '</td>';
+        if (qtyInvalid) tr.classList.add('row-out-of-stock');
+        else if (combinedMismatch === 'warn') tr.classList.add('row-warn');
+        else if (combinedMismatch === 'info') tr.classList.add('row-info');
+        if (isEco) tr.classList.add('row-eco');
         return tr;
     }
-
-    // ── 重新计算装柜备注汇总 ──
+    // 重新计算装柜备注汇总 —— 委托给共享工具 (tbody-tr 模式)
     function recalcLoadingSummary(dateGroup) {
-        var tbody = dateGroup.querySelector('.record-table tbody');
-        var rows = tbody.querySelectorAll('tr:not(.quick-add-row):not(.summary-row)');
-        var totalPieces = 0;
-        var totalLoosePieces = 0;
-        var totalUnitPieces = 0;
-        rows.forEach(function(row) {
-            var remarkCell = row.querySelector('.remark-cell');
-            if (remarkCell) {
-                var remark = remarkCell.textContent.trim();
-                if (remark && remark !== '-') {
-                    var m = remark.match(/(\d+)支/);
-                    if (m) totalPieces += parseInt(m[1]);
-                    var looseMatches = remark.match(/\d+(?:\.\d+)?[yY码]/g);
-                    if (looseMatches) totalLoosePieces += looseMatches.length;
-                }
-            }
-            // 从辅助单位提示中提取支数（涵盖 unit=支 直接显示 + unit=y 换算后的结果）
-            var hintCell = row.querySelector('.unit-hint-cell');
-            if (hintCell) {
-                var hintText = hintCell.textContent.trim();
-                var hm = hintText.match(/(\d+(?:\.\d+)?)支/);
-                if (hm) totalUnitPieces += parseFloat(hm[1]);
-            }
-        });
-
-        // 整数显示
-        if (totalUnitPieces === Math.floor(totalUnitPieces)) {
-            totalUnitPieces = Math.floor(totalUnitPieces);
-        }
-
-        // 移除旧汇总行
-        var oldSummary = tbody.querySelector('.summary-row');
-        if (oldSummary) oldSummary.remove();
-
-        if (totalPieces === 0 && totalLoosePieces === 0 && totalUnitPieces === 0) return;
-
-        var summaryText1 = totalPieces + '支';
-        if (totalLoosePieces > 0) summaryText1 += '+' + totalLoosePieces + '支散码';
-
-        var summaryRow = document.createElement('tr');
-        summaryRow.className = 'summary-row';
-        summaryRow.style.cssText = 'background:#f0fdf4;font-weight:600;border-top:2px solid #00b894;';
-        summaryRow.innerHTML =
-            '<td colspan="5" style="text-align:right;padding:0.6rem 0.75rem;color:#00b894;font-size:0.9rem;">📊 备注支数：</td>' +
-            '<td style="padding:0.6rem 0.75rem;color:#2d3436;font-size:0.9rem;">' + summaryText1 + '</td>' +
-            '<td style="padding:0.6rem 0.75rem;color:#00b894;font-size:0.9rem;">📊 明细支数：' + totalUnitPieces + '支</td>' +
-            '<td style="padding:0.6rem 0.75rem;"></td>' +
-            '<td style="padding:0.6rem 0.75rem;"></td>';
-        tbody.appendChild(summaryRow);
+        ProductRowUtils.refreshRemarkSummary(dateGroup, 'tbody-tr');
     }
-
     // ── 覆盖共享 _smart_add_modal.html 的 submitAiResults ──
     // 原因：共享模板发送 {items} 但装柜 API 需要 {records}；行格式也需匹配装柜页面
     window.submitAiResults = function() {

@@ -58,11 +58,14 @@ class ComparePromptRule1Tests(unittest.TestCase):
         self.assertNotIn('环保杂胶匹配', self.prompt_block)
         self.assertIn('环保 X 匹配', self.prompt_block)
 
-    def test_version_bumped_to_compare_rows_v2(self):
-        """OCR_MATCH_PROMPT_VERSION 应已 bump 到 compare_rows_v2,
-        这样将来 ai-match 事件能按版本号分流比对(与 v1 历史数据平行)。"""
-        self.assertIn("OCR_MATCH_PROMPT_VERSION = 'compare_rows_v2'", self.src,
-            'OCR_MATCH_PROMPT_VERSION 应已 bump 到 compare_rows_v2')
+    def test_version_no_longer_at_compare_rows_v2(self):
+        """历史基线:2026-08-28 已 bump 到 compare_rows_v3(加严 Rule 4 加面例外)。
+
+        本测试只断言「不再停在 v2」(即 v3 测试负责断言「现在在 v3」),
+        v2/v3 字面量本身必须保留作为 audit baseline —— 见下方 test_old_baseline_preserved。
+        """
+        self.assertNotIn("OCR_MATCH_PROMPT_VERSION = 'compare_rows_v2'", self.src,
+            'OCR_MATCH_PROMPT_VERSION 已 bump 到 v3,v2 不应再作为当前版本常量')
 
     def test_old_baseline_preserved_in_history(self):
         """防回归:tests/test_ocr_match_event_triggers.py 不能因版本 bump 而删除

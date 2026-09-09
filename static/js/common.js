@@ -81,6 +81,8 @@ function navScroll(dir) {
 
 function updateNavArrows() {
     var nav = document.querySelector('.nav-links');
+    // 2026-09-09: 移动端页(/m/...)无 .nav-links,直接读 scrollWidth 会抛 null 错误,加守卫
+    if (!nav) return;
     var leftBtn = document.querySelector('.nav-arrow-left');
     var rightBtn = document.querySelector('.nav-arrow-right');
     var hasOverflow = nav.scrollWidth > nav.clientWidth + 2;

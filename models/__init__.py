@@ -12,7 +12,6 @@ from .orders import (
     InboundOrder, InboundRecord, InboundImage, InboundPlacementImage,
     LoadingOrder, LoadingOrderRecord, LoadingOrderImage, LoadingPlacementImage,
     UnifiedSearch, OcrMatchEvent,
-    CopyPaperImage,
 )
 from .point_count import PointCountSession, PointCountImage
 from .stock import StockOutItem
@@ -31,7 +30,6 @@ __all__ = [
     'InboundOrder', 'InboundRecord', 'InboundImage', 'InboundPlacementImage',
     'LoadingOrder', 'LoadingOrderRecord', 'LoadingOrderImage', 'LoadingPlacementImage',
     'UnifiedSearch', 'OcrMatchEvent',
-    'CopyPaperImage',
     'PointCountSession', 'PointCountImage',
     'StockOutItem',
     'ProductUnit', 'ProductCategory', 'Product',
