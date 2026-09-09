@@ -1019,6 +1019,16 @@ document.getElementById('voiceInputBtn').addEventListener('click', function () {
                     {% endif %}
                 </div>
                 {% endfor %}
+                {# 2026-09-09: 拷贝纸/日本纸 label 图混排到普通区 (source='copy_paper_label') #}
+                {% for img in all_order_imgs if img.source == 'copy_paper_label' %}
+                <div class="img-item img-item-record img-item-copy-paper-label" data-record-pk="{{ img.record_pk }}" data-image-id="{{ img.id }}">
+                    <div class="img-photo">
+                        <img src="/upload/{{ img.relative_path }}" alt="{{ img.original_name or '拷贝纸标签' }}" onclick="showImgPreview('/upload/{{ img.relative_path }}')">
+                        <button class="copy-paper-label-del-btn lock-hide" data-image-id="{{ img.id }}">× 删除</button>
+                        <div class="img-overlay-name">📋 拷贝纸标签</div>
+                    </div>
+                </div>
+                {% endfor %}
             </div>
             {% endif %}
             <div class="lock-hide" style="text-align:right; margin-top:0.25rem;">
@@ -1099,7 +1109,7 @@ document.getElementById('voiceInputBtn').addEventListener('click', function () {
                         {% endif %}
                     </div>
                     <div class="copy-paper-thumb-list">
-                        {% for img in item.copy_paper_images %}
+                        {% for img in item.copy_paper_images if img.source == 'count' %}
                         <div class="copy-paper-thumb" data-image-id="{{ img.id }}">
                             <img src="/upload/{{ img.file_path }}" alt="copy paper {{ img.source }}">
                             <span class="copy-paper-tag tag-{{ img.source }}">{{ '标签' if img.source == 'label' else '点数' }}</span>

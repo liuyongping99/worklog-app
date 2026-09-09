@@ -441,3 +441,117 @@ def test_template_buttons_have_onclick():
         ok = rid in ('{{ item.id }}',) or rid.isdigit()
         ok2 = oid in ('{{ group.id }}',) or oid.isdigit()
         assert ok and ok2, f'张数按钮参数错: ({rid!r}, {oid!r})'
+
+
+# ─────────────────────────────────────────────────────────
+# Task 1 (2026-09-09): 拷贝纸标签图渲染归属测试
+# ─────────────────────────────────────────────────────────
+
+def test_label_image_renders_in_order_images_area(client, fresh_record):
+    """拷贝纸 label 图 → 渲染在 order-images-area (.img-item-copy-paper-label)"""
+    rid = fresh_record
+    # 登录(必须,shipping-records 页有 before_request gate)
+    _login_test_user(client)
+    # 上传 1 张 label 图 + 1 张 count 图
+    client.post(
+        f'/api/v1/shipping-orders/records/{rid}/copy-paper-images',
+        data={'source': 'label', 'image': (io.BytesIO(_png_bytes()), 'lbl.png')},
+        content_type='multipart/form-data',
+    )
+    client.post(
+        f'/api/v1/shipping-orders/records/{rid}/copy-paper-images',
+        data={'source': 'count', 'image': (io.BytesIO(_png_bytes()), 'cnt.png')},
+        content_type='multipart/form-data',
+    )
+    resp = client.get('/shipping-records?start_date=2026-09-06&end_date=2030-01-01')
+    html = resp.get_data(as_text=True)
+    assert resp.status_code == 200
+
+    # 作用域:本 record 所在的 date-group
+    import re
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute('SELECT order_pk FROM shipping_records WHERE id = ?', (rid,))
+    order_id = cur.fetchone()['order_pk']
+    conn.close()
+
+    tr_re = re.compile(rf'<tr[^>]*data-record-id="{rid}"[^>]*>')
+    tr_match = tr_re.search(html)
+    assert tr_match, f'找不到 record {rid} 对应的 <tr>'
+    grp_start = html.rfind('<div class="date-group"', 0, tr_match.end())
+    grp_end = html.find('<div class="date-group"', tr_match.end())
+    if grp_end == -1:
+        grp_end = len(html)
+    grp_html = html[grp_start:grp_end]
+
+    assert 'img-item-copy-paper-label' in grp_html, \
+        f'order {order_id} 的 label 图应渲染 .img-item-copy-paper-label class'
+    assert 'copy-paper-label-del-btn' in grp_html, \
+        f'order {order_id} 的 label 图应带 .copy-paper-label-del-btn 删除按钮'
+    assert '拷贝纸标签' in grp_html, \
+        f'order {order_id} 的 label 图应有「拷贝纸标签」水印标识'
+
+
+def test_count_image_still_renders_in_copy_paper_area(client, fresh_record):
+    """拷贝纸 count 图 → 仍渲染在 copy-paper-area,不出现在 order-images-area"""
+    rid = fresh_record
+    _login_test_user(client)
+    # 只上传 1 张 count 图
+    client.post(
+        f'/api/v1/shipping-orders/records/{rid}/copy-paper-images',
+        data={'source': 'count', 'image': (io.BytesIO(_png_bytes()), 'cnt.png')},
+        content_type='multipart/form-data',
+    )
+    resp = client.get('/shipping-records?start_date=2026-09-06&end_date=2030-01-01')
+    html = resp.get_data(as_text=True)
+    assert resp.status_code == 200
+
+    # 找到本 record 所属的 date-group(整张订单)
+    # date-group 的 data-order-id 与 record 的 order_id 对应
+    import re
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute('SELECT order_pk FROM shipping_records WHERE id = ?', (rid,))
+    order_id = cur.fetchone()['order_pk']
+    conn.close()
+
+    # date-group 是 <div class="date-group" data-order-id="<order_id>" ...>...</div>
+    # 在它里面找本 record 的 <tr data-record-id="<rid>">
+    tr_re = re.compile(
+        rf'<tr[^>]*data-record-id="{rid}"[^>]*>',
+    )
+    tr_match = tr_re.search(html)
+    assert tr_match, f'找不到 record {rid} 对应的 <tr>'
+
+    # date-group 边界(下一个 date-group 之前)
+    grp_start = html.rfind('<div class="date-group"', 0, tr_match.end())
+    grp_end = html.find('<div class="date-group"', tr_match.end())
+    if grp_end == -1:
+        grp_end = html.find('<!-- 空状态', tr_match.end())
+    if grp_end == -1:
+        grp_end = len(html)
+    grp_html = html[grp_start:grp_end]
+
+    # 本 record 所在 date-group 内:
+    # - 应有 copy-paper-area (count 图渲染)
+    # - 不应有 img-item-copy-paper-label (本 record 只传了 count)
+    assert 'copy-paper-area' in grp_html, \
+        f'order {order_id} 应有 copy-paper-area 渲染 count 图'
+    assert 'img-item-copy-paper-label' not in grp_html, \
+        f'order {order_id} 只上传了 count, 不应有 label 图'
+
+
+def _login_test_user(client):
+    """测试用登录 helper:拿到任意一个 active staff_id 用于登录。
+    若没有 active staff 就跳过(让后续 GET 仍 302,测试失败信息更清楚)。"""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute('SELECT id FROM staff WHERE is_active = 1 LIMIT 1')
+    row = cur.fetchone()
+    conn.close()
+    if row is None:
+        return
+    sid = row['id']
+    # 走 GET /login 拿 cookie + 跳转 — 测试 client 跟会话
+    client.get('/login')
+    client.post('/login', data={'staff_id': sid})

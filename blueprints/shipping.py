@@ -321,6 +321,22 @@ def shipping_records():
 
             # 2026-09-06: 拷贝纸/日本纸 行级图片 + 张数比对
             _enrich_copy_paper_for_item(item)
+
+            # 2026-09-09: 拷贝纸/日本纸 label 图混排到普通商品图区
+            # (张数图保留在 copy-paper-area,仅 label 图走 order-images-area)
+            if item.get('is_copy_paper'):
+                for lbl in (item.get('copy_paper_images') or []):
+                    if lbl.get('source') != 'label':
+                        continue
+                    # 补 relative_path (用 ShippingImage helper,支持 Windows 反斜杠)
+                    if not lbl.get('relative_path') and lbl.get('file_path'):
+                        lbl['relative_path'] = ShippingImage.get_relative_path(lbl['file_path'])
+                    # 标记 source 让模板能特判(不渲染 match-badge/人工核查)
+                    lbl['source'] = 'copy_paper_label'
+                    # 注入 record_pk 让模板 img-overlay-name 能查 record_by_pk 拿品名
+                    lbl['record_pk'] = item['id']
+                    # 注入到 order_non_ai 复用现有渲染管线
+                    order_non_ai.setdefault(group['id'], []).append(lbl)
         group.update(summarize_remarks(group['records']))
         group['has_eco'] = any('环保' in r.get('product_name', '') for r in group['records'])
         group['has_jia_mian'] = any(
