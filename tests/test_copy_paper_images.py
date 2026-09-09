@@ -555,3 +555,21 @@ def _login_test_user(client):
     # 走 GET /login 拿 cookie + 跳转 — 测试 client 跟会话
     client.get('/login')
     client.post('/login', data={'staff_id': sid})
+
+
+def test_image_upload_modal_routes_copy_paper_to_copy_paper_endpoint():
+    """防回归: 2026-09-09 bug — _image_upload_modal 的 confirmUpload 没分流 copy-paper,
+    走 placement-images 端点导致图片落 shipping_images(source='placement') 而非 copy_paper_images。
+
+    验证 _image_upload_modal.html 的 URL building 含 _copyPaperUploadSource 分支。
+    """
+    with open('templates/_image_upload_modal.html', encoding='utf-8') as f:
+        html = f.read()
+    # URL 应含 copy-paper-images 分支
+    assert 'window._copyPaperUploadSource' in html, \
+        '_image_upload_modal.html 缺 _copyPaperUploadSource 分支'
+    assert "'/records/' + savedTarget.pk + '/copy-paper-images'" in html, \
+        '_image_upload_modal.html 缺 copy-paper-images URL'
+    # formData 应携带 source 字段
+    assert "formData.append('source', window._copyPaperUploadSource)" in html, \
+        '_image_upload_modal.html 缺 source 字段携带'

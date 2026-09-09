@@ -317,11 +317,19 @@ window.confirmUpload = function() {
     // 按 target.type 拼 URL:
     //   'order'  → IMAGE_API + '/<order_pk>/images'
     //   'record' → IMAGE_API + '/records/<record_pk>/images'
-    var url = savedTarget.type === 'record'
-        ? IMAGE_API + '/records/' + savedTarget.pk + '/images'
-        : savedTarget.type === 'placement'
-        ? IMAGE_API + '/records/' + savedTarget.pk + '/placement-images'
-        : IMAGE_API + '/' + savedTarget.pk + '/images';
+    // 2026-09-09: copy-paper 分流 (由 copy_paper.js 标记 _copyPaperUploadSource)
+    //   → IMAGE_API + '/records/<record_pk>/copy-paper-images'
+    //   (source='label'/'count' 携带在 formData 里)
+    var url;
+    if (window._copyPaperUploadSource) {
+        url = IMAGE_API + '/records/' + savedTarget.pk + '/copy-paper-images';
+    } else if (savedTarget.type === 'record') {
+        url = IMAGE_API + '/records/' + savedTarget.pk + '/images';
+    } else if (savedTarget.type === 'placement') {
+        url = IMAGE_API + '/records/' + savedTarget.pk + '/placement-images';
+    } else {
+        url = IMAGE_API + '/' + savedTarget.pk + '/images';
+    }
     // ── loading 状态: OCR 跑分需 ~1-3s, 给用户即时反馈避免以为卡死
     var _confirmBtn = document.querySelector('.preview-actions .btn-confirm');
     var _origBtnText = _confirmBtn ? _confirmBtn.textContent : '';
@@ -332,6 +340,10 @@ window.confirmUpload = function() {
     getRotatedImageFile(pendingFile, uploadImageRotation).then(function(fileToUpload) {
         var formData = new FormData();
         formData.append('image', fileToUpload);
+        // 2026-09-09: copy-paper 上传携带 source 字段('label' or 'count')
+        if (window._copyPaperUploadSource) {
+            formData.append('source', window._copyPaperUploadSource);
+        }
         return fetch(url, { method: 'POST', body: formData });
     }).then(function(res) { return res.json(); })
     .then(function(data) {
