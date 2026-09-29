@@ -18,6 +18,7 @@ from flask import Blueprint, render_template, request, jsonify, current_app, ses
 from models import (
     ShippingOrder, ShippingRecord, ShippingImage, ProductUnit, PieceConversion, AuditLog,
     OcrMatchEvent, PlacementImage,
+    InboundRecord, LoadingOrderRecord,  # 2026-09-21: ypp-review scan 支持入库/装柜
     classify_record, CategoryPrompt,
 )
 from blueprints._helpers import (
@@ -53,6 +54,21 @@ SANMA_RE = re.compile(r'(?<![\d.])(\d+)\s*[yY]')
 #   - has_image / ocr_images 统计:排除(不做 OCR,不算已核对图)
 COPY_PAPER_LABEL_SOURCE = 'copy_paper_label'
 from blueprints.ocr_log import set_log_context
+
+
+# 2026-09-29: 皮革/木板 类商品按"块"计数,无需拍照,商品行不应显示🖼️ 上传按钮。
+# 与 mobile_shipping.py / inbound.py / loading.py 三个端点的同名检测保持一致,
+# 模板 `{% if not item.is_board %}` 守卫依赖此函数 + item['is_board'] 上下文。
+# 关键检测:'皮革' 与 '木板' 任一关键字出现即视为 board,避免『皮革木板』字面量
+# 检查漏掉『皮革』单独存在(2026-08-30 用户报告 bug)。
+_BOARD_KEYWORDS = ("皮革", "木板")
+
+
+def _is_board(product_name) -> bool:
+    """商品名是否属于皮革/木板类(按"块"计数,行级不显示图片按钮)。"""
+    if not product_name:
+        return False
+    return any(k in product_name for k in _BOARD_KEYWORDS)
 
 
 # 摆放图"支数"口径:直接输入(manual_count)优先,无则回退点击计数点(n_marks)。
@@ -308,6 +324,21 @@ def shipping_records():
         return get_ypp(product_name, spec, units_cache=units)
 
     total_orders = ShippingOrder.count_by_date(today)
+    locked_orders = ShippingOrder.count_locked_by_date(today)  # 2026-09-17 新增
+
+    # 2026-09-29: 顶部趋势图数据 —— 最近 7 天(按日) + 最近 6 个月(按月)
+    _today_d = date_cls.today()
+    _week_start = (_today_d - timedelta(days=6)).isoformat()  # 含今天共 7 天
+    trend_daily = ShippingOrder.count_by_date_range(_week_start, today)
+    # 最近 6 个月:用相对今天往前推 5 个月 + 当月,共 6 个月
+    _six_months_ago_y = _today_d.year
+    _six_months_ago_m = _today_d.month - 5
+    while _six_months_ago_m <= 0:
+        _six_months_ago_m += 12
+        _six_months_ago_y -= 1
+    _month_start = f'{_six_months_ago_y:04d}-{_six_months_ago_m:02d}'
+    _month_end = f'{_today_d.year:04d}-{_today_d.month:02d}'
+    trend_monthly = ShippingOrder.count_by_month_range(_month_start, _month_end)
 
     def _calc_hint(quantity_str, ypp, unit=None, remark=None):
         return calc_hint(quantity_str, ypp, unit=unit, remark=remark)
@@ -323,6 +354,9 @@ def shipping_records():
 
     for group in groups:
         for item in group['records']:
+            # 2026-09-29: 皮革/木板类不显示行级图片按钮 —— 模板守卫 `{% if not item.is_board %}`
+            # 必须依赖此字段;若未设,模板里 item.is_board 为 undefined/falsy,按钮照旧显示。
+            item['is_board'] = _is_board(item.get('product_name', ''))
             ypp = _get_ypp(item['product_name'], item.get('specification', ''))
             item['unit_hint'] = _calc_hint(item['quantity'], ypp, unit=item.get('unit', ''), remark=item.get('remark', ''))
             item['mismatch'] = _check_remark(
@@ -389,8 +423,11 @@ def shipping_records():
         page_title='出货记录',
         today=today,
         total_orders=total_orders,
+        locked_orders=locked_orders,  # 2026-09-17 新增:当日已锁单总数
         start_date=start_date,
         end_date=end_date,
+        trend_daily=trend_daily,  # 2026-09-29: 最近 7 天每日出货单数
+        trend_monthly=trend_monthly,  # 2026-09-29: 最近 6 个月每月出货单数
         unit_list=unit_list,
         piece_conversions=piece_conv_list,
     )
@@ -420,11 +457,16 @@ def shipping_ypp_review_page():
 
 @bp.route('/api/v1/shipping-orders/ypp-review/scan', methods=['POST'])
 def api_v1_shipping_orders_ypp_review_scan():
-    """扫全表所有出货明细,找出 YPP 规则冲突项。
+    """扫全表某业务线所有明细,找出 YPP 规则冲突项。
+
+    Query 参数 biz=shipping|inbound|loading,默认 shipping。
+    三页('/shipping-ypp-review' / '/inbound-records' / '/loading-orders')
+    共用同一端点,统一走 find_ypp_mismatches(record 字段一致)。
 
     Returns:
         {
           'success': True,
+          'biz': 'shipping|inbound|loading',
           'scanned_total': N,        # 扫了多少条(参与校验的明细)
           'items': [                 # 冲突项,按 warn→info,日期倒序
             {record_id, order_id, date, customer, product_name, specification,
@@ -433,10 +475,30 @@ def api_v1_shipping_orders_ypp_review_scan():
           ]
         }
     """
+    biz = (request.args.get('biz') or request.form.get('biz') or 'shipping').strip().lower()
     try:
-        records = ShippingRecord.get_all()
+        if biz == 'inbound':
+            # InboundRecord 没有 get_all,用 get_groups 拉全部日期范围
+            from datetime import date as _date, timedelta as _td
+            _today = _date.today()
+            groups = InboundRecord.get_groups(
+                (_today - _td(days=365*3)).isoformat(),
+                _today.isoformat(),
+            )
+            records = []
+            for g in groups:
+                for r in g.get('records', []):
+                    r['order_pk'] = g.get('id') or g.get('order_pk')
+                    r['date'] = g.get('date')
+                    r['customer'] = g.get('supplier') or g.get('customer') or ''
+                    records.append(r)
+        elif biz == 'loading':
+            # LoadingOrderRecord.get_all 已包含 order_pk/date/customer 字段
+            records = LoadingOrderRecord.get_all()
+        else:
+            records = ShippingRecord.get_all()
     except Exception as e:
-        current_app.logger.exception('ypp-review scan: failed to load records')
+        current_app.logger.exception('ypp-review scan: failed to load records biz=%s', biz)
         return jsonify({'success': False, 'error': f'加载明细失败: {e}'}), 500
     try:
         items = find_ypp_mismatches(records) or []
@@ -445,6 +507,7 @@ def api_v1_shipping_orders_ypp_review_scan():
         return jsonify({'success': False, 'error': f'扫描失败: {e}'}), 500
     return jsonify({
         'success': True,
+        'biz': biz,
         'scanned_total': len(records),
         'items': items,
     })
@@ -1079,6 +1142,14 @@ def api_v1_shipping_orders_record_upload_images(record_id):
     order = ShippingOrder.get_by_id(record['order_pk'])
     if order and order.get('is_locked'):
         return jsonify({'success': False, 'error': '该订单已锁定，无法上传图片'}), 403
+    # 2026-09-12: 拷贝纸/日本纸行禁止走普通 /images 端点 → 必须用 /copy-paper-images
+    # 后端硬拦截,避免 UI 隐藏被绕过(DevTools / 粘贴 / 拖拽)误触发 OCR 流水线产生误导性红 ✗
+    # 触发于出货订单 986 / record_id=2740(日本纸777/700)的 image_id=4370 误识别案例
+    if _is_copy_paper_item(record):
+        return jsonify({
+            'success': False,
+            'error': '该明细为拷贝纸/日本纸,请使用 🖼️ 标签按钮上传(不需 OCR)'
+        }), 400
 
     upload_dir, month_str = _get_upload_dir()
     source = 'upload'
@@ -1571,6 +1642,42 @@ def shipping_records_ai_recognize():
         }), 500
 
     if result.get('success'):
+        # 【2026-09-15】重复检测:对照订单已有明细,对重复项标 duplicate=true,
+        # 前端智能添加弹框渲染红色 ⚠️ 警示,让用户手动核对而不是盲目批量入库。
+        # 场景:订单 1011 (KILA GROUP装柜) AI 误把 3 条数量(3504/2001/3483)
+        # 串行分配到错的品名+规格,新增的 2853/2854/2855 与原 2827/2828/2829 数量一致。
+        order_id_str = (request.form.get('order_id') or request.args.get('order_id') or '').strip()
+        if order_id_str and result.get('items'):
+            try:
+                order_id_int = int(order_id_str)
+                existing_records = ShippingRecord.get_by_order(order_id_int) if hasattr(ShippingRecord, 'get_by_order') else []
+                if not existing_records:
+                    from models._db import get_db as _get_db
+                    _conn = _get_db(); _cur = _conn.cursor()
+                    _cur.execute('SELECT id, product_name, specification, quantity, unit FROM shipping_records WHERE order_pk = ? ORDER BY sort_order, id', (order_id_int,))
+                    existing_records = [dict(r) for r in _cur.fetchall()]
+                    _conn.close()
+                for item in result['items']:
+                    if not isinstance(item, dict): continue
+                    qty = (item.get('quantity') or '').strip()
+                    pn = (item.get('product_name') or '').strip()
+                    sp = (item.get('specification') or '').strip()
+                    if not qty: continue
+                    # 三层重复: 数量完全相同(强); 品名+规格+数量 三项一致(最强)
+                    same_qty = [r for r in existing_records if str(r.get('quantity') or '').strip() == qty]
+                    same_full = [r for r in same_qty if str(r.get('product_name') or '').strip() == pn and str(r.get('specification') or '').strip() == sp]
+                    if same_full:
+                        item['duplicate'] = 'full'
+                        item['duplicate_existing_id'] = same_full[0]['id']
+                    elif same_qty:
+                        item['duplicate'] = 'quantity_only'
+                        item['duplicate_existing_ids'] = [r['id'] for r in same_qty]
+                    if item.get('duplicate'):
+                        current_app.logger.info(
+                            'AI-识别 标记重复: order=%s pn=%s sp=%s qty=%s kind=%s',
+                            order_id_int, pn, sp, qty, item['duplicate'])
+            except (ValueError, Exception) as e:
+                current_app.logger.warning('ai-recognize duplicate check 失败: %s', e)
         return jsonify(result)
     else:
         # 根据错误类型返回合适的 HTTP 状态码
@@ -2018,23 +2125,25 @@ def api_v1_shipping_orders_record_copy_paper_upload(rid):
 # ─────────────────────────────────────────────────────────
 
 def _is_copy_paper_item(item: dict) -> bool:
-    """判断 record 是否属于拷贝纸/日本纸类别。
+    """判断 record 是否属于拷贝纸/日本纸/快巴纸类别(均统一走 placement 点数体系)。
 
     双兜底:
-    1. 关键词匹配(product_name 含 '拷贝' 或 '日本纸')
+    1. 关键词匹配(product_name 含 '拷贝' / '日本纸' / '快巴')
     2. classify_record 查 product_categories 拿到 category_code,
-       是 '0105'(日本纸)或 '0107'(拷贝纸)时返回 True
+       是 '0105'(日本纸)/ '0106'(快巴纸)/ '0107'(拷贝纸)时返回 True
     """
     name = (item.get('product_name') or '').strip()
     # 关键词兜底
-    if '拷贝' in name or '日本纸' in name:
+    # 2026-09-22: +'快巴' 一并纳入(0106 快巴纸 与 0105/0107 同属卷纸类,点数统一走 placement)
+    if '拷贝' in name or '日本纸' in name or '快巴' in name:
         return True
     # JOIN category_code(若 helper 已存在)
     try:
         from models.category_prompt import classify_record
         result = classify_record(name, item.get('specification') or '')
         code = result.get('category_code') if isinstance(result, dict) else None
-        return code in ('0105', '0107')
+        # 2026-09-22: +'0106'(快巴纸) 一并纳入,与 0105 日本纸 / 0107 拷贝纸 统一走 placement-add-btn 点数体系
+        return code in ('0105', '0106', '0107')
     except Exception:
         return False
 

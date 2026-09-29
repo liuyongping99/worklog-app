@@ -167,6 +167,87 @@ class ShippingOrder:
         return n
 
     @staticmethod
+    def count_locked_by_date(date: str) -> int:
+        """指定日期的已锁单(is_locked=1)条数。
+
+        2026-09-17 新增:出货页 /shipping-records 头部"当天出货单数"旁显示
+        当日已锁单总数,便于一眼看出当天已确认多少单。
+        """
+        conn = get_db()
+        cursor = conn.cursor()
+        n = cursor.execute(
+            'SELECT COUNT(*) FROM shipping_orders WHERE date = ? AND is_locked = 1',
+            (date,)).fetchone()[0]
+        conn.close()
+        return n
+
+    @staticmethod
+    def count_by_date_range(start_date: str, end_date: str) -> list:
+        """返回 [start_date..end_date] 区间的每日出货单数(含 0 单的日期)。
+
+        2026-09-29 新增:出货页顶部"最近一周/最近6个月"趋势图用。
+        返回格式: [{date: 'YYYY-MM-DD', count: N}, ...],长度 = 区间天数。
+        区间端点闭区间,按 date 升序排列。0 单日期仍占位,便于前端对齐坐标轴。
+        """
+        from datetime import date as _date_cls, timedelta as _td
+        conn = get_db()
+        cursor = conn.cursor()
+        rows = cursor.execute(
+            'SELECT date, COUNT(*) AS n FROM shipping_orders '
+            'WHERE date >= ? AND date <= ? GROUP BY date',
+            (start_date, end_date)
+        ).fetchall()
+        counts_by_date = {r['date']: r['n'] for r in rows}
+        conn.close()
+
+        # 补齐区间内所有日期(0 单也占位),保证图表坐标轴完整
+        start = _date_cls.fromisoformat(start_date)
+        end = _date_cls.fromisoformat(end_date)
+        result = []
+        cur = start
+        while cur <= end:
+            d = cur.isoformat()
+            result.append({'date': d, 'count': counts_by_date.get(d, 0)})
+            cur += _td(days=1)
+        return result
+
+    @staticmethod
+    def count_by_month_range(start_month: str, end_month: str) -> list:
+        """返回 [start_month..end_month] 区间的每月出货单数(含 0 单的月份)。
+
+        2026-09-29 新增:出货页顶部"最近6个月"趋势图用。
+        入参/出参 month 格式: 'YYYY-MM'。
+        返回: [{month: 'YYYY-MM', count: N}, ...],长度 = 区间月数。
+        """
+        from datetime import date as _date_cls
+        conn = get_db()
+        cursor = conn.cursor()
+        # SQLite 没有原生 DATE_TRUNC,用 substr 取 YYYY-MM
+        rows = cursor.execute(
+            "SELECT substr(date, 1, 7) AS ym, COUNT(*) AS n "
+            "FROM shipping_orders "
+            "WHERE substr(date, 1, 7) >= ? AND substr(date, 1, 7) <= ? "
+            "GROUP BY ym ORDER BY ym",
+            (start_month, end_month)
+        ).fetchall()
+        counts_by_month = {r['ym']: r['n'] for r in rows}
+        conn.close()
+
+        # 补齐区间所有月份
+        sy, sm = map(int, start_month.split('-'))
+        ey, em = map(int, end_month.split('-'))
+        result = []
+        y, m = sy, sm
+        while (y, m) <= (ey, em):
+            ym = f'{y:04d}-{m:02d}'
+            result.append({'month': ym, 'count': counts_by_month.get(ym, 0)})
+            m += 1
+            if m > 12:
+                m = 1
+                y += 1
+        return result
+
+    @staticmethod
     def get_by_id(order_id: int):
         conn = get_db()
         cursor = conn.cursor()

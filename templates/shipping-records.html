@@ -118,6 +118,62 @@
     cursor: pointer; font-weight: 600; opacity: 0;
     transition: opacity 0.2s; z-index: 5;
 }
+
+/* 2026-09-29: 顶部出货趋势面板(最近 7 天 + 最近 6 个月) */
+.shipping-page .trends-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-md);
+    margin-top: 0.5rem;
+}
+.shipping-page .trend-panel {
+    background: linear-gradient(180deg, #f8fff8 0%, #ffffff 100%);
+    border: 1px solid var(--page-accent-bg);
+    border-radius: var(--radius-lg);
+    padding: 0.85rem 1rem 0.6rem;
+}
+.shipping-page .trend-panel-title {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--gray-800);
+    margin-bottom: 0.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.shipping-page .trend-panel-title .trend-total {
+    font-size: 0.78rem;
+    color: var(--gray-600);
+    font-weight: 500;
+}
+.shipping-page .trend-panel-title .trend-total strong {
+    color: var(--page-accent);
+    font-weight: 700;
+}
+.shipping-page .trend-chart {
+    width: 100%;
+    height: 150px;
+    display: block;
+}
+.shipping-page .trend-chart svg { width: 100%; height: 100%; display: block; }
+.shipping-page .trend-chart .bar { fill: var(--page-accent); transition: fill 0.15s; cursor: default; }
+.shipping-page .trend-chart .bar:hover { fill: #00997a; }
+.shipping-page .trend-chart .bar-zero { fill: #e9ecef; }
+.shipping-page .trend-chart .bar-label {
+    font-size: 11px; fill: var(--gray-700); text-anchor: middle;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+.shipping-page .trend-chart .axis-label {
+    font-size: 10px; fill: var(--gray-500); text-anchor: middle;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+.shipping-page .trend-chart .empty-hint {
+    font-size: 0.85rem; fill: var(--gray-500); text-anchor: middle;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+@media (max-width: 768px) {
+    .shipping-page .trends-grid { grid-template-columns: 1fr; }
+}
 .shipping-page .img-col-btn {
     background: #e9ecef; color: #495057; border: 1px solid #ced4da;
     border-radius: 5px; padding: 0.2rem 0.6rem; font-size: 0.78rem;
@@ -631,10 +687,39 @@
 .loose-count-modal .lcm-save { background: #00b894; color: #fff; }
 </style>
 
+<!-- 2026-09-29: 顶部出货趋势 —— 最近 7 天(每日) + 最近 6 个月(每月),两个并排 -->
+<div class="card shipping-page">
+    <h2 class="card-title">📈 出货趋势</h2>
+    <div class="trends-grid">
+        <div class="trend-panel">
+            <div class="trend-panel-title">
+                <span>📅 最近一周（每日）</span>
+                <span class="trend-total">本周共 <strong>{{ trend_daily | sum(attribute='count') }}</strong> 单</span>
+            </div>
+            <div class="trend-chart" id="trendDaily" data-points='{{ trend_daily | tojson }}'></div>
+        </div>
+        <div class="trend-panel">
+            <div class="trend-panel-title">
+                <span>📊 最近 6 个月（每月）</span>
+                <span class="trend-total">近 6 月共 <strong>{{ trend_monthly | sum(attribute='count') }}</strong> 单</span>
+            </div>
+            <div class="trend-chart" id="trendMonthly" data-points='{{ trend_monthly | tojson }}'></div>
+        </div>
+    </div>
+</div>
+
 <!-- 新建出货单（日期+客户） -->
 <div class="card shipping-page">
     <h2 class="card-title">🚚 新建出货单</h2>
-    <p class="page-meta">📅 当前日期：<strong>{{ today }}</strong> ｜ 当天出货单数：<strong>{{ total_orders }}</strong></p>
+    {# 2026-09-21: 装车单扫描提示 + 同批外包装要求 —— 防止多批次混装 #}
+    <div style="background: linear-gradient(90deg, #fff5e1 0%, #ffeaa7 100%); border: 1px solid #fdcb6e; border-left: 4px solid #e17055; border-radius: 8px; padding: 0.55rem 1rem; margin: 0.6rem 0; display: flex; align-items: center; gap: 0.8rem; font-size: 0.88rem; color: #6c5d00; flex-wrap: wrap; line-height: 1.55;">
+        <span style="font-weight: 600; flex: 0 0 auto;">📸 <strong>装车单扫描</strong></span>
+        <span style="color:#b2bec3;">|</span>
+        <span>有装车单必须同时扫描装车单和同价单后面的<strong>竖线</strong></span>
+        <span style="color:#b2bec3;">|</span>
+        <span>出货商品保证出<strong>同一批外包装</strong>,<strong>不要多批次</strong></span>
+    </div>
+    <p class="page-meta">📅 当前日期：<strong>{{ today }}</strong> ｜ 当天出货单数：<strong>{{ total_orders }}</strong> ｜ 当日已锁单：<strong>{{ locked_orders }}</strong></p>
     <form id="createOrderForm" action="/api/v1/shipping-orders" method="post">
         <div class="form-grid">
             <div>
@@ -694,8 +779,11 @@ document.getElementById('voiceInputBtn').addEventListener('click', function () {
 <!-- 出货记录列表（按日期+客户分组） -->
 <div class="card shipping-page">
     <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem;">
+    <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
         <h2 class="card-title" style="margin-bottom:0; border-bottom:none;">📋 出货记录</h2>
-        <div style="display:flex; align-items:center; gap:0.5rem;">
+        <span class="shipping-hint" style="font-size:0.78rem; color:#d97706; font-weight:600; background:#fff7ed; border:1px solid #fed7aa; padding:0.2rem 0.55rem; border-radius:6px; display:inline-flex; align-items:center; gap:0.3rem;">⚠️ 有装车单必须同时扫描装车单和同价单</span>
+    </div>
+    <div style="display:flex; align-items:center; gap:0.5rem;">
             <input type="text" id="searchInput" placeholder="🔍 搜索客户/商品" style="padding:0.3rem 0.6rem; border:1px solid #dfe6e9; border-radius:6px; font-size:0.82rem; width:160px;">
             <button type="button" id="dateRangeBtn" style="padding:0.35rem 0.8rem; background:#e8f5e9; color:#00b894; border:1px solid #b2dfdb; border-radius:6px; font-size:0.82rem; cursor:pointer; font-weight:600; display:flex; align-items:center; gap:0.3rem;">⚙️ <span id="dateRangeLabel">{{ start_date }} ~ {{ end_date }}</span></button>
         </div>
@@ -908,8 +996,9 @@ document.getElementById('voiceInputBtn').addEventListener('click', function () {
                 {% for item in group.records %}
                 <tr class="{% if item.qty_invalid %}row-out-of-stock{% elif item.mismatch == 'warn' or item.piece_mismatch == 'warn' %}row-warn{% elif item.mismatch == 'info' or item.piece_mismatch == 'info' %}row-info{% endif %}{% if '环保' in item.product_name %} row-eco{% endif %}"
                     data-record-id="{{ item.id }}"
-                    data-count-unit="{{ item.unit if item.is_copy_paper else '支' }}"
-                    data-has-loose="{{ '0' if item.is_copy_paper else '1' }}"
+                    {# 2026-09-18: data-count-unit/data-has-loose 扩展到桶/令/张(桶装胶水、拷贝纸、日本纸) #}
+                    data-count-unit="{{ item.unit if item.is_copy_paper or item.unit in ('桶','令','张') else '支' }}"
+                    data-has-loose="{{ '0' if item.is_copy_paper or item.unit in ('桶','令','张') else '1' }}"
                     data-verified="{{ '1' if item.verified else '0' }}"
                     data-verified-warnings="{{ item.verified_warnings or '{}' }}">
                     <td style="text-align:center; color:#868e96; font-size:0.85rem;">{% if item.qty_invalid %}<span class="stock-icon" title="数量异常">❌</span>{% elif item.mismatch == 'warn' or item.piece_mismatch == 'warn' %}❌ {% elif item.mismatch == 'info' or item.piece_mismatch == 'info' %}💡 {% endif %}{{ loop.index }}</td>
@@ -930,11 +1019,11 @@ document.getElementById('voiceInputBtn').addEventListener('click', function () {
                         <button type="button" class="placement-add-btn lock-hide{% if item.placement_match %} placement-ok{% endif %}" data-record-id="{{ item.id }}" data-order-id="{{ group.id }}" title="添加点数图(供清点{{ item.unit }}数)" onclick="openPlacementImageModal('{{ item.id }}','{{ group.id }}')">点数</button>
                         {% endif %}
                         {% if not item.is_board and not item.is_copy_paper %}<button type="button" class="btn btn-sm record-image-btn lock-hide{% if item.has_image %} has-image{% endif %}" data-record-id="{{ item.id }}" title="上传图片到此商品{% if item.has_image %}（已上传）{% endif %}" style="background:#74b9ff;color:#fff;">🖼️</button>{% endif %}
-                        {% if '支' in (item.unit_hint or '') or '支' in (item.piece_hint or '') %}<button type="button" class="placement-add-btn lock-hide{% if item.placement_match %} placement-ok{% endif %}" data-record-id="{{ item.id }}" data-order-id="{{ group.id }}" title="添加点数图(供清点支数)" onclick="openPlacementImageModal('{{ item.id }}','{{ group.id }}')">点数</button>{% endif %}
+                        {% if item.unit == '桶' or '支' in (item.unit_hint or '') or '支' in (item.piece_hint or '') %}<button type="button" class="placement-add-btn lock-hide{% if item.placement_match %} placement-ok{% endif %}" data-record-id="{{ item.id }}" data-order-id="{{ group.id }}" title="添加点数图(供清点{{ item.unit }}数)" onclick="openPlacementImageModal('{{ item.id }}','{{ group.id }}')">点数</button>{% endif %}
                         <input type="file" class="record-image-input" data-record-id="{{ item.id }}" accept="image/*" multiple style="display:none;">
                         {% if item.verified %}<span class="status-badge verified-badge lock-show" title="该行已核查">✓ 已核查</span>{% endif %}
                         {# 2026-09-09: 拷贝纸/日本纸 点数走 placement 体系(单位=令/张),同样可显示"✓ 点数"标记 #}
-                        {% if item.is_copy_paper or '支' in (item.unit_hint or '') or '支' in (item.piece_hint or '') %}{% if item.placement_match %}<span class="status-badge placement-badge lock-show" title="该行已添加点数图">✓ 点数</span>{% endif %}{% endif %}
+                        {% if item.unit == '桶' or item.is_copy_paper or '支' in (item.unit_hint or '') or '支' in (item.piece_hint or '') %}{% if item.placement_match %}<span class="status-badge placement-badge lock-show" title="该行已添加点数图">✓ 点数</span>{% endif %}{% endif %}
                     </td>
                 </tr>
                 {% endfor %}
@@ -1147,106 +1236,8 @@ document.getElementById('voiceInputBtn').addEventListener('click', function () {
 {% with image_api="/api/v1/shipping-orders" %}{% include "_image_upload_modal.html" %}{% endwith %}
 
 {# 2026-08-15 + v3 (2026-08-30): 摆放图计数弹框(点击任意位置加计数点 + 连续撤销) #}
-<div id="placementCountModal" class="placement-count-modal">
-    <div class="pcm-inner">
-        {# ① 身份条(暗色)— 标题 + 记录名 + 图序号 + 关闭 #}
-        <div class="pcm-identity">
-            <div class="pcm-id-left">
-                <span class="pcm-title" id="pcmTitle">🧮 清点支数</span>
-                <span class="pcm-id-record" id="pcmRecordName">—</span>
-            </div>
-            <div class="pcm-id-right">
-                <span class="pcm-id-imgpos" id="pcmImgPosLabel">本图第 -/- 张</span>
-                <button type="button" id="pcmClose" class="pcm-close-btn" title="关闭 (Esc)">✕</button>
-            </div>
-        </div>
-
-        {# ② KPI 三联卡片 — 本图 / 累计·目标 / 散码 #}
-        <div class="pcm-kpi">
-            <div class="pcm-kpi-card pcm-kpi-cur">
-                <div class="pcm-kpi-label">本图</div>
-                <div class="pcm-kpi-value"><span id="pcmCount">0</span><span class="pcm-kpi-unit" id="pcmCurUnit">支</span></div>
-            </div>
-            <div class="pcm-kpi-card pcm-kpi-cum">
-                <div class="pcm-kpi-label">累计 / 目标</div>
-                <div class="pcm-kpi-value"><span id="pcmCumulative">0 / —</span><span class="pcm-kpi-unit" id="pcmCumUnit">支</span></div>
-                <div class="pcm-kpi-sub" id="pcmProgText">本记录累计 0 / 目标 — · 共 0 张</div>
-                <div class="pcm-kpi-bar"><div class="pcm-kpi-fill" id="pcmProgBar"></div></div>
-            </div>
-            <div class="pcm-kpi-card pcm-kpi-loose">
-                <div class="pcm-kpi-label">散码</div>
-                <div class="pcm-kpi-value"><span id="pcmLooseVal">0</span><span class="pcm-kpi-unit">y</span></div>
-            </div>
-        </div>
-
-        {# ③ 图片区(暗底)— 摆放图 + 红色支数标记 #}
-        <div class="pcm-actions" id="pcmActions">
-            <button type="button" id="pcmManual" class="pcm-tb-btn pcm-tb-manual">
-                <span>✎ 直输</span><span class="pcm-tb-key">M</span>
-            </button>
-            <button type="button" id="pcmLoose" class="pcm-tb-btn pcm-tb-loose" title="录入散码数量 (L)">
-                <span>散码</span><span class="pcm-tb-key">L</span>
-            </button>
-            <label class="pcm-tb-toggle" id="pcmUnloadWrap">
-                <input type="checkbox" id="pcmUnload"><span>⬇ 卸载</span><span class="pcm-tb-key">U</span>
-            </label>
-            <span class="pcm-act-spacer"></span>
-            <span class="pcm-act-hint" id="pcmActHint">点击图个位置计 1 支、数字键 1–9 直输</span>
-        </div>
-
-        <div class="pcm-body" id="pcmBody">
-            <div class="pcm-side-zoom" id="pcmSideZoom" aria-label="调节手动输入数字">
-                <button type="button" id="pcmBigger" class="pcm-tb-btn" title="数字 +1 (+)" aria-label="加一">+</button>
-                <button type="button" id="pcmSmaller" class="pcm-tb-btn" title="数字 -1 (−)" aria-label="减一">−</button>
-            </div>
-            <div class="pcm-corner-undo" id="pcmCornerUndo">
-                <button type="button" id="pcmUndo" class="pcm-tb-btn pcm-tb-undo" title="撤销最近一次点击 (Z)">
-                    <span>↩</span><span>撤销</span><span class="pcm-tb-key">Z</span>
-                </button>
-            </div>
-            <div class="pcm-img-wrap" id="pcmImgWrap">
-                <img id="pcmImg" class="pcm-img" src="" alt="摆放图">
-                <div id="pcmMarks" class="pcm-marks"></div>
-            </div>
-        </div>
-
-        {# ④ 操作工具栏 — 撤销 / 放大·缩小 / 散码 / 直输 / 卸载切换 #}
-
-
-        {# ⑤ 快捷键脚注 #}
-        <div class="pcm-shortcuts"><b>Z</b> 撤销 · <b>U</b> 卸载 · <b>L</b> 散码 · <b>M</b> 直输 · <b>+/−</b> 字号 · <b>1-9</b> 直输 · <b>Esc</b> 关闭</div>
-    </div>
-</div>
-
-{# 2026-08-16: 散码数量录入弹框 #}
-<div id="looseCountModal" class="loose-count-modal">
-    <div class="lcm-inner">
-        <div class="lcm-title">散码数量</div>
-        <div class="lcm-body">
-            <input type="number" id="looseCountInput" min="0" step="1" placeholder="请输入散码数量" inputmode="numeric">
-        </div>
-        <div class="lcm-actions">
-            <button type="button" id="looseCountCancel" class="lcm-cancel">取消</button>
-            <button type="button" id="looseCountSave" class="lcm-save">保存</button>
-        </div>
-    </div>
-</div>
-
-
-<div id="manualCountModal" class="manual-count-modal">
-    <div class="mcm-inner">
-        <div class="mcm-title">🖊️ 直接输入支数</div>
-        <div class="mcm-body">
-            <input type="number" id="manualCountInput" min="0" step="1" placeholder="请输入支数" inputmode="numeric">
-            <div class="mcm-hint">直接输入会清空这张图的点击计数点,二者互斥。「清空」可恢复点击计数。</div>
-        </div>
-        <div class="mcm-actions">
-            <button type="button" id="manualCountClear" class="mcm-clear">清空</button>
-            <button type="button" id="manualCountCancel" class="mcm-cancel">取消</button>
-            <button type="button" id="manualCountSave" class="mcm-save">保存</button>
-        </div>
-    </div>
-</div>
+{# 2026-09-18: 三页(出货/入库/装柜)共用的清点支数/桶数/令数/张数 弹框 #}
+{% include '_placement_count_modal.html' %}
 
 
 <script>
@@ -1515,7 +1506,7 @@ document.getElementById('voiceInputBtn').addEventListener('click', function () {
 
         var summaryText1 = totalPieces + '支';
         if (totalLoosePieces > 0) summaryText1 += '+' + totalLoosePieces + '支散码';
-        var summaryText2 = totalUnitPieces + '支';
+        var summaryText2 = totalUnitPieces;
 
         if (!summaryRow) {
             summaryRow = document.createElement('div');
@@ -2176,6 +2167,75 @@ if (typeof bindOcrDetailButtons === 'function') bindOcrDetailButtons();
 if (typeof bindFuzzyMatchButtons === 'function') bindFuzzyMatchButtons();
 if (typeof bindAiJudgeButtons === 'function') bindAiJudgeButtons();
 if (typeof bindReOcrButtons === 'function') bindReOcrButtons();
+
+// 2026-09-29: 渲染顶部出货趋势柱状图(纯 SVG,无外部依赖)
+(function renderTrendCharts() {
+    var NS = 'http://www.w3.org/2000/svg';
+    function el(tag, attrs, parent) {
+        var n = document.createElementNS(NS, tag);
+        if (attrs) for (var k in attrs) n.setAttribute(k, attrs[k]);
+        if (parent) parent.appendChild(n);
+        return n;
+    }
+    function fmtLabel(key, value) {
+        // 日: 'YYYY-MM-DD' → 'MM-DD';月: 'YYYY-MM' → 'YY-MM'
+        if (key === 'date') {
+            var p = value.split('-');
+            return p[1] + '-' + p[2];
+        }
+        if (key === 'month') {
+            var p2 = value.split('-');
+            return p2[1] + '月';
+        }
+        return value;
+    }
+    function draw(containerId, key) {
+        var box = document.getElementById(containerId);
+        if (!box) return;
+        var points;
+        try { points = JSON.parse(box.getAttribute('data-points') || '[]'); }
+        catch (e) { points = []; }
+        if (!points.length) {
+            box.innerHTML = '<svg viewBox="0 0 400 150" preserveAspectRatio="xMidYMid meet"><text x="200" y="80" class="empty-hint">暂无数据</text></svg>';
+            return;
+        }
+        // SVG 视口:宽 600,高 200,坐标按 viewBox 比例自动适配容器
+        var W = 600, H = 200;
+        var padTop = 24, padBottom = 36, padLeft = 16, padRight = 16;
+        var innerW = W - padLeft - padRight;
+        var innerH = H - padTop - padBottom;
+        var n = points.length;
+        var gap = 4;
+        var barW = (innerW - gap * (n - 1)) / n;
+        var maxV = Math.max.apply(null, points.map(function (p) { return p.count; }));
+        // Y 轴上限抬高到 ≥1,避免 max=0 时柱条不可见
+        var yMax = Math.max(maxV, 1);
+
+        var svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, preserveAspectRatio: 'xMidYMid meet' }, box);
+
+        // 顶部水平基线 + 网格线(辅助读数,极浅)
+        el('line', { x1: padLeft, x2: W - padRight, y1: padTop + innerH, y2: padTop + innerH, stroke: '#e9ecef', 'stroke-width': 1 }, svg);
+
+        points.forEach(function (p, i) {
+            var cx = padLeft + i * (barW + gap) + barW / 2;
+            var h = (p.count / yMax) * innerH;
+            var y = padTop + (innerH - h);
+            var isZero = p.count === 0;
+            el('rect', {
+                x: cx - barW / 2, y: y, width: barW, height: Math.max(h, 0),
+                rx: 3, ry: 3, class: isZero ? 'bar bar-zero' : 'bar'
+            }, svg);
+            // 柱顶数值(0 不显示,避免冗余)
+            if (!isZero) {
+                el('text', { x: cx, y: Math.max(y - 4, 12), class: 'bar-label' }, svg).textContent = p.count;
+            }
+            // 底部 X 轴标签
+            el('text', { x: cx, y: H - 12, class: 'axis-label' }, svg).textContent = fmtLabel(key, p[key]);
+        });
+    }
+    draw('trendDaily', 'date');
+    draw('trendMonthly', 'month');
+})();
 
 
 // ── "已核查"按钮回调 ──
