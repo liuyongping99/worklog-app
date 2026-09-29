@@ -263,7 +263,14 @@ def inbound_records():
     # 2026-08-04:match-col 服务端不再渲染,改由 JS `_ensureMatchColumn`
     # 在首次有匹配结果时动态插入。所以这里不再算 record_worst_*_map /
     # has_match —— 那块逻辑下沉到 JS。
+    # 2026-09-15:与出货页对齐 —— group.images 排除 source='placement',
+    # 让模板主图区只展示普通商品图(upload/copy_paper_label/ai);
+    # placement 图只走下方 .placement-area 单独展示,不再重复出现在主图区。
     for grp in groups:
+        grp['images'] = [
+            img for img in grp.get('images', [])
+            if img.get('source') != 'placement'
+        ]
         for rec in grp.get('records', []):
             record_imgs = [img for img in grp.get('images', []) if img.get('record_pk') == rec['id']]
             rec['has_image'] = bool(record_imgs)
@@ -850,7 +857,12 @@ def api_v1_inbound_orders_placement_mark_undo(image_id):
 # ── AI 图片识别（双引擎：Moonshot + PaddleOCR + DeepSeek）──────
 @bp.route('/api/v1/inbound-orders/ai-recognize', methods=['POST'])
 def inbound_ai_recognize():
-    """接收图片，调用 OCR 引擎识别商品表格，返回 JSON。"""
+    """接收图片，调用 OCR 引擎识别商品表格，返回 JSON。
+
+    2026-09-22:支持「🤖 智能文本」tab 走 text 分支 —— 无 image、有 text 时
+    直接调 DeepSeekEngine.recognize_text(text),跳过 PaddleOCR,解析用户
+    自由输入的商品描述为结构化明细行。返回 schema 与图片路径完全一致。
+    """
     set_log_context(biz='inbound', evt_src='ai_recognize')
     from blueprints.ocr_engine import get_ocr_engine
 
@@ -867,10 +879,78 @@ def inbound_ai_recognize():
             'hint': '请使用 "moonshot"、"paddleocr" 或 "deepseek"'
         }), 400
 
+    # ── 文本分支(2026-09-22 入库页「🤖 智能文本」tab)───────────────
+    # 优先级:有 text 字段就走 text 分支,即使同时附了图片(image)也被忽略
+    # —— 自由文本路径只调 DeepSeek,不调 OCR。
+    raw_text = (request.form.get('text') or request.args.get('text') or '').strip()
+    if raw_text:
+        try:
+            engine = get_ocr_engine('deepseek')
+        except RuntimeError as e:
+            return jsonify({'success': False, 'error': '引擎初始化失败', 'hint': str(e)}), 500
+        except ValueError as e:
+            return jsonify({'success': False, 'error': str(e), 'hint': '请配置 DEEPSEEK_API_KEY'}), 400
+        try:
+            result = engine.recognize_text(raw_text)
+        except Exception as e:
+            current_app.logger.exception('AI 文本解析运行时错误: %s', e)
+            return jsonify({
+                'success': False,
+                'error': f'解析引擎运行异常：{type(e).__name__}',
+                'hint': '请稍后重试,或把文本改写得更结构化'
+            }), 500
+        # 2026-09-24:入库智能文本添加·「按 y 卖」自动归一化
+        # 若商品在 product_units 配置了 is_usingyardforcounting = 1,则把
+        # DeepSeek 抽出的 quantity 从「支」换成「总码数」、unit 从「支」换成 'y';
+        # 否则保持原样。备注列原样保留(X支+Y码)便于用户核对。
+        #
+        # 优先级:
+        #   - 已 unit='y' → 信任 AI 数量,跳过(防 double-convert)
+        #   - remark 含「X支+(Y码|Y码*X支|...)」 → 用 remark 解析,精确(带散码)
+        #   - 否则 quantity 兜底按 quantity × ypp 算总码
+        if result.get('success') and result.get('items'):
+            from models import ProductUnit
+            from blueprints._helpers import get_ypp, compute_total_yards_from_remark
+            try:
+                units_cache = ProductUnit.get_all() or []
+            except Exception:
+                units_cache = []
+            normalized = 0
+            for item in result['items']:
+                pn = item.get('product_name') or ''
+                sp = item.get('specification') or ''
+                ypp = get_ypp(pn, sp, units_cache=units_cache)
+                if ypp <= 0:
+                    continue
+                # 已按 y 计量 → 信任 AI 给的 quantity,跳过(避免误转)
+                if (item.get('unit') or '').strip() == 'y':
+                    continue
+                total_y = compute_total_yards_from_remark(
+                    item.get('remark') or '',
+                    ypp,
+                    quantity_str=item.get('quantity'),
+                )
+                if total_y is None:
+                    continue
+                item['quantity'] = str(total_y)
+                item['unit'] = 'y'
+                normalized += 1
+            if normalized:
+                current_app.logger.info(
+                    'ai-recognize text: 已对 %d 条「按 y 卖」明细做归一化 (ypp 命中)', normalized
+                )
+        if result.get('success'):
+            return jsonify(result)
+        error_msg = result.get('error', '')
+        if 'API key' in error_msg or '未配置' in error_msg:
+            return jsonify(result), 503
+        return jsonify(result), 500
+
+    # ── 图片分支(原有逻辑)────────────────────────────────────────
     if 'image' not in request.files:
         return jsonify({
             'success': False, 'error': '没有上传图片',
-            'hint': '请先选择一张图片再点击识别'
+            'hint': '请先选择一张图片,或在「🤖 智能文本」tab 输入商品描述'
         }), 400
     file = request.files['image']
     if file.filename == '':
@@ -1539,3 +1619,154 @@ def api_v1_inbound_orders_image_match_status(image_id):
             'human_verified': bool(img.get('human_verified')),
         },
     })
+
+
+# 2026-09-21: 入库 YPP 核查页 — 与出货/装柜同源端点,只换 biz= 参数
+# 端点统一在 shipping.py:/api/v1/shipping-orders/ypp-review/scan (接受 biz=shipping|inbound|loading)
+@bp.route('/inbound-ypp-review')
+def inbound_ypp_review_page():
+    """入库 YPP 规则冲突核查页(单页手动扫描,不受日期过滤影响)。"""
+    try:
+        from models import ProductUnit
+        all_units = ProductUnit.get_all() or []
+    except Exception:
+        all_units = []
+    ypp_config_count = sum(
+        1 for u in all_units
+        if u.get('is_usingyardforcounting') and (u.get('yards_per_piece') or 0) > 0
+    )
+    return render_template(
+        'inbound_ypp_review.html',
+        ypp_config_count=ypp_config_count,
+    )
+
+
+# ═════════════════════════════════════════════════════════════════════
+# 「🤖 智能文本」补充提示词管理(2026-09-22)
+# 挂载在 inbound.py 是因为本提示词是入库页「🤖 智能文本」tab 用的,
+# 数据存于 category_prompts 表(scope='text_recognize')。所有 CRUD 走
+# JSON API,前端弹框调,响应 {success, ...}。
+# 设计:仅管理员能取(软删/编辑/启用);前端调用前要确认已登录。
+# ═════════════════════════════════════════════════════════════════════
+
+@bp.route('/api/v1/text-recognize-supplements', methods=['GET'])
+def text_recognize_supplements_list():
+    """列出所有 text_recognize 提示词(含 archived)。"""
+    include_archived = (request.args.get('include_archived') == '1')
+    try:
+        from models._db import get_db as _get_db
+        conn = _get_db()
+        cur = conn.cursor()
+        if include_archived:
+            cur.execute(
+                "SELECT * FROM category_prompts WHERE scope = 'text_recognize' "
+                "ORDER BY id ASC"
+            )
+        else:
+            cur.execute(
+                "SELECT * FROM category_prompts WHERE scope = 'text_recognize' "
+                "AND status = 'active' ORDER BY id ASC"
+            )
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+        return jsonify({'success': True, 'items': rows})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/v1/text-recognize-supplements', methods=['POST'])
+def text_recognize_supplements_create():
+    """新增一条 text_recognize 提示词。
+    Body: {prompt_text: str, source_ocr_text?: str}
+    """
+    from models._db import get_db as _get_db
+    data = request.get_json(silent=True) or {}
+    prompt_text = (data.get('prompt_text') or '').strip()
+    if not prompt_text:
+        return jsonify({'success': False, 'error': 'prompt_text 不能为空'}), 400
+    if len(prompt_text) > 500:
+        return jsonify({'success': False, 'error': '提示词长度不超过 500 字'}), 400
+    source_ocr_text = (data.get('source_ocr_text') or '').strip()[:4000]
+    try:
+        conn = _get_db()
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO category_prompts "
+            "(scope, category_code, spec_pattern, product_name_keyword, "
+            "prompt_text, source_ocr_text, status, created_at) "
+            "VALUES ('text_recognize', '', '', '', ?, ?, 'active', "
+            "datetime('now','localtime'))",
+            (prompt_text, source_ocr_text)
+        )
+        new_id = cur.lastrowid
+        conn.commit()
+        conn = _get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM category_prompts WHERE id = ?", (new_id,))
+        row = dict(cur.fetchone())
+        conn.close()
+        return jsonify({'success': True, 'item': row})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/v1/text-recognize-supplements/<int:item_id>', methods=['PATCH'])
+def text_recognize_supplements_update(item_id):
+    """编辑提示词文本或切换 active/archived。仅更新非空字段。"""
+    from models._db import get_db as _get_db
+    data = request.get_json(silent=True) or {}
+    fields = []
+    params = []
+    if 'prompt_text' in data:
+        pt = (data.get('prompt_text') or '').strip()
+        if not pt:
+            return jsonify({'success': False, 'error': 'prompt_text 不能为空'}), 400
+        if len(pt) > 500:
+            return jsonify({'success': False, 'error': '提示词长度不超过 500 字'}), 400
+        fields.append('prompt_text = ?')
+        params.append(pt)
+    if 'status' in data:
+        st = data['status']
+        if st not in ('active', 'archived'):
+            return jsonify({'success': False, 'error': 'status 必须 active/archived'}), 400
+        fields.append('status = ?')
+        params.append(st)
+    if not fields:
+        return jsonify({'success': False, 'error': '没有可更新的字段'}), 400
+    try:
+        conn = _get_db()
+        cur = conn.cursor()
+        params.append(item_id)
+        cur.execute(f"UPDATE category_prompts SET {', '.join(fields)} WHERE id = ? AND scope = 'text_recognize'", params)
+        if cur.rowcount == 0:
+            conn.close()
+            return jsonify({'success': False, 'error': '提示词不存在或已删除'}), 404
+        conn.commit()
+        cur.execute("SELECT * FROM category_prompts WHERE id = ?", (item_id,))
+        row = dict(cur.fetchone())
+        conn.close()
+        return jsonify({'success': True, 'item': row})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/v1/text-recognize-supplements/<int:item_id>', methods=['DELETE'])
+def text_recognize_supplements_delete(item_id):
+    """软删:status='archived'(保留 audit,前端默认不显示 archived)。"""
+    from models._db import get_db as _get_db
+    try:
+        conn = _get_db()
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE category_prompts SET status = 'archived' "
+            "WHERE id = ? AND scope = 'text_recognize'",
+            (item_id,)
+        )
+        if cur.rowcount == 0:
+            conn.close()
+            return jsonify({'success': False, 'error': '提示词不存在'}), 404
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500

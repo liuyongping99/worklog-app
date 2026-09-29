@@ -8,6 +8,9 @@ import os
 import re
 import base64
 import uuid
+import time
+import threading
+import contextvars
 from datetime import date, timedelta, datetime
 from flask import Blueprint, render_template, request, jsonify, current_app, session, abort
 from models import (
@@ -24,7 +27,7 @@ from blueprints._helpers import (
     compute_placement_expected_zhi, apply_user_rotation,
 )
 from blueprints.ocr_engine import PaddleOCREngine, get_ocr_engine, OCR_MATCH_PROMPT_VERSION, ocr_preprocess_kind
-from blueprints.ocr_pipeline import RecordImageProcessor
+from blueprints.ocr_pipeline import RecordImageProcessor, _OCR_LOCK, _ASYNC_JOBS
 from blueprints import _helpers
 from models._db import get_db
 from blueprints.ocr_log import set_log_context
@@ -47,6 +50,40 @@ SANMA_RE = re.compile(r'(?<![\d.])(\d+)\s*[yY]')
 # 后续是否补,看准确率再说),端点显式传 with_supplement=False。
 loading_processor = RecordImageProcessor(
     LoadingOrderImage, ocr_engine_getter=lambda name: get_ocr_engine(name))
+
+
+# 2026-09-18: 行级图异步 OCR+AI 触发器 — 与出货 shipping._spawn_record_image_processing 同源。
+# 装柜历史上传是同步落库 + 等用户手动点 fuzzy/ai-judge 才写 match_status;
+# 现在对齐出货:上传即后台跑 OCR+AI,前端轮询 /match-status 拿结果。
+def _spawn_loading_record_image_processing(image_id, filepath, record, order_id,
+                                            record_id, rel_path, original_name, sort_order):
+    _ASYNC_JOBS[image_id] = {'state': 'processing', 'started': time.time()}
+
+    def _run_async_in_thread():
+        loading_processor.process_async(
+            image_id=image_id, filepath=filepath, record=record,
+            order_id=order_id, record_id=record_id,
+        )
+
+    # threading.Thread 不会自动传 contextvars — 必须显式 copy_context().run(...)
+    # 把当前请求的 trace_id + 业务上下文带进后台线程,否则 OCR 日志全显示 '-'
+    ctx = contextvars.copy_context()
+    t = threading.Thread(
+        target=ctx.run,
+        args=(_run_async_in_thread,),
+        daemon=True,
+    )
+    t.start()
+    return {
+        'image_id': image_id,
+        'image': rel_path,
+        'original_name': original_name,
+        'sort_order': sort_order,
+        'processing': True,        # 前端据此启动 pollRecordImageMatch
+        'match_status': None,
+        'match_score': None,
+        'match_source': None,
+    }
 
 
 def _as_bool(value, default=True):
@@ -244,31 +281,80 @@ def loading_orders():
         order_ids=[g['order_pk'] for g in groups]
     )
     # 按 source 拆分:非 AI(商品行下方图区) + AI(商品行上方 AI 图区)
-    # get_all_by_orders 返回"订单级 + record 级"全部图;这里只要订单级(record_pk IS NULL)
+    # 2026-09-18: 与出货/入库对齐 —— 主图区排除 source='placement',placement 图只走 .placement-area
     order_non_ai = {}
     ai_images = {}
     for oid, imgs in order_images.items():
         for img in imgs:
             if img.get('record_pk') is not None:
                 continue  # record 级图由下面 get_by_record 循环补,避免重复
+            if img.get('source') == 'placement':
+                continue  # placement 图走 .placement-area,不进主图区
             target = ai_images if img.get('source') == 'ai' else order_non_ai
             target.setdefault(oid, []).append(img)
     # 合并 record 级图
     for grp in groups:
         for rec in grp.get('records', []):
             for img in LoadingOrderImage.get_by_record(rec['id']):
+                if img.get('source') == 'placement':
+                    continue  # placement 图同上,跳过
                 target = ai_images if img.get('source') == 'ai' else order_non_ai
                 target.setdefault(grp['order_pk'], []).append(img)
     for oid in order_non_ai:
         order_non_ai[oid].sort(key=lambda x: (x.get('sort_order', 0), x.get('id', 0)))
     for oid in ai_images:
         ai_images[oid].sort(key=lambda x: (x.get('sort_order', 0), x.get('id', 0)))
+
+    # 2026-09-18: 摆放图分组(对齐 shipping/inbound) — server-side 渲染 placement-area
+    # 同产品多规格并排,不同产品单规格也能并排。
+    placement_groups = {}
+    for grp in groups:
+        group_list = []
+        current = None
+        for rec in grp.get('records', []):
+            pimgs = placement_by_record.get(rec['id']) or []
+            if not pimgs:
+                continue
+            pn = (rec.get('product_name') or '').strip()
+            if current is None or current['product_name'] != pn:
+                current = {'product_name': pn, 'items': []}
+                group_list.append(current)
+            loose_total = sum(p.get('loose_count', 0) for p in pimgs)
+            remark = rec.get('remark') or ''
+            expected_zhi, has_zhi = compute_placement_expected_zhi(
+                remark, rec.get('quantity') or '', rec.get('unit') or ''
+            )
+            san_m = list(SANMA_RE.finditer(remark))
+            expected_sanma = sum(int(x.group(1)) for x in san_m)
+            has_sanma = len(san_m) > 0
+            current['items'].append({
+                'record_id': rec['id'],
+                'specification': rec.get('specification') or '',
+                'quantity': rec.get('quantity') or '',
+                'unit': rec.get('unit') or '',
+                # 装柜独有 is_unload(卸载货物 → 支数取负),与出货页 _eff_zhi 等价
+                'total': sum((-(p['manual_count'] if p['manual_count'] is not None else (p.get('n_marks') or 0))
+                              if p.get('is_unload') else
+                              (p['manual_count'] if p['manual_count'] is not None else (p.get('n_marks') or 0)))
+                             for p in pimgs),
+                'loose_total': loose_total,
+                'remark': remark,
+                'expected_zhi': expected_zhi,
+                'has_zhi': has_zhi,
+                'expected_sanma': expected_sanma,
+                'has_sanma': has_sanma,
+                'images': pimgs,
+            })
+        if group_list:
+            placement_groups[grp['order_pk']] = group_list
+
     # 不再用 cookie:img_cols 由 Task 1 加的 loading_orders.img_cols 列提供,渲染走 group.img_cols
     return render_template(
         'loading-orders.html',
         groups=groups,
         order_images=order_non_ai,
         ai_images=ai_images,
+        placement_groups=placement_groups,  # 2026-09-18: 摆放图 server-side 渲染
         today=date.today().strftime('%Y-%m-%d'),
         start_date=start_date,
         end_date=end_date,
@@ -743,6 +829,13 @@ def api_v1_loading_orders_record_upload_images(record_id):
     order = LoadingOrder.get_by_id(record['order_pk'])
     if order and order.get('is_locked'):
         return jsonify({'success': False, 'error': '该订单已锁定，无法上传图片'}), 403
+    # 2026-09-12: 拷贝纸/日本纸行禁止走普通 /images 端点 → 必须用 /copy-paper-images
+    # 后端硬拦截,与出货页一致(出货/装柜共用 _is_copy_paper_item 判定)
+    if _is_copy_paper_item(record):
+        return jsonify({
+            'success': False,
+            'error': '该明细为拷贝纸/日本纸,请使用 🖼️ 标签按钮上传(不需 OCR)'
+        }), 400
 
     upload_dir, month_str = _get_upload_dir()
     source = 'upload'
@@ -755,6 +848,12 @@ def api_v1_loading_orders_record_upload_images(record_id):
                 filepath, original_name = _save_one_uploaded_file(f, upload_dir)
             except ValueError as e:
                 return jsonify({'success': False, 'error': str(e)}), 400
+            # 2026-09-19: 移动端拍照方向修正(90/180/270),落盘后再走 OCR
+            rotate_deg = request.form.get('rotate_deg')
+            try:
+                filepath = apply_user_rotation(filepath, rotate_deg)
+            except ValueError as e:
+                return jsonify({'success': False, 'error': str(e)}), 400
             image_id = LoadingOrderImage.create(
                 order_pk=record['order_pk'],
                 file_path=filepath,
@@ -764,16 +863,15 @@ def api_v1_loading_orders_record_upload_images(record_id):
             )
             rel_path = os.path.join(month_str, os.path.basename(filepath)).replace('\\', '/')
             img = LoadingOrderImage.get_by_id(image_id)
-            saved.append({
-                'image_id': image_id,
-                'image': rel_path,
-                'original_name': original_name,
-                'sort_order': img['sort_order'],
-            })
+            # 2026-09-19: 上传即异步跑 OCR + AI 比对(对齐出货);前端靠 processing:true 启动轮询
+            saved.append(_spawn_loading_record_image_processing(
+                image_id, filepath, record, record['order_pk'], record_id,
+                rel_path, original_name, img['sort_order'],
+            ))
         for s in saved:
             AuditLog.log('upload_image', 'loading_order', record['order_pk'],
                          detail={'filename': s['image'], 'source': source, 'record_id': record_id})
-        return jsonify({'success': True, 'images': saved, 'count': len(saved)}), 201
+        return jsonify({'success': True, 'images': saved, 'count': len(saved), 'async': True}), 201
 
     if request.is_json:
         data = request.get_json() or {}
@@ -791,12 +889,14 @@ def api_v1_loading_orders_record_upload_images(record_id):
         )
         rel_path = os.path.join(month_str, os.path.basename(filepath)).replace('\\', '/')
         img = LoadingOrderImage.get_by_id(image_id)
+        # 2026-09-19: 上传即异步跑 OCR + AI 比对(对齐出货)
+        saved_item = _spawn_loading_record_image_processing(
+            image_id, filepath, record, record['order_pk'], record_id,
+            rel_path, original_name, img['sort_order'],
+        )
         AuditLog.log('upload_image', 'loading_order', record['order_pk'],
                      detail={'filename': rel_path, 'source': source, 'record_id': record_id})
-        return jsonify({'success': True, 'images': [{
-            'image_id': image_id, 'image': rel_path,
-            'original_name': original_name, 'sort_order': img['sort_order'],
-        }], 'count': 1}), 201
+        return jsonify({'success': True, 'images': [saved_item], 'count': 1, 'async': True}), 201
 
     return jsonify({'success': False, 'error': '未提供图片'}), 400
 
@@ -1488,3 +1588,23 @@ def api_v1_loading_orders_image_match_status(image_id):
 # 数点匹配逻辑已合并到 /loading-orders 主 handler 的 record 富集循环里,
 # 摆放图渲染仍由前端 placementImageUploaded → refreshRecordBlock(GET /placement-images) 驱动,
 # 无需 server-side placement_groups 预渲染。
+
+
+# 2026-09-21: 装柜 YPP 核查页 — 与出货/入库同源端点,只换 biz= 参数
+# 端点统一在 shipping.py:/api/v1/shipping-orders/ypp-review/scan (接受 biz=shipping|inbound|loading)
+@bp.route('/loading-ypp-review')
+def loading_ypp_review_page():
+    """装柜 YPP 规则冲突核查页(单页手动扫描,不受日期过滤影响)。"""
+    try:
+        from models import ProductUnit
+        all_units = ProductUnit.get_all() or []
+    except Exception:
+        all_units = []
+    ypp_config_count = sum(
+        1 for u in all_units
+        if u.get('is_usingyardforcounting') and (u.get('yards_per_piece') or 0) > 0
+    )
+    return render_template(
+        'loading_ypp_review.html',
+        ypp_config_count=ypp_config_count,
+    )

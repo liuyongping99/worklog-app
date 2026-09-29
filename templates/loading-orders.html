@@ -141,6 +141,19 @@
     color: #1e7e34;
     border: 1px solid #27ae60;
 }
+.loading-page .placement-add-btn {
+    margin: 0 0 0 0.25rem; padding: 0.18rem 0.5rem; font-size: 0.72rem; vertical-align: middle;
+    background: #fdcb6e; color: #2d3436; border: 2px solid #b9770e; border-radius: 5px; cursor: pointer;
+    font-weight: 700;
+    box-shadow: 0 0 0 1px rgba(185, 119, 14, 0.25);
+}
+.loading-page .placement-add-btn:hover { background: #f0b94e; }
+/* 2026-09-18:与出货页一致 —— 点数匹配时按钮加绿框 */
+.loading-page .placement-add-btn.placement-ok {
+    background: #e6f9ec; color: #1e7e34; border: 2px solid #27ae60;
+    box-shadow: 0 0 0 1px #27ae60;
+}
+.loading-page .placement-add-btn.placement-ok:hover { background: #d3f3df; }
 .loading-page .placement-area {
     margin: 0.5rem 0 0.25rem; padding: 0.6rem 0.75rem;
     background: #fff9ec; border: 1px dashed #f0b94e; border-radius: 8px;
@@ -183,14 +196,17 @@
 .loading-page .placement-compare-badge.warn  { background: #fff0c2; color: #8a6d00; }
 .loading-page .placement-compare-badge.none  { background: #f0f0f0; color: #636e72; }
 
-/* placement count modal — 复用出货页同款样式 */
+/* placement count modal — 2026-09-18 与出货/入库对齐尺寸(880px / 92vh)
+   主体内容仍由出货/装柜共用的 _placement_count_modal.html include 引入。
+   装柜保留暗色主题(深色背景下图片计数更醒目),仅尺寸对齐。 */
 .loading-page .placement-count-modal {
     display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 1100;
     justify-content: center; align-items: center;
 }
 .loading-page .placement-count-modal.show { display: flex; }
 .loading-page .placement-count-modal .pcm-inner {
-    background: #1a1a1a; color: #f5f5f5; border-radius: 12px; max-width: 92vw; max-height: 94vh;
+    background: #1a1a1a; color: #f5f5f5; border-radius: 12px;
+    width: 94%; max-width: 880px; max-height: 92vh;
     display: flex; flex-direction: column; overflow: hidden;
     box-shadow: 0 25px 70px rgba(0,0,0,0.5);
 }
@@ -215,10 +231,19 @@
 .loading-page .placement-count-modal .pcm-kpi-value { font-size: 1.4rem; font-weight: 700; }
 .loading-page .placement-count-modal .pcm-kpi-unit { font-size: 0.75rem; color: #b2bec3; margin-left: 2px; }
 .loading-page .placement-count-modal .pcm-body {
-    position: relative; flex: 1; min-height: 0; background: #000;
+    position: relative; overflow: auto; background: #1a1a1a;
+    display: flex; justify-content: center; align-items: center;
+    min-height: 280px; flex: 1 1 auto; padding: 1rem;
 }
-.loading-page .placement-count-modal .pcm-img-wrap { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
-.loading-page .placement-count-modal .pcm-img { max-width: 100%; max-height: 100%; }
+.loading-page .placement-count-modal .pcm-img-wrap {
+    position: relative; display: inline-block; line-height: 0;
+    align-self: center; flex: 0 0 auto;
+}
+.loading-page .placement-count-modal .pcm-img {
+    max-width: 100%; max-height: calc(70vh - 1rem);
+    width: auto; height: auto; display: block; cursor: crosshair;
+    border-radius: 4px;
+}
 .loading-page .placement-count-modal .pcm-marks { position: absolute; inset: 0; pointer-events: none; }
 .loading-page .placement-count-modal .pcm-mark {
     position: absolute; transform: translate(-50%, -50%);
@@ -319,6 +344,15 @@
         <div style="margin-left: auto; display: flex; gap: 0.5rem;" data-page-node-id="gAyGABB2MdAobRdSGqRe1F">
 
         </div>
+    </div>
+
+    {# 2026-09-21: 央士专用提示横幅 —— 上柜送货凭证/聊天记录要求 + 2026-09-21 补全无纺布细节 #}
+    <div style="background: linear-gradient(90deg, #fff5e1 0%, #ffeaa7 100%); border: 1px solid #fdcb6e; border-left: 4px solid #e17055; border-radius: 8px; padding: 0.55rem 1rem; margin: 0.6rem 0 0.8rem 0; display: flex; align-items: center; gap: 0.8rem; font-size: 0.88rem; color: #6c5d00; flex-wrap: wrap; line-height: 1.55;">
+        <span style="font-weight: 600; flex: 0 0 auto;">📦 <strong>央士上柜要求</strong></span>
+        <span style="color:#b2bec3;">|</span>
+        <span>所有上柜的货都要送货凭证,本地送货要聊天记录</span>
+        <span style="color:#b2bec3;">|</span>
+        <span>示例:2026-08-07 ,无纺布 已送央士(<strong>特别是临时补加的货物</strong>)</span>
     </div>
 
     <!-- 日期筛选弹框 -->
@@ -457,6 +491,9 @@
                     {% for record in group.records %}
                     <tr class="{% if record.qty_invalid %}row-out-of-stock{% elif record.mismatch == 'warn' or record.piece_mismatch == 'warn' %}row-warn{% elif record.mismatch == 'info' or record.piece_mismatch == 'info' %}row-info{% endif %}{% if '环保' in record.product_name %} row-eco{% endif %}"
                         data-record-id="{{ record.id }}"
+                        {# 2026-09-18: data-count-unit/data-has-loose 让 JS 弹框按明细行的实际单位显示「清点桶数」等;桶装类无散码 has-loose=0 #}
+                        data-count-unit="{{ record.unit if record.unit in ('桶','令','张') else '支' }}"
+                        data-has-loose="{{ '0' if record.unit in ('桶','令','张') else '1' }}"
                         data-verified="{{ '1' if record.verified else '0' }}"
                         data-verified-warnings="{{ record.verified_warnings or '{}' }}" data-page-node-id="XVh9Ayi55lJ43uzCT8dsNk">
                         <td style="text-align:center; color:#868e96; font-size:0.85rem;" data-page-node-id="T0BKhDMDBG5Z3OrAAxXIyz">{% if record.qty_invalid %}<span class="stock-icon" title="数量异常" data-page-node-id="6vYvCw8Ay5PulsFp1CLWpJ">⚠️</span>{% elif record.mismatch == 'warn' or record.piece_mismatch == 'warn' %}❌ {% elif record.mismatch == 'info' or record.piece_mismatch == 'info' %}💡 {% endif %}{{ loop.index }}</td>
@@ -475,7 +512,7 @@
                             <button type="button" class="edit-record-btn lock-hide" data-id="{{ record.id }}" onclick="editRecord({{ record.id }}, this)" style="background:none;border:none;color:#00b894;cursor:pointer;font-size:0.85rem;margin-right:0.4rem;" title="修改" data-page-node-id="fQHVgBHjLcxAZ5uCB6XQiQ">✏️</button>
                             <button type="button" class="del-record-btn lock-hide" data-id="{{ record.id }}" onclick="deleteRecord({{ record.id }}, this)" style="background:none;border:none;color:#ff7675;cursor:pointer;font-size:0.85rem;" title="删除" data-page-node-id="oaH34LVtHTfsHVAdWA3lRR">🗑️</button>
                             <button type="button" class="btn btn-sm record-image-btn lock-hide{% if record.has_image %} has-image{% endif %}" data-record-id="{{ record.id }}" title="上传图片到此商品{% if record.has_image %}（已上传）{% endif %}" style="background:#74b9ff;color:#fff;" data-page-node-id="2o3ypdCVCZCa35OEIjHXlU">🖼️</button>
-                            {% if '支' in (record.unit_hint or '') or '支' in (record.piece_hint or '') %}<button type="button" class="placement-add-btn lock-hide{% if record.placement_match %} placement-ok{% endif %}" data-record-id="{{ record.id }}" data-order-id="{{ group.order_pk }}" title="添加摆放图(供清点支数)" onclick="openPlacementImageModal('{{ record.id }}','{{ group.order_pk }}')" data-page-node-id="5KfdPqnmDEdkBAuE6gZKR4">点数</button>{% endif %}
+                            {% if record.unit == '桶' or '支' in (record.unit_hint or '') or '支' in (record.piece_hint or '') %}<button type="button" class="placement-add-btn lock-hide{% if record.placement_match %} placement-ok{% endif %}" data-record-id="{{ record.id }}" data-order-id="{{ group.order_pk }}" title="添加点数图(供清点{{ record.unit }}数)" onclick="openPlacementImageModal('{{ record.id }}','{{ group.order_pk }}')" data-page-node-id="5KfdPqnmDEdkBAuE6gZKR4">点数</button>{% endif %}
                             <input type="file" class="record-image-input" data-record-id="{{ record.id }}" accept="image/*" multiple style="display:none;" data-page-node-id="qdw753L0DRzPkeqIOnflJd">
                             {% if record.placement_match %}<span class="status-badge placement-badge lock-show" title="该行已添加摆放图" data-page-node-id="wQRKwTJ6arCsdU1IUiFSRR">✓ 点数</span>{% endif %}
                         </td>
@@ -523,9 +560,6 @@
                     </tr>
                 </tbody>
             </table>
-            
-            <!-- 摆放图(点数)缩略图区 -->
-            <div class="placement-area" data-record-ids="{% for record in group.records %}{{ record.id }}{% if not loop.last %},{% endif %}{% endfor %}" data-page-node-id="uvtxgoghLMzWQtauCc6Djx"></div>
             
             <!-- 图片区域 -->
             {% set imgs = order_images.get(group.order_pk, []) %}
@@ -586,6 +620,66 @@
                 {% endfor %}
             </div>
             {% endif %}
+
+            <!-- 摆放图(点数)缩略图区 — 与出货页 shipping-records.html:1054 结构同源,server-side 渲染 -->
+            {# placement-area 紧跟在 img-area 之后(下方),与出货页一致 #}
+            <div class="placement-area" data-order-id="{{ group.order_pk }}" data-page-node-id="uvtxgoghLMzWQtauCc6Djx">
+                {% set _groups = placement_groups.get(group.order_pk, []) %}
+                {% for _grp in _groups %}
+                    {% for _item in _grp['items'] %}
+                    {# 2026-09-18: 计数单位参数化 — 桶/令/张 用实际单位,其他 = 支 #}
+                    {% set _punit = _item.unit if _item.unit in ('桶','令','张') else '支' %}
+                    <div class="placement-record-block"
+                         data-record-id="{{ _item.record_id }}"
+                         data-total="{{ _item.total }}"
+                         data-expected-zhi="{{ _item.expected_zhi }}"
+                         data-has-zhi="{{ '1' if _item.has_zhi else '0' }}"
+                         data-img-count="{{ _item.images | length }}"
+                         data-loose-total="{{ _item.loose_total }}">
+                        <div class="placement-record-head">
+                            <span class="placement-record-name">{{ _grp.product_name }}{% if _item.specification %} · {{ _item.specification }}{% endif %}</span>
+                            <span class="placement-count-badge" data-total="{{ _item.total }}">已点 {{ _item.total }} {{ _punit }}</span>
+                            {% if _item.has_zhi %}
+                                {% if _item.total == _item.expected_zhi %}
+                            <span class="placement-compare-badge ok">✓ {{ _punit }} {{ _item.total }} = 备注 {{ _item.expected_zhi }}</span>
+                                {% elif _item.total < _item.expected_zhi %}
+                            <span class="placement-compare-badge bad">✗ {{ _punit }} {{ _item.total }} &lt; 备注 {{ _item.expected_zhi }}（差 {{ _item.expected_zhi - _item.total }}）</span>
+                                {% else %}
+                            <span class="placement-compare-badge warn">⚠ {{ _punit }} {{ _item.total }} &gt; 备注 {{ _item.expected_zhi }}（多 {{ _item.total - _item.expected_zhi }}）</span>
+                                {% endif %}
+                            {% else %}
+                            <span class="placement-compare-badge none">备注无{{ _punit }}</span>
+                            {% endif %}
+                            {% if _item.has_sanma %}
+                                {% if _item.loose_total == _item.expected_sanma %}
+                            <span class="placement-compare-badge ok">✓ 散 {{ _item.loose_total }} = 备注 {{ _item.expected_sanma }}</span>
+                                {% elif _item.loose_total < _item.expected_sanma %}
+                            <span class="placement-compare-badge bad">✗ 散 {{ _item.loose_total }} &lt; 备注 {{ _item.expected_sanma }}（差 {{ _item.expected_sanma - _item.loose_total }}）</span>
+                                {% else %}
+                            <span class="placement-compare-badge warn">⚠ 散 {{ _item.loose_total }} &gt; 备注 {{ _item.expected_sanma }}（多 {{ _item.loose_total - _item.expected_sanma }}）</span>
+                                {% endif %}
+                            {% else %}
+                            <span class="placement-compare-badge none">备注无散码</span>
+                            {% endif %}
+                        </div>
+                        <div class="placement-images">
+                            {% for pimg in _item.images %}
+                            <div class="placement-thumb-wrap" data-image-id="{{ pimg.id }}" data-record-id="{{ _item.record_id }}">
+                                <img class="placement-thumb" src="/upload/{{ pimg.relative_path }}" data-image-id="{{ pimg.id }}" alt="点数图">
+                                {% if pimg.is_unload %}
+                                <span class="placement-thumb-count placement-thumb-count-unload" title="卸载货物,本图{{ _punit }}数从总数扣减">卸 -{{ pimg.effective_zhi }} {{ _punit }}</span>
+                                {% else %}
+                                <span class="placement-thumb-count">{{ pimg.effective_zhi }} {{ _punit }}</span>
+                                {% endif %}
+                                {% if pimg.loose_count %}<span class="placement-thumb-loose">散码 {{ pimg.loose_count }} y</span>{% endif %}
+                                <button type="button" class="placement-del-btn lock-hide" data-image-id="{{ pimg.id }}" title="删除此摆放图">×</button>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% endfor %}
+            </div>
         </div>
         {% endfor %}
     {% else %}
@@ -598,87 +692,8 @@
 {% with smart_add_api="/api/v1/loading-orders" %}{% include "_smart_add_modal.html" %}{% endwith %}
 {% with image_api="/api/v1/loading-orders" %}{% include "_image_upload_modal.html" %}{% endwith %}
 
-<!-- 摆放图(点数)弹框 — 与出货页同款 -->
-<div id="placementCountModal" class="placement-count-modal" data-page-node-id="F9GM5xTw1gd0lWIuRqlmBs">
-    <div class="pcm-inner" data-page-node-id="7B2ubGPoJjK35EdexV62El">
-        <div class="pcm-identity" data-page-node-id="7Kfm1PrwDHBGOJQ0Yux24D">
-            <div class="pcm-id-left" data-page-node-id="JEvhlUDjhU97rnbFHYWzaK">
-                <span class="pcm-title" data-page-node-id="tiocUaC5Hjv7LNmuia3tlb">🧮 清点支数</span>
-                <span class="pcm-id-record" id="pcmRecordName" data-page-node-id="lnFMahXpHwk46jowcZQRyn">—</span>
-            </div>
-            <div class="pcm-id-right" data-page-node-id="iJEhtYDD3IYZBe8TS9vuP6">
-                <span class="pcm-id-imgpos" id="pcmImgPosLabel" data-page-node-id="Fo9ECTCV6NkxVHqxFx2RiS">本图第 -/- 张</span>
-                <button type="button" id="pcmClose" class="pcm-close-btn" title="关闭 (Esc)" data-page-node-id="DngFyR9SvILp98hokkXF9u">✕</button>
-            </div>
-        </div>
-        <div class="pcm-kpi" data-page-node-id="iJPCaBRrGcguOEuHiTDMsa">
-            <div class="pcm-kpi-card" data-page-node-id="TGfK4x0zU9UKPdSSQ8Mnrx">
-                <div class="pcm-kpi-label" data-page-node-id="Ttuw8f4ubkt04AZoa4Zapp">本图</div>
-                <div class="pcm-kpi-value" data-page-node-id="4SULeYyRGvCQEz6J9ABl0L"><span id="pcmCount" data-page-node-id="F51rxEaPblPVuPAlJ8iuwV">0</span><span class="pcm-kpi-unit" data-page-node-id="K9ZOlvyaFQp6EMsiWdfa1R">支</span></div>
-            </div>
-            <div class="pcm-kpi-card" data-page-node-id="uCqJb8SZvSdONVAaYBSBFi">
-                <div class="pcm-kpi-label" data-page-node-id="mMJDAHB0g1n3P1WxLI23Oj">累计 / 目标</div>
-                <div class="pcm-kpi-value" data-page-node-id="AxEqrDOCDWhzcvckuygkHO"><span id="pcmCumulative" data-page-node-id="XZgbL0Ev5uVQswUVh1IMrj">0 / —</span><span class="pcm-kpi-unit" data-page-node-id="hVw9DCnzaIegw50LLl8srD">支</span></div>
-                <div class="pcm-kpi-sub" id="pcmProgText" data-page-node-id="Ad2UKZGSpd6a2NJsAD7Wex">本记录累计 0 / 目标 — · 共 0 张</div>
-                <div class="pcm-kpi-bar" data-page-node-id="SyfrLwAvXVLDoOnewMSfuc"><div class="pcm-kpi-fill" id="pcmProgBar" data-page-node-id="iiRi4FIFARkJGOR1jDKz9e"></div></div>
-            </div>
-            <div class="pcm-kpi-card" data-page-node-id="bvcMaTURUKnohYVsUBhXCG">
-                <div class="pcm-kpi-label" data-page-node-id="CPNMB7pWFnOUkeBo3c9qdK">散码</div>
-                <div class="pcm-kpi-value" data-page-node-id="VGIG50FsRN45WGZBekApl5"><span id="pcmLooseVal" data-page-node-id="PebQGz7HEDIEIAGyzj4k6K">0</span><span class="pcm-kpi-unit" data-page-node-id="nk291FH5PKCSGlxgHuAcyv">y</span></div>
-            </div>
-        </div>
-        <div class="pcm-actions" id="pcmActions" data-page-node-id="cFtmAA43EDFL5CF0gfqbR4">
-            <button type="button" id="pcmManual" class="pcm-tb-btn pcm-tb-manual" title="直接输入支数 (M)" data-page-node-id="gISAAMmeTCvMpbkp2uHy80"><span data-page-node-id="WpGAjn6opF4fQN2DZHyJ3M">✎ 直输</span><span class="pcm-tb-key" data-page-node-id="xEigYkTcYT0a2pxxAwY6Ez">M</span></button>
-            <button type="button" id="pcmLoose" class="pcm-tb-btn pcm-tb-loose" title="录入散码数量 (L)" data-page-node-id="vGoK3wheWiUb0u1e6eX6sk"><span data-page-node-id="pdbZwlRtsl81yAgjfSBEa9">散码</span><span class="pcm-tb-key" data-page-node-id="JxACqBR3ILqobnq2imC4Vd">L</span></button>
-            <label class="pcm-tb-toggle" id="pcmUnloadWrap" title="勾选后,本图清点支数以负数计入累计 (U)" data-page-node-id="VngjB37bHCfUZsx44d2pYf"><input type="checkbox" id="pcmUnload" data-page-node-id="8jsiLcAPb0D9ftm9qZn9Np"><span data-page-node-id="LupPupqTbSi2fpSg0GRxvA">⬇ 卸载</span><span class="pcm-tb-key" data-page-node-id="0aexf6R1L87tnwcJci1DFA">U</span></label>
-            <span class="pcm-act-spacer" data-page-node-id="g7Q3RE44OEqKrWVvd32SHZ"></span>
-            <span class="pcm-act-hint" data-page-node-id="Dtdd6JyPMqfKiZDs0VHQt2">点击图任意位置计 1 支、数字键 1–9 直输</span>
-        </div>
-        <div class="pcm-body" id="pcmBody" data-page-node-id="6UdqogpLrRkUnJPnNkEQof">
-            <div class="pcm-side-zoom" id="pcmSideZoom" data-page-node-id="ly7DNCeiYFk2Xpu3vzDACL">
-                <button type="button" id="pcmBigger" class="pcm-tb-btn" title="数字 +1 (+)" data-page-node-id="Uem7D5TQ5S4NbFYcJxVHHz">+</button>
-                <button type="button" id="pcmSmaller" class="pcm-tb-btn" title="数字 -1 (−)" data-page-node-id="Vp4VTRAwvs7lty1AAZq91C">−</button>
-            </div>
-            <div class="pcm-corner-undo" id="pcmCornerUndo" data-page-node-id="sCS2TMRlAGozDQpT5LLpdt">
-                <button type="button" id="pcmUndo" class="pcm-tb-btn pcm-tb-undo" title="撤销最近一次点击 (Z)" data-page-node-id="zAbRWHiNvYgB7uUDS36Xug"><span data-page-node-id="qWcxUJQpve9VGKGlWAFrdN">↩</span><span data-page-node-id="3mTvgE0W8rs2ytnrukTLNc">撤销</span><span class="pcm-tb-key" data-page-node-id="bUhGSA9KCUeH0XG89l4JcI">Z</span></button>
-            </div>
-            <div class="pcm-img-wrap" id="pcmImgWrap" data-page-node-id="cANG7PFiab0Fyc9fYGYydO">
-                <img id="pcmImg" class="pcm-img" src="" alt="摆放图" data-page-node-id="qF5KbUKzVTYV23iD3H7f1B">
-                <div id="pcmMarks" class="pcm-marks" data-page-node-id="WBY8JvOeTN0aK3wjtF1ln3"></div>
-            </div>
-        </div>
-        <div class="pcm-shortcuts" data-page-node-id="544fgy9sB1RtWDYR5Dmckm"><b data-page-node-id="xSAHZt8TVlvMBJYSBiXwcN">Z</b> 撤销 · <b data-page-node-id="2iqUqQQ77Gy4q9p7KaTWEZ">U</b> 卸载 · <b data-page-node-id="F0rqtDC6584bMIkIolkY8Z">L</b> 散码 · <b data-page-node-id="qaXLNLOKyoJfkbTFvM3cf8">M</b> 直输 · <b data-page-node-id="ficFzlWPrSD9j1jbo21zNm">+/−</b> 字号 · <b data-page-node-id="4fM9Ivo0XamhRVBgyzjk4T">1-9</b> 直输 · <b data-page-node-id="AOXGFDJx4EUo2RXrgZE1VA">Esc</b> 关闭</div>
-    </div>
-</div>
-
-<div id="looseCountModal" class="loose-count-modal" data-page-node-id="UJpcWGV5Dsw2GvMGWRMePl">
-    <div class="lcm-inner" data-page-node-id="cOc0G2Eibel7KVlbShxIuy">
-        <div class="lcm-title" data-page-node-id="I6wSQmGAdg37q4YcxrpONg">散码数量</div>
-        <div class="lcm-body" data-page-node-id="2R4U6iV0J4fvAo7YTPqPwV">
-            <input type="number" id="looseCountInput" min="0" step="1" placeholder="请输入散码数量" inputmode="numeric" data-page-node-id="jHARhZX7QpTJibSCTIRDOH">
-        </div>
-        <div class="lcm-actions" data-page-node-id="mUO91XmVZEnCY1wFRhMM3b">
-            <button type="button" id="looseCountCancel" class="lcm-cancel" data-page-node-id="ymWRA83p5bPgXeZlNV3s7M">取消</button>
-            <button type="button" id="looseCountSave" class="lcm-save" data-page-node-id="1xzSQgWh4MfCeX534x2iwX">保存</button>
-        </div>
-    </div>
-</div>
-
-<div id="manualCountModal" class="manual-count-modal" data-page-node-id="sQGMmBJW2ueaNrvOKnSjcc">
-    <div class="mcm-inner" data-page-node-id="7XHipPZ92kBZbXdiPLf1tV">
-        <div class="mcm-title" data-page-node-id="ShVMAPBjRJjpgD59Cf4VwL">🖊️ 直接输入支数</div>
-        <div class="mcm-body" data-page-node-id="A4a1MQKN8zD7RPana6zRbU">
-            <input type="number" id="manualCountInput" min="0" step="1" placeholder="请输入支数" inputmode="numeric" data-page-node-id="Lqh6V2sHBimzq0WoYJqPWn">
-            <div class="mcm-hint" data-page-node-id="8QwonnONWICgxQPsuPwFgD">直接输入会清空这张图的点击计数点,二者互斥。「清空」可恢复点击计数。</div>
-        </div>
-        <div class="mcm-actions" data-page-node-id="IcCLIWEd2gPG14LeTF10xL">
-            <button type="button" id="manualCountClear" class="mcm-clear" data-page-node-id="m1XA2YqVChjDA2ylUO5idL">清空</button>
-            <button type="button" id="manualCountCancel" class="mcm-cancel" data-page-node-id="AYd4cEzmK0OOATVKqQbCCu">取消</button>
-            <button type="button" id="manualCountSave" class="mcm-save" data-page-node-id="uc7TP0nLA0uqGljHgNMOmq">保存</button>
-        </div>
-    </div>
-</div>
-</div>
+<!-- 摆放图(点数)弹框 + 散码/直输 弹框 — 2026-09-18 三页共享 include -->
+{% include '_placement_count_modal.html' %}
 
 <!-- 备注弹框 -->
 <div class="note-modal" id="noteModal" data-page-node-id="ZigYPBXSnd1DEInuPIhQhN">
@@ -931,6 +946,12 @@ document.addEventListener('DOMContentLoaded', function() {
         // Mark button as has-image
         var btn = document.querySelector('.record-image-btn[data-record-id="' + recordId + '"]');
         if (btn) { btn.classList.add('has-image'); }
+        // 2026-09-19: 后端 OCR + AI 现在是异步(对齐出货),processing:true 启动轮询 /match-status
+        (images || []).forEach(function(img) {
+            if (img.processing && typeof pollRecordImageMatch === 'function') {
+                pollRecordImageMatch(img.image_id, recordId);
+            }
+        });
         // Refresh row badge
         if (typeof refreshRowMatchBadge === 'function') refreshRowMatchBadge(recordId);
     };
@@ -1017,11 +1038,14 @@ document.addEventListener('DOMContentLoaded', function() {
         var tr = btn.closest('tr');
         var tds = tr.querySelectorAll('td');
         var seq = tds[0].textContent.trim();
-        var name = tds[1].textContent.trim();
-        var spec = tds[2].textContent.trim();
-        var qty = tds[3].textContent.trim();
-        var unit = tds[4].textContent.trim();
-        var remark = tds[5].textContent.trim();
+        // 2026-09-18:明细表第 2 列是「重点」(eco-col),数据列从 tds[2] 开始
+        var name = tds[2].textContent.trim();
+        var spec = tds[3].textContent.trim();
+        var qty = tds[4].textContent.trim();
+        var unit = tds[5].textContent.trim();
+        var remark = tds[6].textContent.trim();
+        // 保留「重点」td 的 outerHTML(含 eco-icon / jia-mian SVG),编辑模式下不重建
+        var ecoTdHtml = tr.children[1] ? tr.children[1].outerHTML : '<td class="eco-col"></td>';
 
         // 保存原始行内容用于取消
         tr.dataset.orig = JSON.stringify({name: name, spec: spec, qty: qty, unit: unit, remark: remark});
@@ -1038,6 +1062,7 @@ document.addEventListener('DOMContentLoaded', function() {
         var editingPieceHint = getPieceHint(name, spec) || '';
 
         tr.innerHTML = '<td style="width:36px; text-align:center; color:#868e96; font-size:0.85rem;">'+seq+'</td>' +
+            ecoTdHtml +
             '<td><input type="text" name="name" value="'+escAttr(name)+'" style="width:100%;padding:0.65rem;border:1px solid #dfe6e9;border-radius:4px;font-size:1.1rem;box-sizing:border-box;"></td>' +
             '<td><input type="text" name="spec" value="'+escAttr(spec)+'" style="width:100%;padding:0.65rem;border:1px solid #dfe6e9;border-radius:4px;font-size:1.1rem;box-sizing:border-box;"></td>' +
             '<td><input type="number" name="qty" value="'+escAttr(qty)+'" style="width:100%;padding:0.65rem;border:1px solid #dfe6e9;border-radius:4px;font-size:1.1rem;box-sizing:border-box;"></td>' +
@@ -1077,7 +1102,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 var mismatch = checkLoadingMismatch(r.remark || '', r.quantity, r.product_name, r.specification || '');
                 var pieceHint = getPieceHint(r.product_name, r.specification || '');
                 var pieceMismatch = checkPieceMismatch(r.remark || '', r.quantity, r.product_name, r.specification || '');
+                // 2026-09-18:重新构造「重点」td(eco/jia_mian 图标),不依赖原 tr.children
+                var isEco = (r.product_name || '').indexOf('环保') !== -1;
+                var isJiaMian = (r.product_name || '').indexOf('杂胶') !== -1 && (r.specification || '').indexOf('加面') !== -1;
+                var ecoTdHtml = '<td class="eco-col">' +
+                    (isEco ? '<span class="eco-icon" title="环保产品">🌿</span>' : '') +
+                    (isJiaMian ? '<svg class="jia-mian-icon" viewBox="0 0 16 16" width="14" height="14" title="加面工艺"><defs><pattern id="jm-load-' + r.id + '" width="3" height="3" patternUnits="userSpaceOnUse"><path d="M0,3 L3,0" stroke="currentColor" stroke-width="0.6"/><path d="M0,0 L3,3" stroke="currentColor" stroke-width="0.6"/></pattern></defs><rect width="16" height="16" fill="url(#jm-load-' + r.id + ')"/></svg>' : '') +
+                    '</td>';
                 tr.innerHTML = '<td style="width:36px; text-align:center; color:#868e96; font-size:0.85rem;">' + loadingMismatchIcon(mismatch) + seq + '</td>' +
+                    ecoTdHtml +
                     '<td class="product-name-cell">' + escHtml(r.product_name) + '</td>' +
                     '<td class="spec-cell">' + escHtml(r.specification || '-') + '</td>' +
                     '<td><span class="qty-badge">' + escHtml(r.quantity) + '</span></td>' +
@@ -1120,7 +1153,15 @@ document.addEventListener('DOMContentLoaded', function() {
         }).join('');
         var unitHint = getLoadingUnitHint(orig.name, orig.spec, orig.qty, orig.unit, orig.remark) || '—';
         var pieceHint = getPieceHint(orig.name, orig.spec) || '';
+        // 2026-09-18:重新构造「重点」td(eco/jia_mian 图标),与模板一致
+        var isEco = (orig.name || '').indexOf('环保') !== -1;
+        var isJiaMian = (orig.name || '').indexOf('杂胶') !== -1 && (orig.spec || '').indexOf('加面') !== -1;
+        var ecoTdHtml = '<td class="eco-col">' +
+            (isEco ? '<span class="eco-icon" title="环保产品">🌿</span>' : '') +
+            (isJiaMian ? '<svg class="jia-mian-icon" viewBox="0 0 16 16" width="14" height="14" title="加面工艺"><defs><pattern id="jm-load-' + tr.dataset.editId + '" width="3" height="3" patternUnits="userSpaceOnUse"><path d="M0,3 L3,0" stroke="currentColor" stroke-width="0.6"/><path d="M0,0 L3,3" stroke="currentColor" stroke-width="0.6"/></pattern></defs><rect width="16" height="16" fill="url(#jm-load-' + tr.dataset.editId + ')"/></svg>' : '') +
+            '</td>';
         tr.innerHTML = '<td style="width:36px; text-align:center; color:#868e96; font-size:0.85rem;">'+tr.dataset.seq+'</td>' +
+            ecoTdHtml +
             '<td class="product-name-cell">'+escHtml(orig.name)+'</td>' +
             '<td class="spec-cell">'+escHtml(orig.spec)+'</td>' +
             '<td>'+escHtml(orig.qty)+'</td>' +

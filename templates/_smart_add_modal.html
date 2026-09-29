@@ -73,6 +73,10 @@ function buildShippingRecordRow(rec, tbody) {
 }
 
 function doBatchAdd(items, imgData) {
+    // 兜底:无论 items 来源是 submitSmartFill(本地解析)还是 LLM/AI 解析,在入站前统一格式化 remark
+    if (items && items.length && typeof formatPiecePlusYardsRemark === 'function') {
+        items.forEach(function(it) { it.remark = formatPiecePlusYardsRemark(it.remark || ''); });
+    }
     if (typeof showLoading === 'function') showLoading('批量添加中...');
     fetch(_smartAddApi + '/' + _smartFillOrderPk + '/records/batch', {
         method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({items:items, records:items})
@@ -114,7 +118,77 @@ window.openSmartFill = function(orderPk, orderDate, orderCustomer) {
     document.getElementById('smartFillText').value = '';
     document.getElementById('smartFillOrderInfo').textContent = '📦 ' + orderDate + ' ' + orderCustomer;
     resetAiState(); switchSmartFillTab('ai');
+    refreshSuppressSummary();
 };
+// 2026-09-18: 临时两栏对照弹框(OCR 原文 vs AI 结构化) — 防相邻行数量串错
+var _smartAiOcrText = '';
+function showOcrVerify(items, ocrText) {
+    // 2026-09-18: OCR 原文移到独立 tab 显示(带行号标号,方便核对)
+    var ocrEl = document.getElementById('ocrRawContent');
+    if (ocrText) {
+        var numberedLines = ocrText.split('\n').map(function(line, idx) {
+            return (idx + 1).toString().padStart(2, '0') + ' | ' + line;
+        }).join('\n');
+        ocrEl.textContent = numberedLines;
+    } else {
+        ocrEl.textContent = '(后端未返回 OCR 原文,请确认引擎是否支持)';
+    }
+    var tbody = document.getElementById('ocrVerifyStructured');
+    tbody.innerHTML = '';
+    items.forEach(function(it, idx) {
+        var tr = '<tr>' +
+            '<td style="padding:0.4rem;border-bottom:1px solid #f1f3f5;color:#868e96;">' + (idx + 1) + '</td>' +
+            '<td style="padding:0.4rem;border-bottom:1px solid #f1f3f5;">' + escHtml(it.product_name || '') + '</td>' +
+            '<td style="padding:0.4rem;border-bottom:1px solid #f1f3f5;"><input class="ovm-cell-input" data-field="specification" data-idx="' + idx + '" value="' + escHtml(it.specification || '') + '" style="width:100%;padding:0.25rem 0.3rem;border:1px solid #dfe6e9;border-radius:4px;font-size:0.85rem;box-sizing:border-box;"></td>' +
+            '<td style="padding:0.4rem;border-bottom:1px solid #f1f3f5;"><input class="ovm-cell-input ovm-cell-qty" data-field="quantity" data-idx="' + idx + '" value="' + escHtml(it.quantity || '') + '" style="width:100%;padding:0.25rem 0.3rem;border:1px solid #dfe6e9;border-radius:4px;font-size:0.95rem;font-weight:700;color:#0984e3;box-sizing:border-box;"></td>' +
+            '<td style="padding:0.4rem;border-bottom:1px solid #f1f3f5;">' + escHtml(it.unit || '-') + '</td>' +
+            '<td style="padding:0.4rem;border-bottom:1px solid #f1f3f5;">' + escHtml(it.remark || '-') + '</td>' +
+            '</tr>';
+        tbody.insertAdjacentHTML('beforeend', tr);
+    });
+    document.getElementById('ocrVerifyModal').style.display = 'flex';
+}
+function _continueAfterOcrVerify() {
+    // 2026-09-18: 收集用户在两栏对照弹框里编辑过的字段,回写到 _smartAiItems
+    document.querySelectorAll('.ovm-cell-input').forEach(function(inp) {
+        var idx = parseInt(inp.getAttribute('data-idx'), 10);
+        var field = inp.getAttribute('data-field');
+        if (!isNaN(idx) && _smartAiItems[idx] && field) {
+            _smartAiItems[idx][field] = inp.value;
+        }
+    });
+    // 把 customer_name 和 doc_number 写到 modal 顶部的可编辑输入框
+    document.getElementById('aiCustomerInput').value = _smartCustomer;
+    document.getElementById('aiDocNumberInput').value = _smartDocNumber;
+    renderAiResults(_smartAiItems);
+    document.getElementById('aiResultArea').classList.add('show');
+    document.getElementById('aiAddBtn').disabled = false;
+}
+window.closeOcrVerify = function() {
+    document.getElementById('ocrVerifyModal').style.display = 'none';
+    _continueAfterOcrVerify();
+};
+window.copyOcrRaw = function() {
+    var text = document.getElementById('ocrRawContent').textContent;
+    if (!text || text.indexOf('(暂无') === 0) {
+        alert('暂无可复制的 OCR 原文,请先在「📷 AI 图片识别」跑一次识别');
+        return;
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function() {
+            alert('✅ OCR 原文已复制到剪贴板');
+        }, function() {
+            prompt('OCR 原文(手动复制):', text);
+        });
+    } else {
+        prompt('OCR 原文(手动复制):', text);
+    }
+};
+window.confirmOcrVerify = function() {
+    document.getElementById('ocrVerifyModal').style.display = 'none';
+    _continueAfterOcrVerify();
+};
+
 window.closeSmartFill = function() {
     document.getElementById('smartFillModal').classList.remove('show');
     document.getElementById('smartFillText').value = '';
@@ -123,8 +197,12 @@ window.closeSmartFill = function() {
 window.switchSmartFillTab = function(tab) {
     document.getElementById('tabText').classList.toggle('active', tab === 'text');
     document.getElementById('tabAI').classList.toggle('active', tab === 'ai');
+    document.getElementById('tabAiText').classList.toggle('active', tab === 'ai-text');
+    document.getElementById('tabOcrRaw').classList.toggle('active', tab === 'ocr-raw');
     document.getElementById('contentText').classList.toggle('active', tab === 'text');
     document.getElementById('contentAI').classList.toggle('active', tab === 'ai');
+    document.getElementById('contentAiText').classList.toggle('active', tab === 'ai-text');
+    document.getElementById('contentOcrRaw').classList.toggle('active', tab === 'ocr-raw');
 };
 window.onAiEngineChange = function() {
     var e = document.getElementById('aiEngine').value;
@@ -146,6 +224,13 @@ function resetAiState() {
     document.getElementById('aiAddBtn').disabled = true;
     document.getElementById('aiUploadArea').style.display = 'block';
     var p = document.querySelector('#aiLoading p'); if (p) p.textContent = 'AI 正在识别中，请稍候...';
+    // 2026-09-22: 智能文本 tab 状态一并清掉
+    var aiTextInput = document.getElementById('aiTextInput');
+    if (aiTextInput) aiTextInput.value = '';
+    var aiTextLoading = document.getElementById('aiTextLoading');
+    if (aiTextLoading) aiTextLoading.style.display = 'none';
+    var aiTextBtn = document.getElementById('aiTextParseBtn');
+    if (aiTextBtn) aiTextBtn.disabled = false;
 }
 
 function handleAiFileSelect(input) {
@@ -209,6 +294,13 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('smartFillModal').addEventListener('click', function(e) {
         if (e.target === this) closeSmartFill();
     });
+    // 2026-09-22:补充提示词弹框 — 独立监听遮罩 click,不复用主弹框样式
+    var suppressEl = document.getElementById('suppressSettingsModal');
+    if (suppressEl) {
+        suppressEl.addEventListener('click', function(e) {
+            if (e.target === this) closeSuppressSettings();
+        });
+    }
 });
 
 // ── 从明细行读「品名 / 规格」的唯一入口 ────────────────────────────────────
@@ -355,18 +447,17 @@ function submitAiRecognize() {
               engine === 'deepseek' ? 'PaddleOCR 提取文字 + DeepSeek 结构化中...' : 'AI 正在识别中，请稍候...';
     document.querySelector('#aiLoading p').textContent = msg;
     var fd = new FormData(); fd.append('image', _smartAiImageFile); fd.append('engine', engine);
+    // 【2026-09-15】把当前 order_id 一并提交,后端会跟订单已有明细做重复检测
+    if (_smartFillOrderId) fd.append('order_id', String(_smartFillOrderId));
     fetch(_smartAddApi + '/ai-recognize', { method: 'POST', body: fd })
     .then(function(r) { return r.json(); })
     .then(function(data) {
         document.getElementById('aiLoading').classList.remove('show');
         if (data.success && data.items && data.items.length > 0) {
             _smartAiItems = data.items; _smartDocNumber = data.doc_number || ''; _smartCustomer = data.customer_name || '';
-            // 把 customer_name 和 doc_number 写到 modal 顶部的可编辑输入框(用户可手动改)
-            document.getElementById('aiCustomerInput').value = _smartCustomer;
-            document.getElementById('aiDocNumberInput').value = _smartDocNumber;
-            renderAiResults(data.items);
-            document.getElementById('aiResultArea').classList.add('show');
-            document.getElementById('aiAddBtn').disabled = false;
+            _smartAiOcrText = data.ocr_text || '';  // 2026-09-18: 两栏对照弹框用
+            // 2026-09-18: 先弹 OCR 原文 vs AI 结构化 两栏对照临时弹框,人核对后再进正常编辑流程
+            showOcrVerify(data.items, data.ocr_text || '');
         } else if (data.success && data.items && data.items.length === 0) {
             // 即使没识别到商品, 也显示 customer_name/doc_number (如果识别到了)
             if (data.customer_name || data.doc_number) {
@@ -421,7 +512,22 @@ function renderAiResults(items) {
     tbody.innerHTML = '';
     for (i = 0; i < items.length; i++) {
         item = _normalizeAiItemForYardProduct(items[i]); tr = document.createElement('tr');
-        tr.innerHTML = '<td><input type="text" value="' + escHtml(item.product_name||'') + '" data-field="product_name"></td>' +
+        // 【2026-09-15】重复检测警示:后端已在 item 上加 duplicate 字段。
+        //   duplicate='full'        → 品名+规格+数量与现有明细完全一致(最强警示,大概率重复添加)
+        //   duplicate='quantity_only' → 仅数量与现有明细一致(可能是真的另一行;警示但允许)
+        // 行底色 + 徽章,用户可手动删行或确认后继续添加。
+        var dupKind = item.duplicate;
+        var dupBadge = '';
+        var rowStyle = '';
+        if (dupKind === 'full') {
+            rowStyle = 'background:#ffe0e0;border-left:3px solid #d63031;';
+            dupBadge = ' <span title="与现有明细(品名+规格+数量)完全一致,极可能重复" style="background:#d63031;color:#fff;font-size:0.7rem;padding:0 0.35rem;border-radius:3px;font-weight:700;margin-left:0.25rem;cursor:help;">⚠ 重复</span>';
+        } else if (dupKind === 'quantity_only') {
+            rowStyle = 'background:#fff5e1;border-left:3px solid #fdcb6e;';
+            dupBadge = ' <span title="该数量与现有明细一致但品名/规格不同,可能是 AI 误把数量串行(如 KILA GROUP 装车单事件)" style="background:#fdcb6e;color:#7a4a00;font-size:0.7rem;padding:0 0.35rem;border-radius:3px;font-weight:700;margin-left:0.25rem;cursor:help;">⚠ 数量冲突</span>';
+        }
+        tr.setAttribute('data-duplicate', dupKind || '');
+        tr.innerHTML = '<td><input type="text" value="' + escHtml(item.product_name||'') + '" data-field="product_name">' + dupBadge + '</td>' +
             '<td><input type="text" value="' + escHtml(item.specification||'') + '" data-field="specification"></td>' +
             '<td><input type="text" value="' + escHtml(item.quantity||'') + '" data-field="quantity"></td>' +
             '<td><select data-field="unit" style="width:100%;padding:0.25rem;border:1px solid #dfe6e9;border-radius:4px;font-size:0.85rem;box-sizing:border-box;">' +
@@ -434,7 +540,15 @@ function renderAiResults(items) {
             '</select></td>' +
             '<td><input type="text" value="' + escHtml(item.remark||'') + '" data-field="remark" oninput="autoFillQtyFromRemark(this)" style="width:100%;"></td>' +
             '<td style="width:35px;text-align:center;"><button onclick="this.closest(\'tr\').remove()" style="background:#ffeaa7;border:1px solid #fdcb6e;color:#d63031;cursor:pointer;font-size:1.1rem;padding:0 4px;border-radius:3px;line-height:1;" title="删除此行">&times;</button></td>';
+        if (rowStyle) tr.setAttribute('style', rowStyle);
         tbody.appendChild(tr);
+    }
+    // 顶部统计重复行数
+    var dupCount = items.filter(function(it) { return it && it.duplicate; }).length;
+    if (dupCount > 0) {
+        var hint = document.createElement('tr');
+        hint.innerHTML = '<td colspan="6" style="background:#fff5e1;color:#7a4a00;font-size:0.78rem;padding:0.4rem 0.6rem;border-top:1px solid #fdcb6e;">⚠ AI 识别出 ' + dupCount + ' 行与订单已有明细疑似重复(数量或品名规格一致),请核对后再添加。可点击右侧 × 删除该行,或手动修改品名/规格/数量。</td>';
+        tbody.appendChild(hint);
     }
 }
 
@@ -476,7 +590,10 @@ function addRowWarning(targetTr, item) {
     // - 已核查:从主警告列表剔除,移到下方「✓ 已核查的 N 项」折叠区 + 「✗ 取消核查」按钮
     // 特殊:如果该明细**原本就只触发 1 条警告**且已被核查,效果等同"全部已核查",整段警告行隐藏
     //       (空折叠区放一个 ✗ 取消核查按钮没意义),用户想恢复就改品名/规格让警告重新触发
-    var warnings = getItemWarnings(item);
+    // 跨条规则(同订单「1板X」不一致 / 新厂磅布 vs B级)需要同订单其他行的 pn/sp/remark,
+    // 由 buildOrderContext 从 DOM .date-group 自动收集,无 ctx 时退化为只跑单条规则。
+    var orderCtx = (typeof buildOrderContext === 'function') ? buildOrderContext(targetTr) : [];
+    var warnings = getItemWarnings(item, orderCtx);
     var verifiedMap = item.verified_warnings || {};
     var activeWarnings = [];
     var ignoredWarnings = [];
@@ -689,13 +806,52 @@ window.validateAllRows = function() {
     return result;
 };
 
+// ── 跨条规则上下文构建 ──
+// 从 remark 中解析「(1板X)」的 X 后缀;无 1板 → null;X 为空字符串('(1板)')也返回 '' 以与「无 1板」区分
+// 真实样本:
+//   "50支(1板)"          → ''        (X 为空)
+//   "56支(1板新厂)"      → '新厂'
+//   "40支(1板硬标签)"    → '硬标签'
+//   "42支"               → null      (无外包装标记)
+function extractOuterPackTag(remark) {
+    if (!remark) return null;
+    var m = remark.match(/1板([^）)]*)/);
+    if (!m) return null;
+    return (m[1] || '').trim();
+}
+
+// 从 targetTr 出发,收集同 .date-group 下所有数据行(带 data-record-id 的 tr)的
+// (product_name, specification, remark) 列表。用于跨条规则判定。
+// 自然覆盖:DOMContentLoaded 扫、inline 编辑保存、锁定切换、智能添加批量成功四个 addRowWarning 调用点。
+function buildOrderContext(targetTr) {
+    var dg = targetTr && targetTr.closest('.date-group');
+    if (!dg) return [];
+    var rows = dg.querySelectorAll('tr[data-record-id]');
+    var ctx = [];
+    rows.forEach(function(r) {
+        var pnCell = r.querySelector('.product-name-cell');
+        var spCell = r.querySelector('.spec-cell');
+        var rkCell = r.querySelector('.remark-cell');
+        if (!pnCell) return;  // 跳过警告行(没 product-name-cell)
+        ctx.push({
+            tr: r,
+            product_name: (pnCell.textContent || '').trim(),
+            specification: spCell ? (spCell.textContent || '').trim() : '',
+            remark: rkCell ? (rkCell.textContent || '').trim() : ''
+        });
+    });
+    return ctx;
+}
+
 // ── AI 识别结果校验规则 ──
 // 规则 1: 商品名含「纯胶」但不是「环保纯胶」→ 提示核查
 // 规则 2: 商品类型为「杂胶」或「环保杂胶」→ 提示核查规格是否含「加面」
 // (product_name 没单独的 category 字段,实际数据里 product_name 已包含分类信息)
+// 规则 5: 同订单同品名+同规格 「(1板X)」后缀不一致 → 提示是否同一批外包装
+// 规则 6: B级磅布三文治 备注含「新厂」(语义矛盾),或非 B 级磅布标「新厂」与同订单 B 级磅布混出
 // 返回 [{rule_id, message}],前端按 rule_id 渲染「✓ 核查」/「✗ 取消核查」按钮,
 // 配合后端 shipping_records.verified_warnings(JSON) 持久化每条规则的核查状态。
-function getItemWarnings(item) {
+function getItemWarnings(item, ctx) {
     var pn = (item.product_name || '').trim();
     var sp = (item.specification || '').trim();
     var combined = pn + ' ' + sp;
@@ -743,6 +899,54 @@ function getItemWarnings(item) {
         warnings.push({rule_id: 'misc_has_jia_mian', message: '商品类型为「杂胶」,规格含「加面」,是否应为「不加面」?'});
     }
 
+    // ── 跨条规则(需要 ctx) ──
+    ctx = ctx || [];
+    var myRemark = item.remark || '';
+
+    // 规则 5: 同订单同品名+同规格 「(1板X)」后缀不一致 → 不要混批次外包装
+    // 仅当本行 remark 含「1板」时触发(无 1板 的行不参与,避免无谓警告)
+    var myX = extractOuterPackTag(myRemark);
+    if (myX !== null && ctx.length > 0) {
+        var sameKeyRows = ctx.filter(function(c) {
+            return c.product_name === pn && c.specification === sp;
+        });
+        if (sameKeyRows.length >= 2) {
+            // 收集所有「X」(含自己),统计 distinct 数
+            var xs = sameKeyRows.map(function(c) { return extractOuterPackTag(c.remark); });
+            var distinct = {};
+            xs.forEach(function(x) { distinct[x === null ? 'NONE' : x] = true; });
+            if (Object.keys(distinct).length >= 2) {
+                var parts = xs.map(function(x) {
+                    return x === null ? '(无)' : '「1板' + (x || '') + '」';
+                });
+                warnings.push({
+                    rule_id: 'outer_pack_inconsistent',
+                    message: '同订单同品名/同规格的多条明细「1板X」后缀不一致:' + parts.join(' / ') + ',请确认是否同一批外包装'
+                });
+            }
+        }
+    }
+
+    // 规则 6: 新厂磅布 vs B 级磅布 误标
+    //   B1: 品名=B级磅布三文治 且 备注含「新厂」 → 语义直接矛盾
+    //   B2: 品名是非 B 级的磅布三文治(黑/白/环保/7P环保)+ 备注含「新厂」+ 同订单存在 B 级磅布行 → 混出嫌疑
+    var isBGrade = pn === 'B级磅布三文治';
+    var isPoundClothFamily = pn.indexOf('磅布三文治') !== -1;
+    var hasNewFactoryTag = myRemark.indexOf('新厂') !== -1;
+    if (hasNewFactoryTag && isPoundClothFamily) {
+        if (isBGrade) {
+            warnings.push({
+                rule_id: 'new_factory_in_b_grade',
+                message: '品名为「B级磅布三文治」但备注标了「新厂」,B 级通常不分新厂 —— 是否品名选错?'
+            });
+        } else if (ctx.some(function(c) { return (c.product_name || '').trim() === 'B级磅布三文治'; })) {
+            warnings.push({
+                rule_id: 'new_factory_in_b_grade',
+                message: '同订单同时存在「B级磅布三文治」,且本行标了「新厂」 —— 新厂品可能被错抓成 B 级,请确认'
+            });
+        }
+    }
+
     return warnings;
 }
 
@@ -762,7 +966,8 @@ function collectRowWarnings() {
         rm = (row.querySelector('[data-field="remark"]')||{}).value || '';
         if (!pn.trim() || !qt.trim()) continue;
         item = {product_name: pn, specification: sp, quantity: qt, unit: un, remark: rm};
-        ws = getItemWarnings(item);
+        // 弹框里 pending 行还没入 DOM,跨条规则交给保存后的 addRowWarning + buildOrderContext 处理
+        ws = getItemWarnings(item, []);
         if (ws.length) all.push({pn: pn, sp: sp, warnings: ws});
     }
     return all;
@@ -856,6 +1061,118 @@ function updateOrderDocNumber() {
     }).catch(function(e){console.error('doc_number update:',e);});
 }
 
+// ── 🤖 智能文本 tab(2026-09-22 入库页新增)─────────────────────────
+// 用户在「🤖 智能文本」tab 粘贴/手敲自由格式商品描述,DeepSeek 解析为可编辑的
+// 明细行。流程:
+//   1. submitAiText()        POST /ai-recognize (form: text=...) → DeepSeek
+//   2. 成功后 _smartAiItems / _smartDocNumber / _smartCustomer / _smartAiOcrText
+//      都被赋值 → 复用 renderAiResults() 渲染到 #aiResultBody(可编辑表格)
+//   3. 2026-09-22 改造:不再强制切到 AI tab,改弹「🤖 确认入库?」对话框
+//      → 用户主动选择入库(确认按钮 → submitAiResults)或再编辑(取消按钮 → 切回 AI tab)
+// 这样新 tab 与图片 tab 复用 100% 的编辑/校验/批量添加代码,行为零分叉。
+function showAiTextConfirm(items) {
+    var list = document.getElementById('aiConfirmList');
+    var countEl = document.getElementById('aiConfirmCount');
+    if (countEl) countEl.textContent = items.length;
+    if (list) {
+        var html = '';
+        items.forEach(function(it, idx) {
+            html += '<div style="padding:0.3rem 0.4rem;border-bottom:1px solid #f1f3f5;display:flex;gap:0.4rem;align-items:baseline;">';
+            html += '<span style="color:#868e96;font-size:0.78rem;min-width:1.5rem;">' + (idx + 1) + '.</span>';
+            html += '<span style="flex:1;">';
+            html += '<span style="font-weight:600;color:#2d3436;">' + escHtml(it.product_name || '') + '</span>';
+            html += '<span style="color:#636e72;margin-left:0.4rem;">' + escHtml(it.specification || '') + '</span>';
+            html += '<span style="color:#0984e3;font-weight:700;margin-left:0.4rem;">' + escHtml(String(it.quantity || '')) + escHtml(it.unit || '') + '</span>';
+            if (it.remark) html += '<span style="color:#868e96;font-size:0.78rem;margin-left:0.4rem;">(' + escHtml(it.remark) + ')</span>';
+            html += '</span></div>';
+        });
+        list.innerHTML = html || '<p style="color:#888;text-align:center;margin:1rem 0;">未识别到商品</p>';
+    }
+    document.getElementById('aiTextConfirmModal').classList.add('show');
+}
+window.closeAiTextConfirm = function() {
+    document.getElementById('aiTextConfirmModal').classList.remove('show');
+};
+window.confirmAiTextSubmit = function() {
+    // 2026-09-22:用户点「确认入库」 → 调 submitAiResults()(入库页已覆盖)
+    // → 走批量入库路径,跟「📷 AI 图片识别」共用 100% 的代码
+    closeAiTextConfirm();
+    if (typeof window.submitAiResults === 'function') {
+        window.submitAiResults();
+    } else {
+        alert('submitAiResults 函数未定义');
+    }
+};
+window.submitAiText = function() {
+    var textEl = document.getElementById('aiTextInput');
+    var text = textEl ? textEl.value.trim() : '';
+    if (!text) { alert('请输入要解析的商品描述'); return; }
+    if (_smartFillOrderPk === null) { alert('缺少订单信息'); return; }
+    var btn = document.getElementById('aiTextParseBtn');
+    var loading = document.getElementById('aiTextLoading');
+    btn.disabled = true;
+    loading.style.display = 'block';
+    // 2026-09-22: 文本路径不依赖图片。强制清掉旧模块级 _smartAiImageFile,
+    // 防止「📷 AI 图片识别」tab 残留的旧图在提交时触发「上传图片中...」loading。
+    _smartAiImageFile = null;
+    var fd = new FormData();
+    fd.append('text', text);
+    fd.append('engine', 'deepseek');
+    // 【2026-09-22】跟图片识别共用同一套重复检测:order_id 透传让后端能对照已有明细
+    if (_smartFillOrderId) fd.append('order_id', String(_smartFillOrderId));
+    fetch(_smartAddApi + '/ai-recognize', { method: 'POST', body: fd })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        btn.disabled = false;
+        loading.style.display = 'none';
+        if (data.success && data.items && data.items.length > 0) {
+            _smartAiItems = data.items;
+            _smartDocNumber = data.doc_number || '';
+            _smartCustomer = data.customer_name || '';
+            // 同步 OCR 原文 → 让 OCR 原文 tab 也能显示用户输入的文本(带行号)
+            _smartAiOcrText = data.ocr_text || text;
+            renderAiResults(_smartAiItems);
+            // OCR 原文 tab 同步刷新(共享 _smartAiOcrText)
+            var ocrEl = document.getElementById('ocrRawContent');
+            if (ocrEl && _smartAiOcrText) {
+                var numberedLines = _smartAiOcrText.split('\n').map(function(line, idx) {
+                    return (idx + 1).toString().padStart(2, '0') + ' | ' + line;
+                }).join('\n');
+                ocrEl.textContent = numberedLines;
+            }
+            document.getElementById('aiCustomerInput').value = _smartCustomer;
+            document.getElementById('aiDocNumberInput').value = _smartDocNumber;
+            document.getElementById('aiResultArea').classList.add('show');
+            document.getElementById('aiAddBtn').disabled = false;
+            // 2026-09-22 改造:不再强制切到 AI tab,弹「🤖 确认入库?」对话框
+            // 让用户主动选择入库还是再核对,避免「AI 解析后以为已入库」的认知错位。
+            showAiTextConfirm(_smartAiItems);
+            if (data.truncated) {
+                alert('⚠️ ' + (data.hint || '输入文本过长,已截断部分内容'));
+            }
+        } else if (data.success && data.items && data.items.length === 0) {
+            // 没识别到商品但识别到了客户/单号 → 也填上
+            if (data.customer_name || data.doc_number) {
+                _smartCustomer = data.customer_name || '';
+                _smartDocNumber = data.doc_number || '';
+                document.getElementById('aiCustomerInput').value = _smartCustomer;
+                document.getElementById('aiDocNumberInput').value = _smartDocNumber;
+                document.getElementById('aiResultArea').classList.add('show');
+                document.getElementById('aiAddBtn').disabled = false;
+                switchSmartFillTab('ai');
+            }
+            alert('AI 未能从文本中识别到商品信息,请尝试更结构化的格式(如每行一个商品)或切换到「📝 文本输入」手动填写。');
+        } else {
+            var m = data.hint ? data.error + '\n\n💡 ' + data.hint : (data.error || '未知错误');
+            alert('解析失败:' + m);
+        }
+    }).catch(function(err) {
+        btn.disabled = false;
+        loading.style.display = 'none';
+        alert('请求失败:' + err);
+    });
+};
+
 window.submitSmartFill = function() {
     var text = document.getElementById('smartFillText').value.trim();
     if (!text) { alert('请输入要解析的内容'); return; }
@@ -864,7 +1181,8 @@ window.submitSmartFill = function() {
         parts = lines[i].trim().split(/[,\s;\t]+/).filter(function(p){return p.length>0;});
         if (parts.length>=4) {
             var u = parts[2]; if (u==='码') u='y';
-            items.push({product_name:parts[0], specification:parts[1], unit:u, quantity:parts[3], remark:parts.slice(4).join(' ')||''});
+            var rk = formatPiecePlusYardsRemark(parts.slice(4).join(' ') || '');
+            items.push({product_name:parts[0], specification:parts[1], unit:u, quantity:parts[3], remark:rk});
         } else { alert('第'+(i+1)+'行格式不正确，至少需：商品名称 规格 单位 数量'); return; }
     }
     if (items.length===0) { alert('没有有效数据'); return; }
@@ -872,6 +1190,113 @@ window.submitSmartFill = function() {
     // 委托 doBatchAdd 走局部刷新路径(appendChild tr + 绑定事件),跟 AI 识别走同一条路
     doBatchAdd(items, null);
 };
+
+// 「XX支+yy码/y」→「XX支 + yy码」:在 + 两侧加空格,码尾统一显示为「码」
+// (2026-09-27 入库页体验改进)抽出来作为兜底函数,doBatchAdd 入站处再调一次,覆盖所有来源:
+// submitSmartFill(本地解析)/submitAiText→submitAiResults(LLM 解析)都要走它
+function formatPiecePlusYardsRemark(text) {
+    if (!text) return '';
+    return text.replace(/(\d+(?:\.\d+)?)支\+(\d+(?:\.\d+)?)(?:码|y)(?!\d)/g, '$1支 + $2码');
+}
+
+// ── 「🤖 智能文本」补充提示词管理(2026-09-22)───────────────────────
+// 弹框挂在 contentAiText tab 内的「⚙️ 提示词设置」按钮,数据走 4 个 REST 端点。
+// 设计:每条独立增删;激活的 active 文本会拼到 prompt 末段(全局生效,不分关键词)。
+// 软删走 PATCH status='archived',前端列表默认不显示 archived。
+var _suppressCache = [];
+window.openSuppressSettings = function() {
+    document.getElementById('suppressSettingsModal').classList.add('show');
+    loadSuppressList();
+};
+window.closeSuppressSettings = function() {
+    document.getElementById('suppressSettingsModal').classList.remove('show');
+};
+function loadSuppressList() {
+    fetch('/api/v1/text-recognize-supplements?include_archived=1')
+    .then(function(r){return r.json();}).then(function(data){
+        var list = document.getElementById('suppressList');
+        if (!data.success) { list.innerHTML = '<p style="color:#d63031;">加载失败:'+(data.message||data.error)+'</p>'; return; }
+        _suppressCache = data.items || [];
+        renderSuppressList(_suppressCache);
+    }).catch(function(e){
+        document.getElementById('suppressList').innerHTML = '<p style="color:#d63031;">加载失败:'+e+'</p>';
+    });
+}
+function renderSuppressList(items) {
+    var list = document.getElementById('suppressList');
+    if (!items || items.length === 0) {
+        list.innerHTML = '<p style="color:#888;text-align:center;margin:8px 0;font-size:0.85rem;">暂无提示词。遇到 LLM 错配,在这里加一条约束(如「环保≠7P」),下次解析就会自动遵循。</p>';
+        return;
+    }
+    var html = '';
+    items.forEach(function(it){
+        var archived = it.status === 'archived';
+        html += '<div style="display:flex;gap:0.5rem;align-items:flex-start;padding:0.45rem 0.55rem;margin-bottom:0.4rem;background:'+(archived?'#f5f5f5':'#fff')+';border:1px solid '+(archived?'#dee2e6':'#d6c5ff')+';border-radius:4px;'+(archived?'opacity:0.55;':'')+'">';
+        html += '<span style="flex:1;font-size:0.85rem;color:#2d3436;line-height:1.5;word-break:break-all;">'+(archived?'<s>':'')+escHtml(it.prompt_text||'')+(archived?'</s>':'')+'</span>';
+        html += '<span style="font-size:0.7rem;color:#999;white-space:nowrap;">#'+it.id+'</span>';
+        if (archived) {
+            html += '<button class="btn btn-sm" style="background:#e8f5e9;color:#27ae60;font-size:0.7rem;padding:2px 6px;" onclick="restoreSuppress('+it.id+')">↺ 恢复</button>';
+        } else {
+            html += '<button class="btn btn-sm" style="background:#fff3cd;color:#d63031;font-size:0.7rem;padding:2px 6px;" onclick="archiveSuppress('+it.id+')">✕ 软删</button>';
+        }
+        html += '</div>';
+    });
+    list.innerHTML = html;
+}
+window.addSuppress = function() {
+    var ta = document.getElementById('suppressNewText');
+    var txt = ta.value.trim();
+    if (!txt) { alert('请输入提示词内容'); return; }
+    if (txt.length > 500) { alert('提示词长度不超过 500 字'); return; }
+    var sourceText = (document.getElementById('aiTextInput')||{}).value || '';
+    fetch('/api/v1/text-recognize-supplements', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({prompt_text: txt, source_ocr_text: sourceText.slice(0, 4000)})
+    }).then(function(r){return r.json();}).then(function(data){
+        if (!data.success) { alert('添加失败:'+(data.error||'未知错误')); return; }
+        ta.value = '';
+        loadSuppressList();
+        // 同步顶栏计数
+        var countEl = document.getElementById('suppressCount');
+        var summaryEl = document.getElementById('suppressSummary');
+        if (countEl) { countEl.textContent = (parseInt(countEl.textContent||'0') + 1); }
+        if (summaryEl) summaryEl.style.display = 'block';
+    }).catch(function(e){ alert('请求失败:'+e); });
+};
+window.archiveSuppress = function(id) {
+    if (!confirm('软删这条提示词?它将不再注入 prompt,但保留记录可恢复。')) return;
+    fetch('/api/v1/text-recognize-supplements/'+id, {
+        method: 'PATCH',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({status: 'archived'})
+    }).then(function(r){return r.json();}).then(function(data){
+        if (!data.success) { alert('操作失败:'+(data.error||'未知错误')); return; }
+        loadSuppressList();
+    }).catch(function(e){ alert('请求失败:'+e); });
+};
+window.restoreSuppress = function(id) {
+    fetch('/api/v1/text-recognize-supplements/'+id, {
+        method: 'PATCH',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({status: 'active'})
+    }).then(function(r){return r.json();}).then(function(data){
+        if (!data.success) { alert('恢复失败:'+(data.error||'未知错误')); return; }
+        loadSuppressList();
+    }).catch(function(e){ alert('请求失败:'+e); });
+};
+// 打开弹框时拉一次(顺便更新顶栏「激活 N 条约束」标签)
+function refreshSuppressSummary() {
+    fetch('/api/v1/text-recognize-supplements')
+    .then(function(r){return r.json();}).then(function(data){
+        var summaryEl = document.getElementById('suppressSummary');
+        var countEl = document.getElementById('suppressCount');
+        if (!data.success) return;
+        var n = (data.items || []).length;
+        if (countEl) countEl.textContent = n;
+        if (summaryEl) summaryEl.style.display = n > 0 ? 'block' : 'none';
+    }).catch(function(){});
+}
 
 window.copyPrompt = function() {
     var btn = document.getElementById('copyPromptBtn'), orig = btn.textContent;
@@ -886,6 +1311,12 @@ window.copyPrompt = function() {
 /* 智能填充弹框 */
 .smart-fill-modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1010; align-items: center; justify-content: center; }
 .smart-fill-modal.show { display: flex; }
+/* 2026-09-22:补充提示词弹框用独立类名,避免与主弹框共享样式时 click 串扰 */
+.suppress-modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1025; align-items: center; justify-content: center; }
+.suppress-modal.show { display: flex; }
+/* 2026-09-22:智能文本解析后确认入库弹框 */
+.ai-confirm-modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1030; align-items: center; justify-content: center; }
+.ai-confirm-modal.show { display: flex; }
 .smart-fill-dialog {
     background: #fff; border-radius: 12px; padding: 1.5rem;
     width: 90%; max-width: 700px; max-height: 92vh;
@@ -960,7 +1391,9 @@ window.copyPrompt = function() {
         <p id="smartFillOrderInfo" style="color:#e17055; font-size:0.85rem; margin-bottom:0.75rem;"></p>
         <div class="smart-fill-tabs">
             <button class="smart-fill-tab active" id="tabAI" onclick="switchSmartFillTab('ai')">📷 AI 图片识别</button>
+            <button class="smart-fill-tab" id="tabAiText" onclick="switchSmartFillTab('ai-text')">🤖 智能文本</button>
             <button class="smart-fill-tab" id="tabText" onclick="switchSmartFillTab('text')">📝 文本输入</button>
+            <button class="smart-fill-tab" id="tabOcrRaw" onclick="switchSmartFillTab('ocr-raw')">📋 OCR 原文</button>
         </div>
         <div class="smart-fill-tab-content active" id="contentAI">
             <p class="hint" style="margin-bottom:0.75rem;">上传图片，AI 自动识别商品列表</p>
@@ -987,6 +1420,47 @@ window.copyPrompt = function() {
                 <div class="spinner"></div>
                 <p style="color:#868e96; font-size:0.85rem;">AI 正在识别中，请稍候...</p>
             </div>
+            <!-- 2026-09-18: 临时两栏对照弹框(OCR 原文 vs AI 结构化) — 防止相邻行数量串错,用户核对后才进入正常编辑流程 -->
+            <div class="ocr-verify-modal" id="ocrVerifyModal" style="display: none;">
+                <div style="background: #fff; border-radius: 10px; max-width: 96vw; max-height: 92vh; padding: 1rem 1.2rem; display: flex; flex-direction: column; gap: 0.7rem; box-shadow: 0 20px 60px rgba(0,0,0,0.3);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 0.5rem; border-bottom: 2px solid #fdcb6e;">
+                        <div>
+                            <div style="font-size: 1.05rem; font-weight: 700; color: #2d3436;">📋 OCR 原文 vs AI 结构化结果</div>
+                            <div style="font-size: 0.78rem; color: #c0392b; margin-top: 0.15rem; line-height: 1.5;">
+                                ⚠️ OCR 文字可能错位(把 2 行识别成 3 行 / 列合并),请以原始图片为准;<br>
+                                → 右栏规格/数量可直接修改,改完点「继续」会按修正后的值入库。
+                            </div>
+                        </div>
+                        <button class="btn btn-sm" onclick="closeOcrVerify()" style="background:#6c5ce7;color:#fff;">跳过 →</button>
+                    </div>
+                    <div style="display: flex; flex-direction: column; min-height: 0; overflow: hidden;">
+                        <h5 style="margin: 0 0 0.4rem 0; color: #636e72; font-size: 0.85rem;">🤖 AI 结构化结果(DeepSeek) — 规格/数量可改</h5>
+                        <div style="flex: 1; overflow: auto; border: 1px solid #e9ecef; border-radius: 6px;">
+                            <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+                                <thead style="position: sticky; top: 0; background: #f8f9fa;">
+                                    <tr>
+                                        <th style="padding: 0.5rem 0.4rem; border-bottom: 1px solid #e9ecef; text-align: left;">#</th>
+                                        <th style="padding: 0.5rem 0.4rem; border-bottom: 1px solid #e9ecef; text-align: left;">商品</th>
+                                        <th style="padding: 0.5rem 0.4rem; border-bottom: 1px solid #e9ecef; text-align: left;">规格(可改)</th>
+                                        <th style="padding: 0.5rem 0.4rem; border-bottom: 1px solid #e9ecef; text-align: left;">数量(可改)</th>
+                                        <th style="padding: 0.5rem 0.4rem; border-bottom: 1px solid #e9ecef; text-align: left;">单位</th>
+                                        <th style="padding: 0.5rem 0.4rem; border-bottom: 1px solid #e9ecef; text-align: left;">备注</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="ocrVerifyStructured"></tbody>
+                            </table>
+                        </div>
+                        <div style="font-size:0.78rem; color:#868e96; margin-top:0.4rem; line-height:1.5;">
+                            💡 OCR 原文请切到上方「📋 OCR 原文」tab 查看
+                        </div>
+                    </div>
+                    <div style="text-align: right; padding-top: 0.5rem; border-top: 1px solid #e9ecef;">
+                        <button class="btn" onclick="closeOcrVerify()">取消</button>
+                        <button class="btn btn-primary" onclick="confirmOcrVerify()">✅ 已核对,继续 →</button>
+                    </div>
+                </div>
+            </div>
+
             <div class="ai-result-area" id="aiResultArea">
                 <h4>✅ 识别结果（请核对后可编辑）</h4>
                 <div class="ai-meta-grid" id="aiMetaGrid">
@@ -1016,6 +1490,34 @@ window.copyPrompt = function() {
                 <button class="btn btn-primary" id="aiAddBtn" onclick="submitAiResults()" disabled>✅ 添加到订单</button>
             </div>
         </div>
+        <div class="smart-fill-tab-content" id="contentAiText">
+            <p class="hint" style="margin-bottom:0.5rem;">输入自由格式的商品描述(可含客户名/订单号/多商品/多种分隔符),<br>DeepSeek 会自动解析成可编辑的结构化明细行。</p>
+            <textarea id="aiTextInput" placeholder="示例:
+普通加面杂胶: 0.6白软加面 53支+30码
+
+环保杂胶 1.2米 20支 / 软性纯胶 0.8黑中软纯胶 80支
+
+川盛皮纺:
+PVC桌布 1.2×1.8m 50支
+无纺布 2m 30码" style="height:160px;"></textarea>
+            <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem; font-size:0.78rem; color:#636e72;">
+                <span style="flex:1;">⚙️ 补充提示词:让 DeepSeek 按你公司的业务语义解析(如「环保≠7P」「白杂胶=杂胶」等)</span>
+                <button class="btn btn-sm" style="background:#f8f9fa;color:#6c5ce7;border:1px solid #d6c5ff;font-size:0.78rem;padding:0.25rem 0.6rem;" onclick="openSuppressSettings()">⚙️ 提示词设置</button>
+            </div>
+            <div id="suppressSummary" style="font-size:0.75rem;color:#b2bec3;margin-bottom:0.5rem;display:none;">
+                激活 <span id="suppressCount">0</span> 条约束
+            </div>
+            <div class="ai-text-loading" id="aiTextLoading" style="display:none; text-align:center; padding:1.25rem;">
+                <div class="spinner" style="border:3px solid #e9ecef;border-top-color:#6c5ce7;border-radius:50%;width:32px;height:32px;animation:spin 0.8s linear infinite;margin:0 auto 0.5rem;"></div>
+                <p style="color:#868e96;font-size:0.85rem;margin:0;">DeepSeek 解析中(2-6 秒)...</p>
+            </div>
+            <div class="actions">
+                <button class="btn" onclick="closeSmartFill()">取消</button>
+                <button class="btn btn-primary" id="aiTextParseBtn" onclick="submitAiText()">🤖 AI 解析为明细行</button>
+            </div>
+        </div>
+        <!-- 2026-09-22 补充提示词管理弹框 -->
+        <!-- 独立类名 .suppress-modal(不复用 .smart-fill-modal,避免 click/display 串扰) -->
         <div class="smart-fill-tab-content" id="contentText">
             <p class="hint" style="margin-bottom:0.5rem;">每行格式：商品名称 规格 单位 数量 [备注]<br>分隔符支持：空格 / 逗号 / 分号 / Tab<br>示例：PVC桌布 1.2×1.8m 支 50 红色款</p>
             <button class="btn btn-sm" id="copyPromptBtn" style="background:#f8f9fa;color:#868e96;border:1px solid #dee2e6;margin-bottom:0.75rem;font-size:0.8rem;" onclick="copyPrompt()">📋 拷贝提示词</button>
@@ -1026,6 +1528,57 @@ window.copyPrompt = function() {
                 <button class="btn" onclick="closeSmartFill()">取消</button>
                 <button class="btn btn-primary" onclick="submitSmartFill()">✅ 批量添加</button>
             </div>
+        </div>
+        <div class="smart-fill-tab-content" id="contentOcrRaw">
+            <p class="hint" style="margin-bottom:0.5rem; color:#636e72;">以下显示「📷 AI 图片识别」上次跑出来的 PaddleOCR / Moonshot 原文,带行号方便核对。</p>
+            <pre id="ocrRawContent" style="background:#f8f9fa; padding:0.7rem; border-radius:6px; margin:0; min-height:240px; max-height:480px; overflow:auto; white-space:pre-wrap; font-family:ui-monospace, Menlo, Consolas, monospace; font-size:0.85rem; line-height:1.6;">(暂无 — 请切到「📷 AI 图片识别」上传图片并点识别)</pre>
+            <div class="actions">
+                <button class="btn" onclick="copyOcrRaw()">📋 复制原文</button>
+                <button class="btn" onclick="closeSmartFill()">关闭</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 2026-09-22 「🤖 智能文本」解析后确认入库弹框 -->
+<!-- 独立类名 .ai-confirm-modal,放在主 modal 外 -->
+<div class="ai-confirm-modal" id="aiTextConfirmModal" style="z-index:1030;">
+    <div class="smart-fill-dialog" style="max-width:560px;max-height:80vh;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;padding-bottom:0.5rem;border-bottom:2px solid #6c5ce7;">
+            <h3 style="margin:0;color:#6c5ce7;">🤖 解析完成</h3>
+            <button class="btn btn-sm" onclick="closeAiTextConfirm()">✕</button>
+        </div>
+        <p class="hint" style="margin-bottom:0.5rem;color:#636e72;">
+            DeepSeek 已解析 <span id="aiConfirmCount" style="font-weight:700;color:#6c5ce7;">0</span> 行商品明细。
+            确认入库或回弹框再编辑?
+        </p>
+        <div id="aiConfirmList" style="max-height:48vh;overflow-y:auto;border:1px solid #e9ecef;border-radius:6px;background:#fafbfc;padding:0.5rem;font-size:0.85rem;margin-bottom:0.75rem;">
+        </div>
+        <div style="display:flex;gap:0.5rem;justify-content:flex-end;">
+            <button class="btn" onclick="closeAiTextConfirm(); switchSmartFillTab('ai');" style="background:#fff;color:#636e72;border:1px solid #dee2e6;">📝 再编辑</button>
+            <button class="btn btn-primary" onclick="confirmAiTextSubmit();" style="background:#6c5ce7;color:#fff;">✅ 确认入库</button>
+        </div>
+    </div>
+</div>
+
+<!-- 2026-09-22 补充提示词管理弹框 -->
+<!-- 必须放在 #smartFillModal 外,避免被父 modal 的 CSS 类 .smart-fill-modal 串扰 -->
+<div class="suppress-modal" id="suppressSettingsModal" style="z-index:1025;">
+    <div class="smart-fill-dialog" style="max-width:780px;max-height:84vh;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;padding-bottom:0.5rem;border-bottom:2px solid #d6c5ff;">
+            <h3 style="margin:0;color:#6c5ce7;">⚙️ 补充提示词管理</h3>
+            <button class="btn btn-sm" onclick="closeSuppressSettings()">✕ 关闭</button>
+        </div>
+        <p class="hint" style="margin-bottom:0.75rem;color:#636e72;">
+            这里累积的提示词会注入到 DeepSeek 解析 prompt 末尾。<br>
+            <strong>不需品类绑定,所有输入都生效</strong>;每发现一个 LLM 错配 → 加一条 → 下次不再犯。
+        </p>
+        <div style="display:flex;gap:0.5rem;margin-bottom:0.75rem;">
+            <textarea id="suppressNewText" rows="2" placeholder="例:「环保杂胶 ≠ 7P环保杂胶,不要擅自加 7P 前缀」" style="flex:1;padding:0.5rem;border:1px solid #dfe6e9;border-radius:4px;font-size:0.85rem;font-family:inherit;resize:vertical;"></textarea>
+            <button class="btn btn-primary" onclick="addSuppress()" style="align-self:flex-start;">➕ 添加</button>
+        </div>
+        <div id="suppressList" style="flex:1;overflow-y:auto;border:1px solid #e9ecef;border-radius:6px;background:#fafbfc;padding:0.5rem;min-height:200px;max-height:46vh;">
+            <p style="color:#888;text-align:center;margin:1rem 0;font-size:0.85rem;">加载中...</p>
         </div>
     </div>
 </div>
