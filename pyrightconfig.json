@@ -1,0 +1,31 @@
+{
+    // 限定检查范围:仅入口 + 数据库层 + re-export 层
+    // 暂不覆盖 blueprints/(业务端点) 和 models/{basic,orders,...}.py(业务模型)
+    // 因为这俩层大量 cursor.execute() 直返 dict,缺类型注解,纳入会刷大量噪音
+    "include": [
+        "app.py",
+        "models/_db.py",
+        "models/__init__.py",
+        "models/_init.py"
+    ],
+
+    // 标准排除项
+    "exclude": [
+        "**/__pycache__",
+        "**/.*",
+        "_safe-snapshot",
+        "tests",
+        "node_modules",
+        "upload",
+        "log"
+    ],
+
+    // 项目用 Python 3.12 + Flask 3.1.3
+    "pythonVersion": "3.12",
+
+    // venv/系统库路径(可选,有 venv 时设;本项目无独立 venv,跳过)
+
+    // 不开 strict —— 默认 basic 模式足以暴露明显错
+    // 长期计划:逐步在 models/ 加类型注解后再开 strict
+    "typeCheckingMode": "basic"
+}

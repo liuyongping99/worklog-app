@@ -476,4 +476,3 @@ SELECT @category_id := category_id FROM product_category WHERE category_code = '
 INSERT INTO product_category ( category_code, category_name, parent_id, level, sort_order) VALUES
 ( '071001', '烫布',    @category_id, 4, 1),
 ( '071002', '弹力布', @category_id, 4, 2);
-
