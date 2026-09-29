@@ -120,3 +120,27 @@ sql/*.bak
 sql/product_category_full*.sql
 sql/newlite.sql
 sql/new01.sql
+
+# ===== 自动化 / agent 运行时态（非源码，纯运行产物） =====
+.playwright-mcp/
+.superpowers/
+
+# ===== 数据库快照 / 备份（含业务数据，不入仓） =====
+_safe-snapshot/
+*.db.bak*
+
+# ===== 开发过程截图（仅根目录零散 png，非产品资源；不影响 docs/ 下回归证据图） =====
+/board-*.png
+/inbound_*.png
+/shipping_*.png
+/trend-panels-top.png
+tools/_shot_*.png
+
+# ===== 调试 / 一次性残留 =====
+paddle_engine_dump.py
+patch_lines.txt
+setup_firewall.bat
+
+# ===== 其他 SQL 调试残留 =====
+sql/_*.sql
+sql/翻译.txt
