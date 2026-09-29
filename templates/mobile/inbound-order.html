@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}{{ order['supplier'] }} 第{{ order['order_num'] }}单{% endblock %}
+{% block head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/mobile.css') }}">
+  <script src="https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0/dist/opencv.js" async></script>
+{% endblock %}
+{% block navbar %}{% endblock %}
+{% block content %}
+<div class="mobile-order" data-order-id="{{ order['id'] }}">
+  <header class="app-head">
+    <a class="back" href="{{ url_for('inbound.mobile_inbound') }}">‹ 今日入库</a>
+    <h2>{{ order['supplier'] }}</h2>
+    <p class="subtitle">第{{ order['order_num'] }}单</p>
+  </header>
+
+  <section class="overall" data-order-id="{{ order['id'] }}">
+    <div class="overall-title">
+      <span>🖼 整体图（必拍）</span>
+      <span class="overall-pill" data-role="overall-count">0 / 1</span>
+    </div>
+    <div class="overall-buttons">
+      <button data-overall-source="打板照">📷 打板照</button>
+      <button data-overall-source="装车照">📷 装车照</button>
+      <button data-overall-source="归仓照">📷 归仓照</button>
+    </div>
+    <input type="file" accept="image/*" data-role="overall-input" hidden>
+    <div class="upload-progress" data-role="overall-progress" hidden></div>
+    <div class="overall-thumbs">
+      <div class="overall-thumb {% if thumb_states['打板照']['taken'] %}filled{% endif %}" data-thumb-source="打板照">
+        打板照　{% if thumb_states['打板照']['taken'] %}✓ {{ thumb_states['打板照']['time_text'] }}{% else %}未拍{% endif %}
+      </div>
+      <div class="overall-thumb {% if thumb_states['装车照']['taken'] %}filled{% endif %}" data-thumb-source="装车照">
+        装车照　{% if thumb_states['装车照']['taken'] %}✓ {{ thumb_states['装车照']['time_text'] }}{% else %}未拍{% endif %}
+      </div>
+      <div class="overall-thumb {% if thumb_states['归仓照']['taken'] %}filled{% endif %}" data-thumb-source="归仓照">
+        归仓照　{% if thumb_states['归仓照']['taken'] %}✓ {{ thumb_states['归仓照']['time_text'] }}{% else %}未拍{% endif %}
+      </div>
+    </div>
+  </section>
+
+  {% for rec in records %}
+    {% set state = record_states.get(rec['id'], {'status': None, 'images': []}) %}
+    {% if state.is_board %}
+      {% set badge_cls, badge_text = 'done', '无需拍照' %}
+      {% set status_cls = '' %}
+      {% set status_text = '皮革/木板类，无需拍照' %}
+      {% set confirm_hidden = True %}
+    {% else %}
+      {% set badge_cls, badge_text = ('done', '✓ 通过') if state.status == 'green' else ('warn', '⚠ 待确认') if state.status == 'yellow' else ('warn', '✕ 不符') if state.status == 'red' else ('todo', '待拍') %}
+      {% if state.status == 'green' %}
+        {% set status_cls = '' %}
+        {% set status_text = '最近一次识别：标签与规格一致' %}
+      {% elif state.status == 'yellow' %}
+        {% set status_cls = 'warn' %}
+        {% set status_text = 'AI 判定与标签不一致' %}
+      {% elif state.status == 'red' %}
+        {% set status_cls = 'warn' %}
+        {% set status_text = 'OCR 失败 / AI 不符' %}
+      {% else %}
+        {% set status_cls = '' %}
+        {% set status_text = '尚未拍照' %}
+      {% endif %}
+      {% set confirm_hidden = state.status in (None, 'green') %}
+    {% endif %}
+    <div class="product-card" data-record-id="{{ rec['id'] }}" {% if state.is_board %}data-role="board"{% endif %}>
+      <div class="row">
+        <div>
+          <div class="product-name">{{ loop.index }}. {{ rec['product_name'] }}</div>
+          <div class="spec">{{ rec['specification'] }} · <b>{{ rec['quantity'] }}{% if state.is_board %}块{% else %}{{ rec['unit'] }}{% endif %}</b>{% if rec['remark'] %} · 备注：{{ rec['remark'] }}{% endif %}</div>
+        </div>
+        <span class="badge {{ badge_cls }}" data-role="badge">{{ badge_text }}</span>
+      </div>
+      {% if not state.is_board %}
+      <div class="photo-row">
+        <button class="primary" data-action="capture">📷 拍照识别</button>
+        <button class="secondary" data-action="album">🖼 相册</button>
+      </div>
+      <input type="file" accept="image/*" capture="environment" data-role="record-input" hidden>
+      {% endif %}
+      <div class="status-line {{ status_cls }}" data-role="status" data-initial-status="{{ state.status or '' }}">
+        {{ status_text }}{% if state.color_note %} <span class="color-note" data-role="color-note">· 标签背景:{{ state.color_note }}</span>{% endif %}{% if not state.is_board and state.status in ('green','yellow','red') and state.images %} <a href="#" data-role="detail" data-image-id="{{ state.images[-1]['id'] }}">详情</a>{% endif %}
+      </div>
+      <div class="upload-progress" data-role="upload-progress" hidden></div>
+      <button class="confirm" data-action="confirm" {% if confirm_hidden %}hidden{% endif %}>✓ 人工确认通过</button>
+    </div>
+  {% endfor %}
+
+  {% if order_images %}
+  <section class="order-images">
+    <h3 data-role="order-images-title">📷 本单图片（{{ order_images|length }}）</h3>
+    <div class="record-images" data-role="order-images-grid">
+      {% for img in order_images %}
+        <div class="record-image-cell">
+          <img src="/upload/{{ img.rel_path }}" alt="{{ img['original_name'] }}" onclick="showImgPreview(this.src)" loading="lazy">
+          {% if img.source_tag %}<span class="img-source-tag">{{ img.source_tag }}</span>{% endif %}
+        </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+</div>
+
+<div class="photo-preview-mask" id="photoPreviewMask" hidden>
+  <div class="photo-preview-box">
+    <div class="photo-preview-title">确认照片</div>
+    <div class="photo-preview-stage">
+      <canvas id="photoPreviewCanvas"></canvas>
+    </div>
+    <div class="photo-preview-hint" id="photoPreviewHint">可旋转调整方向，确认后再上传</div>
+    <div class="photo-preview-actions">
+      <button type="button" id="photoRotateLeft">↺ 左转</button>
+      <button type="button" id="photoRotateRight">↻ 右转</button>
+      <button type="button" class="photo-retake" id="photoRetake">重拍</button>
+      <button type="button" class="photo-confirm" id="photoConfirm">✓ 上传</button>
+    </div>
+  </div>
+</div>
+
+<div class="ocr-detail-mask" id="ocrDetailMask" hidden>
+  <header class="ocr-detail-page-head">
+    <button type="button" class="ocr-detail-back" id="ocrDetailClose" aria-label="返回">‹</button>
+    <div class="ocr-detail-page-title" id="ocrDetailTitle">识别详情</div>
+  </header>
+  <div class="ocr-detail-body" id="ocrDetailBody"></div>
+</div>
+
+<script src="{{ url_for('static', filename='js/mobile_blur.js') }}"></script>
+<script src="{{ url_for('static', filename='js/mobile_inbound_detail.js') }}"></script>
+{% endblock %}

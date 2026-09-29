@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}点数清点 · {{ rec['product_name'] }}{% endblock %}
+{% block head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/mobile.css') }}">
+{% endblock %}
+{% block navbar %}{% endblock %}
+{% block content %}
+<div class="m-place" data-record-id="{{ rec['id'] }}" data-order-id="{{ oid }}">
+  <header class="app-head">
+    <a class="back" href="{{ url_for('mobile_shipping.shipping_order_detail', oid=oid) }}">‹ 返回</a>
+    <h2>点数清点</h2>
+  </header>
+
+  <div class="place-info">
+    <div class="place-title">{{ rec['product_name'] }}</div>
+    <div class="place-spec">{{ rec['specification'] }} · <b>{{ rec['quantity'] }}{{ rec['unit'] }}</b>{% if rec['remark'] %} · 备注：{{ rec['remark'] }}{% endif %}</div>
+  </div>
+
+  <!-- 拍照 / 相册(全局:新增摆放图) -->
+  <div class="photo-row">
+    <button class="primary" data-action="capture">📷 拍照</button>
+    <button class="secondary" data-action="album">🖼 相册</button>
+  </div>
+  <input type="file" accept="image/*" capture="environment" data-role="capture-input" hidden>
+  <input type="file" accept="image/*" data-role="album-input" hidden>
+  <div class="upload-progress" data-role="uploadProgress" hidden>上传中…</div>
+
+  <!-- 每个摆放图一张独立卡片,自带按钮组 -->
+  <div class="place-list" data-role="list">
+    <div class="place-empty" data-role="empty">暂无摆放图，请先拍照或选择相册</div>
+  </div>
+
+  <!-- 整单备注对比 -->
+  <div class="place-compare" data-role="compare"></div>
+</div>
+
+<!-- 散码弹窗 -->
+<div class="place-loose-mask" id="placeLooseMask" hidden>
+  <div class="place-loose-box">
+    <div class="place-loose-title">录入散码数量（单位 y）</div>
+    <input type="number" inputmode="numeric" min="0" data-role="looseInput" value="0">
+    <div class="place-loose-actions">
+      <button data-action="looseCancel">取消</button>
+      <button data-action="looseSave" class="primary">保存</button>
+    </div>
+  </div>
+</div>
+
+{# 2026-08-19: 直接输入支数弹框(与点击计数等效,用于备注比对) #}
+<div class="place-manual-mask" id="placeManualMask" hidden>
+  <div class="place-manual-box">
+    <div class="place-manual-title">输入支数（与点击计数等效）</div>
+    <input type="number" inputmode="numeric" min="0" data-role="manualInput" value="0">
+    <div class="place-manual-hint">直接输入总数会清空这张图的点击计数点，二者互斥。可点「清空」恢复到点击计数。</div>
+    <div class="place-manual-actions">
+      <button data-action="manualClear">清空</button>
+      <button data-action="manualCancel">取消</button>
+      <button data-action="manualSave" class="primary">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 拍照预览遮罩 -->
+<div class="photo-preview-mask" id="placePreviewMask" hidden>
+  <div class="photo-preview-box">
+    <div class="photo-preview-title">确认照片</div>
+    <div class="photo-preview-stage">
+      <canvas id="placePreviewCanvas"></canvas>
+    </div>
+    <div class="photo-preview-hint" id="placePreviewHint">可旋转调整方向，确认后再上传</div>
+    <div class="photo-preview-actions">
+      <button type="button" id="placeRotateLeft">↺ 左转</button>
+      <button type="button" id="placeRotateRight">↻ 右转</button>
+      <button type="button" class="photo-retake" id="placeRetake">重拍</button>
+      <button type="button" class="photo-confirm" id="placeConfirm">✓ 上传</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  window.__PLACEMENT__ = {
+    recordId: {{ rec['id'] }},
+    orderId: {{ oid }},
+    remark: {{ rec['remark']|tojson }}
+  };
+</script>
+<script src="{{ url_for('static', filename='js/mobile_placement.js') }}"></script>
+{% endblock %}

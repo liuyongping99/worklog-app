@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}工作台移动端{% endblock %}
+{% block head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/mobile.css') }}">
+  <style>
+    .portal {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 24px 16px 40px;
+    }
+    .portal-head {
+      margin-bottom: 24px;
+    }
+    .portal-head h2 {
+      font-size: 26px;
+      font-weight: 700;
+      color: #1f2937;
+    }
+    .portal-head .subtitle {
+      margin: 6px 0 0;
+      color: #6b7280;
+      font-size: 14px;
+    }
+    .portal-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .portal-card {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 22px 20px;
+      border-radius: 16px;
+      background: #fff;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, .06);
+      text-decoration: none;
+      color: inherit;
+      transition: transform .12s ease, box-shadow .12s ease;
+    }
+    .portal-card:active {
+      transform: scale(.985);
+      box-shadow: 0 1px 6px rgba(0, 0, 0, .08);
+    }
+    .portal-ico {
+      flex: 0 0 52px;
+      width: 52px;
+      height: 52px;
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 26px;
+      color: #fff;
+    }
+    .portal-ico.ship { background: linear-gradient(135deg, #2563eb, #1d4ed8); }
+    .portal-ico.inbound { background: linear-gradient(135deg, #059669, #047857); }
+    .portal-ico.loading { background: linear-gradient(135deg, #d97706, #b45309); }
+    .portal-meta {
+      flex: 1;
+      min-width: 0;
+    }
+    .portal-meta .name {
+      font-size: 18px;
+      font-weight: 600;
+      color: #111827;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .portal-meta .desc {
+      margin-top: 4px;
+      font-size: 13px;
+      color: #6b7280;
+    }
+    .portal-arrow {
+      flex: 0 0 auto;
+      color: #9ca3af;
+      font-size: 20px;
+    }
+  </style>
+{% endblock %}
+{% block navbar %}{% endblock %}
+{% block content %}
+<div class="portal">
+  <header class="portal-head">
+    <h2>移动工作台</h2>
+    <p class="subtitle">选择要进入的业务</p>
+  </header>
+  <div class="portal-grid">
+    <a class="portal-card" href="{{ url_for('mobile_shipping.shipping_today') }}">
+      <div class="portal-ico ship">🚚</div>
+      <div class="portal-meta">
+        <div class="name">今日出货</div>
+        <div class="desc">拍照识别 · 规格比对 · 存疑处理</div>
+      </div>
+      <div class="portal-arrow">›</div>
+    </a>
+    <a class="portal-card" href="{{ url_for('inbound.mobile_inbound') }}">
+      <div class="portal-ico inbound">📦</div>
+      <div class="portal-meta">
+        <div class="name">今日入库</div>
+        <div class="desc">供应商到货 · 拍照核验 · 明细确认</div>
+      </div>
+      <div class="portal-arrow">›</div>
+    </a>
+    <a class="portal-card" href="{{ url_for('loading.mobile_loading') }}">
+      <div class="portal-ico loading">🚢</div>
+      <div class="portal-meta">
+        <div class="name">今日装柜</div>
+        <div class="desc">装柜明细 · 拍照识别 · 规格比对</div>
+      </div>
+      <div class="portal-arrow">›</div>
+    </a>
+
+      <a class="portal-card" href="{{ url_for('point_count.index') }}">
+        <div class="portal-ico count">📷</div>
+        <div class="portal-meta">
+          <div class="name">独立点数</div>
+          <div class="desc">拍照 · 手指点击计数 · 自动记录用户与位置</div>
+        </div>
+        <div class="portal-arrow">›</div>
+      </a>  </div>
+</div>
+{% endblock %}

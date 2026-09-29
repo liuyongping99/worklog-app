@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}今日入库{% endblock %}
+{% block head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/mobile.css') }}">
+{% endblock %}
+{% block navbar %}{% endblock %}
+{% block content %}
+<div class="mobile-today">
+  <header class="app-head">
+    <div class="head-row">
+      <h2>今日入库</h2>
+      <div class="head-actions">
+        <span class="header-stat">{{ groups|length }} 单</span>
+        <a class="refresh-btn" href="{{ url_for('inbound.mobile_inbound') }}" title="整体刷新">↻</a>
+      </div>
+    </div>
+    <p class="subtitle">{{ today }}</p>
+  </header>
+  {% if not groups %}
+    <p class="empty">今天没有入库订单</p>
+  {% else %}
+    {% for g in groups %}
+      <a class="order-card" href="{{ url_for('inbound.mobile_inbound_order', oid=g['id']) }}">
+        <div class="row">
+          <div>
+            <div class="customer">{{ g['supplier'] }}</div>
+            <div class="number">第{{ g['order_num'] }}单</div>
+          </div>
+          <span class="badge {% if g.has_image == g.total %}done{% else %}todo{% endif %}">
+            {{ g.has_image }}/{{ g.total }} 已拍
+          </span>
+        </div>
+        <div class="line"><i style="width: {{ (g.has_image * 100 // g.total) if g.total else 0 }}%"></i></div>
+        <div class="metrics">
+          <span><b>{{ g.total }}</b> 项商品{% if g.board_total %} + 板 {{ g.board_total }} 块{% endif %}</span>
+          <span>✓ {{ g.stats.green }}　⚠ {{ g.stats.yellow }}　✕ {{ g.stats.red }}</span>
+        </div>
+        <button class="enter">进入商品详情 ›</button>
+      </a>
+    {% endfor %}
+  {% endif %}
+</div>
+{% endblock %}
