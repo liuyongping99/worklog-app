@@ -1,13 +1,11 @@
-// placement_count.js — 出货页「摆放图」计数功能
+// loading_placement_count.js — 装柜页「摆放图」计数功能(移植自 placement_count.js,API 改为 loading-orders)
 // 依赖: common.js 的 escHtml
 // 2026-08-15: 在「支」类商品的辅助单位提示右侧提供摆放图按钮;
 //   上传的摆放图存 shipping_images(source='placement'),与 OCR 图隔离;
 //   点击任意位置计 1 支,数字为固定可读尺寸,「撤销」可连续撤销。
 (function () {
     'use strict';
-    // 2026-08-26:make API base configurable so this script can serve shipping,
-    // loading and inbound pages. Default still /api/v1/shipping-orders.
-    var API = (typeof window !== 'undefined' && window.PLACEMENT_API) || '/api/v1/shipping-orders';
+    var API = '/api/v1/loading-orders';
     var currentCountImageId = null;     // 计数弹框当前 image
     var currentRecordId = null;         // 计数弹框当前 image 所属 record(用于读累计/目标)
     var currentLooseCount = 0;          // 当前图散码数量(持久化到库)
@@ -16,35 +14,9 @@
     var currentMarkScale = 1;           // 当前图计数数字的整体系缩放(放大/缩小按钮,持久化到库)
     var SCALE_STEP = 1.2;               // 每次点击缩放步进(约 ±20%)
     var SCALE_MIN = 0.3, SCALE_MAX = 4.0;
-    // 2026-09-09: 计数单位参数化(支/令/张),从 record tr[data-count-unit] 读;
-    //   拷贝纸=令 / 日本纸=张 / 普通支基产品=支。散码(has-loose)拷贝纸/日本纸=false。
-    var currentCountUnit = '支';
-    var currentHasLoose = true;
-
-    // 读 record tr 上的计数配置(单位 + 是否有散码)
-    function readCountConfig(recordId) {
-        if (!recordId) return;
-        var tr = document.querySelector('tr[data-record-id="' + recordId + '"]');
-        if (!tr) return;
-        var u = tr.getAttribute('data-count-unit');
-        if (u) currentCountUnit = u;
-        var hl = tr.getAttribute('data-has-loose');
-        currentHasLoose = (hl !== '0');
-        // 散码入口按 has-loose 显隐
-        var looseBtn = el('pcmLoose');
-        if (looseBtn) looseBtn.style.display = currentHasLoose ? '' : 'none';
-        // 2026-09-09: 弹框静态文字参数化 — 标题/KPI unit/title/act-hint 按 currentCountUnit(支/令/张) 更新
-        var cu2 = currentCountUnit;
-        var t = el('pcmTitle'); if (t) t.textContent = '🧮 清点' + cu2 + '数';
-        var cuu = el('pcmCurUnit'); if (cuu) cuu.textContent = cu2;
-        var cmu = el('pcmCumUnit'); if (cmu) cmu.textContent = cu2;
-        var man = el('pcmManual'); if (man) man.title = '直接输入' + cu2 + '数 (M) — 与点击计数等效';
-        var unw = el('pcmUnloadWrap'); if (unw) unw.title = '勾选后,本图清点' + cu2 + '数以负数计入累计(卸载/退货) (U)';
-        var hint = el('pcmActHint'); if (hint) hint.textContent = '点击图个位置计 1 ' + cu2 + '、数字键 1–9 直输';
-        // 2026-09-18: 直输弹框 mcm-title / placeholder 同步参数化(桶装显示「桶」)
-        var mcmT = el('mcmTitle'); if (mcmT) mcmT.textContent = '🖊️ 直接输入' + cu2 + '数';
-        var mcmInput = el('manualCountInput'); if (mcmInput) mcmInput.placeholder = '请输入' + cu2 + '数';
-    }
+    // 2026-09-18: 弹框按明细行实际单位动态显示 (支/桶/令/张)
+    var currentCountUnit = '支';        // 从 tr[data-count-unit] 读,默认 '支'
+    var currentHasLoose = true;         // 从 tr[data-has-loose] 读,默认 true;桶装类为 false
 
     // ── 工具 ──
     function el(id) { return document.getElementById(id); }
@@ -60,20 +32,63 @@
         while ((m = re.exec(t)) != null) { san += parseInt(m[1], 10); hasSan = true; }
         return { zhi: zhi, hasZhi: hasZhi, san: san, hasSan: hasSan };
     }
-    // 单类对比角标:label 为单位名(支/令/张)或「散」
+    // 单类对比角标:label 为「支」/「散」
     function oneCompareBadge(label, actual, expected, hasExpected) {
         if (!hasExpected) return '<span class="placement-compare-badge none">备注无' + label + '</span>';
         if (actual === expected) return '<span class="placement-compare-badge ok">✓ ' + label + ' ' + actual + ' = 备注 ' + expected + '</span>';
         if (actual < expected) return '<span class="placement-compare-badge bad">✗ ' + label + ' ' + actual + ' &lt; 备注 ' + expected + '（差 ' + (expected - actual) + '）</span>';
         return '<span class="placement-compare-badge warn">⚠ ' + label + ' ' + actual + ' &gt; 备注 ' + expected + '（多 ' + (actual - expected) + '）</span>';
     }
-    // 返回支(或令/张)、散码两个独立对比角标的 HTML
-    // 2026-09-09: unit/hasLoose 参数化 — 拷贝纸/日本纸无散码,只显示主单位角标
+    // 返回支、散码两个独立对比角标的 HTML
+    // 2026-09-18: 角标 label 从硬编码「支」改为 unit 参数(支持桶/令/张)。
+    //            hasLoose=false 时(桶装)不渲染散码角标。
     function compareBadgesHtml(zhiTotal, sanmaTotal, remarkText, unit, hasLoose) {
         var p = parseRemark(remarkText);
-        var mainBadge = oneCompareBadge(unit || '支', zhiTotal, p.zhi, p.hasZhi);
-        if (!hasLoose) return mainBadge;
-        return mainBadge + oneCompareBadge('散', sanmaTotal, p.san, p.hasSan);
+        var zhiLabel = unit || '支';
+        var badges = oneCompareBadge(zhiLabel, zhiTotal, p.zhi, p.hasZhi);
+        if (hasLoose !== false) {
+            badges += oneCompareBadge('散', sanmaTotal, p.san, p.hasSan);
+        }
+        return badges;
+    }
+
+    // ── 读明细行计数配置 + 改写弹框标题/KPI 单位/散码按钮 显隐 ──
+    // 2026-09-18: 与 placement_count.js 的 readCountConfig 对齐 —— 桶装类
+    //   (data-count-unit="桶", data-has-loose="0") 弹框标题显示「清点桶数」、KPI 单位显示「桶」、
+    //   「散码」按钮与 KPI 卡隐藏(桶装胶水没有散码)。
+    function readCountConfig(recordId) {
+        var tr = recordId ? document.querySelector('tr[data-record-id="' + recordId + '"]') : null;
+        var cu = (tr && tr.getAttribute('data-count-unit')) || '支';
+        var hl = tr ? (tr.getAttribute('data-has-loose') === '0') : false;
+        currentCountUnit = cu;
+        currentHasLoose = !hl;
+        // 标题
+        var title = el('pcmTitle');
+        if (title) title.textContent = '🧮 清点' + cu + '数';
+        // KPI 单位 span(本图/累计)
+        var curUnit = el('pcmCurUnit');
+        if (curUnit) curUnit.textContent = cu;
+        var cumUnit = el('pcmCumUnit');
+        if (cumUnit) cumUnit.textContent = cu;
+        // 散码按钮 + 卸载勾选(桶装类无散码,但 is_unload 仍可保留:某桶卸货的语义不强但不影响)
+        var looseBtn = el('pcmLoose');
+        if (looseBtn) looseBtn.style.display = hl ? '' : 'none';
+        var looseCard = el('pcmLooseCard');
+        if (looseCard) looseCard.style.display = hl ? '' : 'none';
+        // 直输按钮 title(桶装类时显示「直接输入桶数」)
+        var manualBtn = el('pcmManual');
+        if (manualBtn) manualBtn.title = '直接输入' + cu + '数 (M)';
+        // 卸载勾选 title
+        var unloadWrap = el('pcmUnloadWrap');
+        if (unloadWrap) unloadWrap.title = '勾选后,本图清点' + cu + '数以负数计入累计 (U)';
+        // 操作提示
+        var hint = el('pcmActHint');
+        if (hint) hint.textContent = '点击图任意位置计 1 ' + cu + '、数字键 1–9 直输';
+        // 2026-09-18: 直输弹框 mcm-title / placeholder 同步参数化(桶装显示「桶」)
+        var mcmT = el('mcmTitle');
+        if (mcmT) mcmT.textContent = '🖊️ 直接输入' + cu + '数';
+        var mcmInput = el('manualCountInput');
+        if (mcmInput) mcmInput.placeholder = '请输入' + cu + '数';
     }
 
     function findPlacementArea(recordId) {
@@ -89,11 +104,6 @@
     // ── 上传回调(由共享图片弹框 _image_upload_modal.html 的 confirmUpload 触发) ──
     // 与右侧 🖼️ 核对规格按钮走同一个 imageModal,这里只处理摆放图的后续(进展示区 + 计数)
     window.placementImageUploaded = function (data, recordPk) {
-        // 2026-09-06: copy-paper 上传分流(由 copy_paper.js 标记 _copyPaperUploadSource)
-        if (window._copyPaperUploadSource) {
-            window.copyPaperImageUploaded(data, recordPk);
-            return;
-        }
         if (!data || !data.success) { alert('上传失败: ' + ((data && data.error) || '未知错误')); return; }
         refreshRecordBlock(recordPk);
         // 自动打开第一张新图的计数弹框,便于立即清点
@@ -127,7 +137,8 @@
         var recTr = document.querySelector('tr[data-record-id="' + recordId + '"]');
         var recName = recTr ? (recTr.querySelector('.product-name-cell') || {}).textContent || '' : '';
         var recSpec = recTr ? (recTr.querySelector('.spec-cell') || {}).textContent || '' : '';
-        // 2026-09-09: 读本 record 的计数单位(支/令/张)与是否有散码
+        // 2026-09-09: 单位配置改用变量(对齐出货 placement_count.js)。
+        // 装柜场景默认"支",可由 tr data-count-unit 覆盖(留扩展点)。
         var unit = (recTr && recTr.getAttribute('data-count-unit')) || '支';
         var hasLoose = (!recTr || recTr.getAttribute('data-has-loose') !== '0');
         var total = 0;
@@ -143,9 +154,35 @@
             total += effectiveZhi(im);
             looseTotal += (im.loose_count != null ? im.loose_count : 0);
         });
+        // 2026-09-18: expected_zhi / has_zhi 直接从 server-side 渲染的 block dataset 读,
+        // 而非用 parseRemark 重新算 —— 保持与 _helpers.compute_placement_expected_zhi 一致
+        // (后者对 unit ∈ 支/桶/令/张 + 备注无 X支 时会 quantity 兜底,parseRemark 不覆盖)。
+        var p;
+        if (existing) {
+            var prevZhi = parseFloat(existing.getAttribute('data-expected-zhi'));
+            var prevHas = existing.getAttribute('data-has-zhi') === '1';
+            p = { zhi: prevZhi, hasZhi: prevHas, san: parseFloat(existing.getAttribute('data-expected-sanma') || 0), hasSan: existing.getAttribute('data-has-sanma') === '1' };
+        } else {
+            var remarkText = recTr ? (recTr.querySelector('.remark-cell') || {}).textContent || '' : '';
+            p = parseRemark(remarkText);
+        }
         // 支与支累加、散码与散码累加,分别与备注中的支、散码分开比较
-        var remarkText = recTr ? (recTr.querySelector('.remark-cell') || {}).textContent || '' : '';
-        var cmpHtml = compareBadgesHtml(total, looseTotal, remarkText, unit, hasLoose);
+        // 对比用 sanma 期望取自 dataset(已有 block),或 parseRemark(新 block)
+        var expectedSanma = existing ? parseFloat(existing.getAttribute('data-expected-sanma') || 0) : 0;
+        var hasSanma = existing ? existing.getAttribute('data-has-sanma') === '1' : false;
+        var cmpHtml = (function () {
+            // 主单位
+            var label = unit;
+            if (!p.hasZhi) return '<span class="placement-compare-badge none">备注无' + label + '</span>'
+                + (hasLoose ? (hasSanma ? '' : '<span class="placement-compare-badge none">备注无散码</span>') : '');
+            var zhi = p.zhi;
+            var ok = total === zhi, less = total > zhi;
+            var s = '<span class="placement-compare-badge ' + (ok ? 'ok' : (less ? 'warn' : 'bad')) + '">' + (ok ? '✓ ' : (less ? '⚠ ' : '✗ ')) + label + ' ' + total + (less ? ' > ' : (ok ? ' = ' : ' < ')) + '备注 ' + zhi + '</span>';
+            if (!hasLoose) return s;
+            if (!hasSanma) return s + '<span class="placement-compare-badge none">备注无散码</span>';
+            var sok = looseTotal === expectedSanma, sless = looseTotal > expectedSanma;
+            return s + '<span class="placement-compare-badge ' + (sok ? 'ok' : (sless ? 'warn' : 'bad')) + '">' + (sok ? '✓ ' : (sless ? '⚠ ' : '✗ ')) + '散 ' + looseTotal + (sless ? ' > ' : (sok ? ' = ' : ' < ')) + '备注 ' + expectedSanma + '</span>';
+        })();
 
         var html = '<div class="placement-record-head">'
             + '<span class="placement-record-name">' + escHtml(recName) + (recSpec ? ' · ' + escHtml(recSpec) : '') + '</span>'
@@ -176,12 +213,23 @@
         block.className = 'placement-record-block';
         block.setAttribute('data-record-id', recordId);
         // v2: 把累计/目标/张数/散码写在 block 上,供计数弹框 syncHead 读取(多图累计对目标)
-        var p = parseRemark(remarkText);
+        // 2026-09-18: expected-zhi/has-zhi/sanma 优先复用 server-side dataset(server-side 走 compute_placement_expected_zhi 含 quantity 兜底)
         block.setAttribute('data-total', total);
         block.setAttribute('data-expected-zhi', p.zhi);
         block.setAttribute('data-has-zhi', p.hasZhi ? '1' : '0');
         block.setAttribute('data-img-count', images.length);
         block.setAttribute('data-loose-total', looseTotal);
+        if (existing) {
+            // 已存在 block:把 server-side dataset 完整复制过来(expected_zhi 等不要覆盖)
+            ['data-expected-zhi','data-has-zhi','data-expected-sanma','data-has-sanma'].forEach(function (k) {
+                if (existing.hasAttribute(k)) block.setAttribute(k, existing.getAttribute(k));
+            });
+            // 同时把 server-side 渲染好的 <span> 段保留(避免局部刷新后丢失 compare badge 样式)
+            var existingHead = existing.querySelector('.placement-record-head');
+            if (existingHead && block.firstChild) {
+                // html 字符串里已包含完整 head — 直接替换即可
+            }
+        }
         block.innerHTML = html;
         if (existing) existing.replaceWith(block);
         else area.appendChild(block);
@@ -192,26 +240,15 @@
         currentCountImageId = imageId;
         currentRecordId = recordId || currentUploadRecordIdFor(imageId);
         currentManualCount = null;
-        readCountConfig(currentRecordId);  // 2026-09-09: 读单位(支/令/张)+散码显隐
         el('pcmImg').src = src;
+        // 2026-09-18: 先按明细行的 data-count-unit/data-has-loose 改写弹框标题与 KPI 单位
+        readCountConfig(currentRecordId);
         // 重置(图片加载完会按真实尺寸重排徽章)
         el('pcmMarks').innerHTML = '';
         loadImage(imageId);
         el('placementCountModal').classList.add('show');
-        // v3: 身份条填记录名(品名 · 规格);数据行 tr[data-record-id] 已在表里
-        fillRecordName();
         // 先按 block dataset 出一版头部(累计/目标),loadImage 完成后 renderMarks→syncHead 再刷新本图
         syncHead();
-    }
-    // v3 (2026-08-30): 把记录名 + 规格填进 #pcmRecordName,身份条用
-    function fillRecordName() {
-        if (!currentRecordId) return;
-        var tr = document.querySelector('tr[data-record-id="' + currentRecordId + '"]');
-        if (!tr) return;
-        var name = (tr.querySelector('.product-name-cell') || {}).textContent || '';
-        var spec = (tr.querySelector('.spec-cell') || {}).textContent || '';
-        var node = el('pcmRecordName');
-        if (node) node.textContent = (name + (spec ? ' · ' + spec : '')).trim() || '—';
     }
     function closePlacementCount() {
         el('placementCountModal').classList.remove('show');
@@ -261,9 +298,6 @@
     // ── 头部 + 进度条联动 ──
     // 本图计数(读 currentManualCount / marks)、本记录累计与目标(读 .placement-record-block 的 dataset)
     // 多张点数图时,差值按「累计 vs 目标」算,不拿单图计数对目标。
-    // 2026-08-29: 老模板(只有 pcmBigger/pcmSmaller/pcmLoose/pcmUndo/pcmClose)里
-    // 没有 pcmCumulative/pcmDiffChip/pcmProgBar/pcmLooseVal/pcmImgPosLabel/pcmCurLabel/pcmUndoTarget
-    // 等新元素,syncHead 全部 null-guard 后再写。
     function syncHead() {
         var rid = currentRecordId;
         if (!rid) return;
@@ -283,47 +317,34 @@
         if (tw) curIdx = parseInt(tw.getAttribute('data-img-index'), 10) || 0;
 
         el('pcmCount').textContent = (currentIsUnload ? '⬇ −' : '') + Math.abs(curEff);
-        var cum = el('pcmCumulative');
-        // v3: KPI 卡片自带 unit span,这里只写数字比值
-        if (cum) cum.textContent = total + ' / ' + (hasZhi ? expected : '—');
+        // 2026-09-18: 累计显示用 currentCountUnit 替代字面量「支」(桶装显示「桶」)
+        el('pcmCumulative').textContent = total + ' / ' + (hasZhi ? expected : '—') + ' ' + currentCountUnit;
 
         var chip = el('pcmDiffChip');
         if (chip) {
-            var u = currentCountUnit;
-            if (!hasZhi) { chip.className = 'pcm-diff-chip none'; chip.textContent = '备注无' + u + '数'; }
-            else if (total === expected) { chip.className = 'pcm-diff-chip ok'; chip.textContent = '已齐 ' + total + ' ' + u; }
-            else if (total < expected) { chip.className = 'pcm-diff-chip bad'; chip.textContent = '差 ' + (expected - total) + ' ' + u; }
-            else { chip.className = 'pcm-diff-chip warn'; chip.textContent = '多 ' + (total - expected) + ' ' + u; }
+            if (!hasZhi) { chip.className = 'pcm-diff-chip none'; chip.textContent = '备注无' + currentCountUnit + '数'; }
+            else if (total === expected) { chip.className = 'pcm-diff-chip ok'; chip.textContent = '已齐 ' + total + ' ' + currentCountUnit; }
+            else if (total < expected) { chip.className = 'pcm-diff-chip bad'; chip.textContent = '差 ' + (expected - total) + ' ' + currentCountUnit; }
+            else { chip.className = 'pcm-diff-chip warn'; chip.textContent = '多 ' + (total - expected) + ' ' + currentCountUnit; }
         }
 
         var diffTxt = hasZhi
             ? (total === expected ? '已齐' : (total < expected ? '差 ' + (expected - total) : '多 ' + (total - expected)) + ' ' + currentCountUnit)
             : '无目标';
-        var progTxt = el('pcmProgText');
-        // v3: 主数字已经在卡片值显示,这里只保留 diff + 共几张
-        if (progTxt) progTxt.textContent = diffTxt + ' · 共 ' + imgCount + ' 张';
+        el('pcmProgText').textContent = '本记录累计 ' + total + ' / 目标 ' + (hasZhi ? expected : '—') + ' · ' + diffTxt + ' · 共 ' + imgCount + ' 张';
 
         var bar = el('pcmProgBar');
-        if (bar) {
-            var pct = (hasZhi && expected > 0) ? Math.min(100, Math.round(total / expected * 100)) : 0;
-            bar.style.width = pct + '%';
-            // v3: CSS 用 .pcm-kpi-fill 系列(老 .pcm-prog-fill 已删),这里同步
-            bar.className = 'pcm-kpi-fill' + (hasZhi ? (total === expected ? ' ok' : (total > expected ? ' over' : '')) : '');
-        }
+        var pct = (hasZhi && expected > 0) ? Math.min(100, Math.round(total / expected * 100)) : 0;
+        bar.style.width = pct + '%';
+        bar.className = 'pcm-prog-fill' + (hasZhi ? (total === expected ? ' ok' : (total > expected ? ' over' : '')) : '');
 
         var lv = el('pcmLooseVal');
-        if (lv) {
-            // v3: KPI 散码卡片自带 label + unit,这里只写数字,常显(0 时也显示)
-            // 2026-09-09: 拷贝纸/日本纸无散码 → 隐藏散码卡片
-            lv.textContent = (looseTotal || 0);
-            lv.style.display = currentHasLoose ? '' : 'none';
-            var looseCard = lv.closest('.pcm-kpi-card');
-            if (looseCard) looseCard.style.display = currentHasLoose ? '' : 'none';
-        }
+        // 2026-09-18: hasLoose=false(桶装)直接隐藏散码
+        if (looseTotal > 0 && currentHasLoose) { lv.textContent = '散码 ' + looseTotal + ' y'; lv.style.display = ''; }
+        else { lv.textContent = ''; lv.style.display = 'none'; }
 
         var posTxt = imgCount ? ('本图第 ' + curIdx + '/' + imgCount + ' 张') : '本图第 -/- 张';
-        var imgPosLbl = el('pcmImgPosLabel');
-        if (imgPosLbl) imgPosLbl.textContent = posTxt;
+        el('pcmImgPosLabel').textContent = posTxt;
         // 头部「本图」标签也带上图序,更显眼
         var curLbl = el('pcmCurLabel');
         if (curLbl) curLbl.textContent = imgCount ? ('本图 · 第 ' + curIdx + '/' + imgCount + ' 张') : '本图';
@@ -438,6 +459,7 @@
     //   这里补上前端 toggle:pm=True 时补建徽章(模板没渲染的场景),pm=False 时主动移除徽章
     //   (覆盖模板残留)。仅当 placement-add-btn 存在时补建,隐式尊重模板的「外层条件」
     //   (is_copy_paper / 支 in unit_hint / 支 in piece_hint)—— 缺按钮的 record 不会有 placement 图。
+    // 与 placement_count.js 的同名函数同构(loading 单独维护一份)。
     function updatePlacementMatch(recordId, pm) {
         if (recordId == null) return;
         var tr = document.querySelector('tr[data-record-id="' + recordId + '"]');
@@ -449,12 +471,11 @@
         // 同步服务端模板渲染的「✓ 点数」徽章(.placement-badge / status-badge placement-badge lock-show)
         var serverBadge = tr ? tr.querySelector('.placement-badge') : null;
         if (pm) {
-            // btn 存在 = record 满足外层条件(is_copy_paper / 支 in unit_hint / piece_hint),
-            // 此时补建徽章与模板语义一致
+            // btn 存在 = record 满足外层条件,此时补建徽章与模板语义一致
             if (!serverBadge && td && btn) {
                 serverBadge = document.createElement('span');
                 serverBadge.className = 'status-badge placement-badge lock-show';
-                serverBadge.setAttribute('title', '该行已添加点数图');
+                serverBadge.setAttribute('title', '该行已添加摆放图');
                 serverBadge.textContent = '✓ 点数';
                 td.appendChild(serverBadge);
             }
@@ -617,6 +638,11 @@
 
     // ── 事件绑定 ──
     function bind() {
+        // 空值安全的事件绑定(元素可能在某些页面模板中不存在,如 pcmSegClick 仅出货页弹框有)
+        function bindIf(id, evt, fn) {
+            var e = el(id);
+            if (e) e.addEventListener(evt, fn);
+        }
         // 委托:缩略图 / 删除(摆放图按钮走 onclick 直接调 openPlacementImageModal,复用 imageModal)
         document.addEventListener('click', function (e) {
             var delBtn = e.target.closest('.placement-del-btn');
@@ -630,42 +656,36 @@
             }
         });
 
-        // 2026-08-29: 老模板里没有 pcmManual/pcmUnload/manualCountModal 等新元素,
-// 加 helper 在元素缺失时跳过,而不是直接抛 TypeError 中断初始化。
-        function bindIf(id, evt, fn) {
-            var e = el(id);
-            if (e) e.addEventListener(evt, fn);
-        }
-        bindIf('pcmClose', 'click', closePlacementCount);
-        bindIf('pcmBigger', 'click', function () {
+        el('pcmClose').addEventListener('click', closePlacementCount);
+        el('pcmBigger').addEventListener('click', function () {
             if (currentCountImageId) adjustMarkScale(SCALE_STEP);
         });
-        bindIf('pcmSmaller', 'click', function () {
+        el('pcmSmaller').addEventListener('click', function () {
             if (currentCountImageId) adjustMarkScale(1 / SCALE_STEP);
         });
-        bindIf('pcmLoose', 'click', openLooseModal);
+        el('pcmLoose').addEventListener('click', openLooseModal);
         // 2026-08-21: 直接输入支数 UI 已暴露在模板,移除 null-guard;
         // 清空按钮(回退到点击计数)直接绑 clearManualCount
-        bindIf('pcmManual', 'click', openManualModal);
-        bindIf('pcmUnload', 'change', toggleUnload);
-        bindIf('manualCountSave', 'click', saveManualCount);
-        bindIf('manualCountCancel', 'click', closeManualModal);
-        bindIf('manualCountClear', 'click', clearManualCount);
-        bindIf('manualCountInput', 'keydown', function (e) {
+        el('pcmManual').addEventListener('click', openManualModal);
+        el('pcmUnload').addEventListener('change', toggleUnload);
+        el('manualCountSave').addEventListener('click', saveManualCount);
+        el('manualCountCancel').addEventListener('click', closeManualModal);
+        el('manualCountClear').addEventListener('click', clearManualCount);
+        el('manualCountInput').addEventListener('keydown', function (e) {
             if (e.key === 'Enter') { e.preventDefault(); saveManualCount(); }
         });
-        bindIf('manualCountModal', 'click', function (e) {
+        el('manualCountModal').addEventListener('click', function (e) {
             if (e.target === this) closeManualModal();
         });
-        bindIf('looseCountSave', 'click', saveLooseCount);
-        bindIf('looseCountCancel', 'click', closeLooseModal);
-        bindIf('looseCountInput', 'keydown', function (e) {
+        el('looseCountSave').addEventListener('click', saveLooseCount);
+        el('looseCountCancel').addEventListener('click', closeLooseModal);
+        el('looseCountInput').addEventListener('keydown', function (e) {
             if (e.key === 'Enter') { e.preventDefault(); saveLooseCount(); }
         });
-        bindIf('looseCountModal', 'click', function (e) {
+        el('looseCountModal').addEventListener('click', function (e) {
             if (e.target === this) closeLooseModal();
         });
-        bindIf('pcmUndo', 'click', function () {
+        el('pcmUndo').addEventListener('click', function () {
             if (!currentCountImageId) return;
             // 直接输入模式下,「撤销」改为清空直接输入,回退到点击计数
             if (currentManualCount != null) { clearManualCount(); return; }
@@ -693,6 +713,7 @@
             if (e.target === this) closePlacementCount();
         });
         // 「点击计数」分段按钮:直输模式下点它 = 清空直输,回退到点击计数
+        // (loading 页弹框无此分段按钮,pcmSegClick 可能不存在 → 用 bindIf 空值保护)
         bindIf('pcmSegClick', 'click', function () {
             if (currentManualCount != null) clearManualCount();
         });
@@ -704,13 +725,11 @@
                 return;
             }
             if (!el('placementCountModal').classList.contains('show')) return;
-            // 旧模板没有这些元素时,快捷键对应的 click() 也不能直接调,否则 null.click() 会抛
-            function clickIf(id) { var x = el(id); if (x) x.click(); }
             switch (e.key) {
                 case 'Escape': closePlacementCount(); break;
-                case 'z': case 'Z': e.preventDefault(); clickIf('pcmUndo'); break;
-                case 'u': case 'U': e.preventDefault(); clickIf('pcmUnload'); break;
-                case 'l': case 'L': e.preventDefault(); if (currentHasLoose) openLooseModal(); break;
+                case 'z': case 'Z': e.preventDefault(); el('pcmUndo').click(); break;
+                case 'u': case 'U': e.preventDefault(); el('pcmUnload').click(); break;
+                case 'l': case 'L': e.preventDefault(); openLooseModal(); break;
                 case 'm': case 'M': e.preventDefault(); openManualModal(); break;
                 case '+': case '=': e.preventDefault(); if (currentCountImageId) adjustMarkScale(SCALE_STEP); break;
                 case '-': case '_': e.preventDefault(); if (currentCountImageId) adjustMarkScale(1 / SCALE_STEP); break;

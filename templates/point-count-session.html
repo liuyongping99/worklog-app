@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}点数 · {{ sess['title'] }}{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/point-count.css') }}">
+<style>
+.mpc-detail { max-width: 720px; margin: 0 auto; padding: 1rem 0.75rem 4rem; }
+.mpc-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.75rem; }
+.mpc-head h1 { font-size: 1.3rem; margin: 0; color: #2d3436; }
+.mpc-head .meta { color: #868e96; font-size: 0.85rem; margin: 0.25rem 0 0; }
+.mpc-head .status-badge { padding: 0.2rem 0.7rem; border-radius: 999px; font-size: 0.8rem; font-weight: 600; }
+.mpc-head .status-badge.open { background: #dbf6e6; color: #146745; }
+.mpc-head .status-badge.closed { background: #f1f3f5; color: #868e96; }
+.mpc-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px,1fr)); gap: 0.6rem; margin: 0.5rem 0 1rem; }
+.mpc-summary .stat { background: #fff; padding: 0.6rem 0.8rem; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
+.mpc-summary .stat .label { color: #868e96; font-size: 0.78rem; }
+.mpc-summary .stat .value { font-weight: 700; font-size: 1.1rem; color: #14664d; }
+.mpc-back { color: #14664d; text-decoration: none; font-size: 0.9rem; }
+.mpc-photo-row { display: flex; gap: 0.5rem; margin: 0.75rem 0; }
+.mpc-photo-row button { flex: 1; padding: 0.7rem 0; border-radius: 10px; border: 0; font-weight: 700; font-size: 0.95rem; cursor: pointer; }
+.mpc-photo-row .primary { background: #16835f; color: #fff; }
+.mpc-photo-row .secondary { background: #eef8f4; color: #16835f; border: 1px solid #b9ddcf; }
+.mpc-actions-bar { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 0.5rem 0 1rem; }
+.mpc-actions-bar button { padding: 0.4rem 0.8rem; border-radius: 8px; border: 1px solid #d6dee0; background: #fff; cursor: pointer; font-size: 0.85rem; }
+.mpc-actions-bar .danger { color: #c0392b; border-color: #f0c9c6; }
+.mpc-upload-progress { color: #16835f; font-size: 0.85rem; padding: 0.25rem 0; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="m-place mpc-detail" data-session-id="{{ sess['id'] }}">
+  <div class="mpc-head">
+    <div>
+      <a class="mpc-back" href="{{ url_for('point_count.index') }}">‹ 返回列表</a>
+      <h1>{{ sess['title'] }}</h1>
+      <div class="meta">
+        #{{ sess['id'] }} ·
+        创建人 {{ sess.get('user_name') or '已删除' }} ·
+        创建于 {{ sess['created_at'] }}{% if sess.get('closed_at') %} · 完结于 {{ sess['closed_at'] }}{% endif %}
+      </div>
+    </div>
+    <span class="status-badge {{ sess['status'] }}">{{ '已完结' if sess['status'] == 'closed' else '进行中' }}</span>
+  </div>
+
+  <div class="mpc-summary">
+    <div class="stat"><div class="label">单位</div><div class="value">{{ sess['unit'] }}</div></div>
+    <div class="stat"><div class="label">图片数</div><div class="value">{{ images|length }}</div></div>
+    <div class="stat"><div class="label">实际总数</div><div class="value" id="mpcTotalValue">{{ sess['total_count'] }}</div></div>
+    <div class="stat"><div class="label">期望</div><div class="value">{% if sess['expected_count'] is none %}—{% else %}{{ sess['expected_count'] }}{% endif %}</div></div>
+    {% if sess['remark'] %}
+    <div class="stat" style="grid-column: 1/-1;"><div class="label">备注</div><div class="value" style="font-weight:500;font-size:0.95rem;">{{ sess['remark'] }}</div></div>
+    {% endif %}
+  </div>
+
+  <div class="mpc-actions-bar">
+    <button class="primary" data-action="capture">📷 拍照</button>
+    <button class="secondary" data-action="album">🖼 相册</button>
+    <button class="js-close-session" data-status="{{ sess['status'] }}">{{ '重开' if sess['status'] == 'closed' else '完结' }}</button>
+    <button class="js-edit-meta">✏️ 编辑</button>
+    <button class="danger js-delete-session">🗑 删除</button>
+  </div>
+  <input type="file" accept="image/*" capture="environment" data-role="capture-input" hidden>
+  <input type="file" accept="image/*" data-role="album-input" hidden>
+  <div class="upload-progress" data-role="uploadProgress" hidden>上传中…</div>
+
+  <div class="place-list" data-role="list">
+    <div class="place-empty" data-role="empty">暂无图片，请先拍照或选择相册</div>
+  </div>
+</div>
+
+<!-- 散码弹窗 -->
+<div class="place-loose-mask" id="placeLooseMask" hidden>
+  <div class="place-loose-box">
+    <div class="place-loose-title">录入散码数量</div>
+    <input type="number" inputmode="numeric" min="0" data-role="looseInput" value="0">
+    <div class="place-loose-actions">
+      <button data-action="looseCancel">取消</button>
+      <button data-action="looseSave" class="primary">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 拍照预览遮罩 -->
+<div class="photo-preview-mask" id="placePreviewMask" hidden>
+  <div class="photo-preview-box">
+    <div class="photo-preview-title">确认照片</div>
+    <div class="photo-preview-stage"><canvas id="placePreviewCanvas"></canvas></div>
+    <div class="photo-preview-hint" id="placePreviewHint">可旋转调整方向，确认后再上传</div>
+    <div class="photo-preview-actions">
+      <button type="button" id="placeRotateLeft">↺ 左转</button>
+      <button type="button" id="placeRotateRight">↻ 右转</button>
+      <button type="button" class="photo-retake" id="placeRetake">重拍</button>
+      <button type="button" class="photo-confirm" id="placeConfirm">✓ 上传</button>
+    </div>
+  </div>
+</div>
+
+<!-- 编辑会话元数据弹窗 -->
+<div class="place-loose-mask" id="mpcEditModal" hidden>
+  <div class="place-loose-box" style="max-width:360px;">
+    <div class="place-loose-title">编辑点数组</div>
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <input type="text" id="mpcEditTitle" maxlength="64" placeholder="标题">
+      <input type="number" id="mpcEditExpected" min="0" step="1" placeholder="期望值 (可选)">
+      <input type="text" id="mpcEditUnit" maxlength="8" placeholder="单位">
+      <textarea id="mpcEditRemark" maxlength="500" placeholder="备注"></textarea>
+    </div>
+    <div class="place-loose-actions">
+      <button data-action="editCancel">取消</button>
+      <button data-action="editSave" class="primary">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  window.__POINT_COUNT__ = {
+    sessionId: {{ sess['id'] }},
+    unit: {{ sess['unit']|tojson }},
+    status: {{ sess['status']|tojson }},
+    title: {{ sess['title']|tojson }},
+    expectedCount: {{ (sess['expected_count'] if sess['expected_count'] is not none else 'null')|tojson }},
+    remark: {{ sess['remark']|tojson }}
+  };
+</script>
+<script src="{{ url_for('static', filename='js/point-count.js') }}"></script>
+{% endblock %}

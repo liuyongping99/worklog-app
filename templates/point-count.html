@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}独立点数 · 丰源工作台{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/point-count.css') }}">
+<style>
+.pc-page { max-width: 960px; margin: 0 auto; padding: 1rem 0.75rem 2.5rem; }
+.pc-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+.pc-head h1 { font-size: 1.4rem; margin: 0; color: #2d3436; }
+.pc-head .subtitle { color: #636e72; font-size: 0.9rem; margin: 0.25rem 0 0; }
+.pc-head .actions { display: flex; gap: 0.5rem; }
+.pc-btn {
+    border: 0; padding: 0.5rem 0.9rem; border-radius: 8px; cursor: pointer;
+    font-size: 0.9rem; font-weight: 600;
+}
+.pc-btn.primary { background: #14664d; color: #fff; }
+.pc-btn.primary:hover { background: #16835f; }
+.pc-btn.ghost { background: #fff; color: #2d3436; border: 1px solid #d6dee0; }
+.pc-btn.ghost:hover { background: #f8f9fa; }
+.pc-btn.danger { background: #fff; color: #c0392b; border: 1px solid #f0c9c6; }
+.pc-btn.danger:hover { background: #fdecea; }
+
+.pc-new-form {
+    background: #fff; border-radius: 12px; padding: 1rem 1.25rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06); margin-bottom: 1.25rem;
+}
+.pc-new-form[hidden] { display: none; }
+.pc-new-form .form-row { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin-bottom: 0.6rem; }
+.pc-new-form label { font-size: 0.85rem; color: #636e72; min-width: 4.5rem; }
+.pc-new-form input[type="text"],
+.pc-new-form input[type="number"],
+.pc-new-form textarea {
+    flex: 1 1 auto; min-width: 160px; box-sizing: border-box;
+    border: 1px solid #d6dee0; border-radius: 8px; padding: 0.5rem 0.6rem;
+    font-size: 0.95rem; font-family: inherit;
+}
+.pc-new-form textarea { min-height: 60px; resize: vertical; }
+.pc-new-form .form-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.5rem; }
+.pc-new-form .form-tip { color: #868e96; font-size: 0.8rem; margin-top: 0.25rem; }
+
+.pc-list-card {
+    background: #fff; border-radius: 12px; padding: 0.5rem 0; overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+.pc-list-card table { width: 100%; border-collapse: collapse; }
+.pc-list-card th, .pc-list-card td {
+    text-align: left; padding: 0.6rem 0.85rem;
+    border-bottom: 1px solid #f1f3f5; font-size: 0.9rem;
+}
+.pc-list-card tr:last-child td { border-bottom: 0; }
+.pc-list-card th {
+    background: #f8f9fa; font-weight: 600; color: #636e72;
+    font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.5px;
+}
+.pc-list-card .status-badge {
+    display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px;
+    font-size: 0.75rem; font-weight: 600;
+}
+.pc-list-card .status-badge.open { background: #dbf6e6; color: #146745; }
+.pc-list-card .status-badge.closed { background: #f1f3f5; color: #868e96; }
+.pc-list-card .total { font-weight: 700; color: #14664d; font-size: 1rem; }
+.pc-list-card .row-actions { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+.pc-list-card .row-actions a, .row-actions button {
+    font-size: 0.8rem; padding: 0.25rem 0.55rem; border-radius: 6px;
+    background: #fff; border: 1px solid #d6dee0; cursor: pointer;
+    text-decoration: none; color: #2d3436;
+}
+.pc-list-card .row-actions a:hover { background: #f1f8f4; color: #14664d; }
+.pc-list-card .row-actions .danger:hover { background: #fdecea; color: #c0392b; border-color: #f0c9c6; }
+.pc-empty {
+    text-align: center; color: #868e96; padding: 3rem 1rem;
+}
+</style>
+{% endblock %}
+{% block content %}
+<div class="pc-page">
+  <div class="pc-head">
+    <div>
+      <h1>📷 独立点数</h1>
+      <p class="subtitle">拍照或选择图片 → 用手指点击计数 → 自动记录用户、时间、位置和结果（可追溯）</p>
+    </div>
+    <div class="actions">
+      <button class="pc-btn primary" id="pcToggleFormBtn">+ 新建点数组</button>
+    </div>
+  </div>
+
+  <div class="pc-new-form" id="pcNewForm" {% if not show_new_form %}hidden{% endif %}>
+    <div class="form-row">
+      <label for="pcNewTitle">标题</label>
+      <input type="text" id="pcNewTitle" maxlength="64" placeholder="例如：A 仓 白磅布 三文治盘点" autocomplete="off">
+    </div>
+    <div class="form-row">
+      <label for="pcNewExpected">期望</label>
+      <input type="number" id="pcNewExpected" min="0" step="1" placeholder="可选: 已知总数">
+      <label for="pcNewUnit" style="min-width:0;">单位</label>
+      <input type="text" id="pcNewUnit" maxlength="8" value="支" style="flex:0 1 80px;">
+    </div>
+    <div class="form-row" style="flex-direction:column; align-items:stretch;">
+      <label for="pcNewRemark">备注</label>
+      <textarea id="pcNewRemark" maxlength="500" placeholder="可选: 库位/品类/盘点批次…"></textarea>
+    </div>
+    <div class="form-actions">
+      <button class="pc-btn ghost" id="pcNewCancelBtn">取消</button>
+      <button class="pc-btn primary" id="pcNewSubmitBtn">创建并进入</button>
+    </div>
+    <div class="form-tip">创建后立即进入拍照 + 点数界面；会话状态默认为「进行中」。</div>
+  </div>
+
+  <div class="pc-list-card">
+    {% if sessions %}
+    <table>
+      <thead>
+        <tr>
+          <th style="width:4rem;">#</th>
+          <th>标题</th>
+          <th style="width:7rem;">创建人</th>
+          <th style="width:6rem;">状态</th>
+          <th style="width:5rem;">总数</th>
+          <th style="width:5rem;">期望</th>
+          <th style="width:9rem;">创建时间</th>
+          <th style="width:13rem;">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in sessions %}
+        <tr data-session-id="{{ s.id }}">
+          <td>#{{ s.id }}</td>
+          <td>
+            <a href="{{ url_for('point_count.session_detail', session_id=s.id) }}" style="color:#14664d;font-weight:600;text-decoration:none;">{{ s.title }}</a>
+            {% if s.remark %}<div style="color:#868e96;font-size:0.78rem;margin-top:2px;">{{ s.remark }}</div>{% endif %}
+          </td>
+          <td>{{ s.user_name or '已删除' }}{% if s.user_role %} <span style="color:#868e96;">({{ s.user_role }})</span>{% endif %}</td>
+          <td><span class="status-badge {{ s.status }}">{{ '已完结' if s.status == 'closed' else '进行中' }}</span></td>
+          <td><span class="total">{{ s.total_count }}{{ s.unit }}</span></td>
+          <td>{{ s.expected_count if s.expected_count is not none else '—' }}{{ s.unit if s.expected_count is not none else '' }}</td>
+          <td><span title="display: {{ s.created_at }}" style="font-size:0.8rem;color:#636e72;">{{ s.created_at }}</span></td>
+          <td>
+            <div class="row-actions">
+              <a href="{{ url_for('point_count.session_detail', session_id=s.id) }}">📷 进入</a>
+              <button class="js-close-btn" data-id="{{ s.id }}" data-status="{{ s.status }}">{{ '重开' if s.status == 'closed' else '完结' }}</button>
+              <button class="js-export-btn danger" data-id="{{ s.id }}">导出</button>
+              <button class="js-delete-btn danger" data-id="{{ s.id }}">删除</button>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="pc-empty">
+      <div style="font-size:2.5rem;margin-bottom:0.5rem;">📷</div>
+      <div>还没有点数组，点上方「+ 新建点数组」开始</div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+<script src="{{ url_for('static', filename='js/point-count-list.js') }}"></script>
+{% endblock %}

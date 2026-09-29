@@ -1,0 +1,102 @@
+{# 2026-09-18: 三页(出货/入库/装柜)共用的清点支数/桶数/令数/张数 弹框 — 与出货页 shipping-records.html:1154-1253 同源 #}
+{# 由 placement_count.js / loading_placement_count.js 驱动,弹框文字 + 单位按 tr[data-count-unit] / [data-has-loose] 动态切换 #}
+
+<!-- ① 主弹框 — 摆放图清点 -->
+<div id="placementCountModal" class="placement-count-modal">
+    <div class="pcm-inner">
+        {# ① 身份条(暗色)— 标题 + 记录名 + 图序号 + 关闭 #}
+        <div class="pcm-identity">
+            <div class="pcm-id-left">
+                <span class="pcm-title" id="pcmTitle">🧮 清点支数</span>
+                <span class="pcm-id-record" id="pcmRecordName">—</span>
+            </div>
+            <div class="pcm-id-right">
+                <span class="pcm-id-imgpos" id="pcmImgPosLabel">本图第 -/- 张</span>
+                <button type="button" id="pcmClose" class="pcm-close-btn" title="关闭 (Esc)">✕</button>
+            </div>
+        </div>
+
+        {# ② KPI 三联卡片 — 本图 / 累计·目标 / 散码 #}
+        <div class="pcm-kpi">
+            <div class="pcm-kpi-card pcm-kpi-cur">
+                <div class="pcm-kpi-label">本图</div>
+                <div class="pcm-kpi-value"><span id="pcmCount">0</span><span class="pcm-kpi-unit" id="pcmCurUnit">支</span></div>
+            </div>
+            <div class="pcm-kpi-card pcm-kpi-cum">
+                <div class="pcm-kpi-label">累计 / 目标</div>
+                <div class="pcm-kpi-value"><span id="pcmCumulative">0 / —</span><span class="pcm-kpi-unit" id="pcmCumUnit">支</span></div>
+                <div class="pcm-kpi-sub" id="pcmProgText">本记录累计 0 / 目标 — · 共 0 张</div>
+                <div class="pcm-kpi-bar"><div class="pcm-kpi-fill" id="pcmProgBar"></div></div>
+            </div>
+            <div class="pcm-kpi-card pcm-kpi-loose">
+                <div class="pcm-kpi-label">散码</div>
+                <div class="pcm-kpi-value"><span id="pcmLooseVal">0</span><span class="pcm-kpi-unit">y</span></div>
+            </div>
+        </div>
+
+        {# 操作工具栏 — 直输 / 散码 / 卸载切换 #}
+        <div class="pcm-actions" id="pcmActions">
+            <button type="button" id="pcmManual" class="pcm-tb-btn pcm-tb-manual">
+                <span>✎ 直输</span><span class="pcm-tb-key">M</span>
+            </button>
+            <button type="button" id="pcmLoose" class="pcm-tb-btn pcm-tb-loose" title="录入散码数量 (L)">
+                <span>散码</span><span class="pcm-tb-key">L</span>
+            </button>
+            <label class="pcm-tb-toggle" id="pcmUnloadWrap">
+                <input type="checkbox" id="pcmUnload"><span>⬇ 卸载</span><span class="pcm-tb-key">U</span>
+            </label>
+            <span class="pcm-act-spacer"></span>
+            <span class="pcm-act-hint" id="pcmActHint">点击图个位置计 1 支、数字键 1–9 直输</span>
+        </div>
+
+        {# ③ 图片区(暗底)— 摆放图 + 红色支数标记 #}
+        <div class="pcm-body" id="pcmBody">
+            <div class="pcm-side-zoom" id="pcmSideZoom" aria-label="调节手动输入数字">
+                <button type="button" id="pcmBigger" class="pcm-tb-btn" title="数字 +1 (+)" aria-label="加一">+</button>
+                <button type="button" id="pcmSmaller" class="pcm-tb-btn" title="数字 -1 (−)" aria-label="减一">−</button>
+            </div>
+            <div class="pcm-corner-undo" id="pcmCornerUndo">
+                <button type="button" id="pcmUndo" class="pcm-tb-btn pcm-tb-undo" title="撤销最近一次点击 (Z)">
+                    <span>↩</span><span>撤销</span><span class="pcm-tb-key">Z</span>
+                </button>
+            </div>
+            <div class="pcm-img-wrap" id="pcmImgWrap">
+                <img id="pcmImg" class="pcm-img" src="" alt="摆放图">
+                <div id="pcmMarks" class="pcm-marks"></div>
+            </div>
+        </div>
+
+        {# ⑤ 快捷键脚注 #}
+        <div class="pcm-shortcuts"><b>Z</b> 撤销 · <b>U</b> 卸载 · <b>L</b> 散码 · <b>M</b> 直输 · <b>+/−</b> 字号 · <b>1-9</b> 直输 · <b>Esc</b> 关闭</div>
+    </div>
+</div>
+
+<!-- 散码数量录入弹框 -->
+<div id="looseCountModal" class="loose-count-modal">
+    <div class="lcm-inner">
+        <div class="lcm-title">散码数量</div>
+        <div class="lcm-body">
+            <input type="number" id="looseCountInput" min="0" step="1" placeholder="请输入散码数量" inputmode="numeric">
+        </div>
+        <div class="lcm-actions">
+            <button type="button" id="looseCountCancel" class="lcm-cancel">取消</button>
+            <button type="button" id="looseCountSave" class="lcm-save">保存</button>
+        </div>
+    </div>
+</div>
+
+<!-- 直输弹框 — mcmTitle/mcmInput 由 readCountConfig 按当前单位动态改写 -->
+<div id="manualCountModal" class="manual-count-modal">
+    <div class="mcm-inner">
+        <div class="mcm-title" id="mcmTitle">🖊️ 直接输入支数</div>
+        <div class="mcm-body">
+            <input type="number" id="manualCountInput" min="0" step="1" placeholder="请输入支数" inputmode="numeric">
+            <div class="mcm-hint">直接输入会清空这张图的点击计数点,二者互斥。「清空」可恢复点击计数。</div>
+        </div>
+        <div class="mcm-actions">
+            <button type="button" id="manualCountClear" class="mcm-clear">清空</button>
+            <button type="button" id="manualCountCancel" class="mcm-cancel">取消</button>
+            <button type="button" id="manualCountSave" class="mcm-save">保存</button>
+        </div>
+    </div>
+</div>
