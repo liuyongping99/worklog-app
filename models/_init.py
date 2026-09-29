@@ -1,4 +1,4 @@
-﻿"""数据库初始化：建表 + 迁移"""
+"""数据库初始化：建表 + 迁移"""
 import json
 import os
 import sqlite3

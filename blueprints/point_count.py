@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """独立点数工具蓝图(双蓝图:页面 + REST API)。
 
 - 页面蓝图 bp(url_prefix='/tools/point-count'):

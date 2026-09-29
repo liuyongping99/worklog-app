@@ -1,4 +1,4 @@
-﻿"""OCR 引擎抽象层：Moonshot 云端 + PaddleOCR 本地双引擎。
+"""OCR 引擎抽象层：Moonshot 云端 + PaddleOCR 本地双引擎。
 
 提供统一的 recognize(image_bytes, filename) → {"success": bool, "items": [...]} 接口，
 通过 get_ocr_engine(name) 工厂函数获取引擎实例（单例缓存）。
