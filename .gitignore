@@ -143,4 +143,5 @@ setup_firewall.bat
 
 # ===== 其他 SQL 调试残留 =====
 sql/_*.sql
-sql/翻译.txt
+sql/*0609.sql
+sql/说明.txt
