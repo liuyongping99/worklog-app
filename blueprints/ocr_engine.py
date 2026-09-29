@@ -15,6 +15,15 @@ from abc import ABC, abstractmethod
 from typing import Optional
 import numpy as np
 import openai  # 提到顶层,避免 except 子句引用 _openai 模块时 UnboundLocalError
+
+
+class DeepSeekResponseTruncated(RuntimeError):
+    """DeepSeek 响应被截断(max_tokens 用尽)或 JSON 解析失败。
+
+    2026-09-17 新增:让上层(ocr_pipeline.classify / shipping.ai_match)能
+    区分「DeepSeek 真正格式错」与「max_tokens 不够 → fallback 本地 fuzzy」,
+    而不是统一 fallback 成本地或抛通用 APIError。
+    """
 from PIL import Image
 
 from blueprints.ocr_log import (image_payload, items_outcome, log_ocr_call,
@@ -468,7 +477,18 @@ _GLARE_VARIANTS = frozenset({'无纺布'})
 # _FORM_NOLINES(_FORM_NOLINES_EXCLUDES 已不再包含 环保磅布三文治),子串「环保磅布
 # 三文治」也能命中 form_nolines,但 7P 前缀会优先命中 _FORM_NOLINES_VARIANTS 第一项。
 # 详见 memory: ocr-eco-pangburger-redstamp-routing-2026-09-02
-_REDSTAMP_VARIANTS = frozenset({'杂胶', '纯胶', '环保磅布三文治'})
+_REDSTAMP_VARIANTS = frozenset({
+    '杂胶', '纯胶', '环保磅布三文治',
+    # 【2026-09-14】LB鱼鳞布系列 + LB特软 短名
+    # 背景:订单 1001 明细 2805「LB特软 / 黑色-0.8」三张图 OCR 全部被红章污染:
+    #   - 928-黑色 (红章 2020 + 0.8 串扰)
+    #   - #08-黑色
+    #   - 9750-8707 / 8-黑色 / 古格 (多行串扰,「古格」是红章字)
+    # 历史损失:全库 11 条 LB特软 图片中 5 条被红章污染(yellow),剩下 6 条无红章的能干净出 green
+    # '鱼鳞布' 覆盖 7P环保LB鱼鳞布/环保LB鱼鳞布/环保HA鱼鳞布/LB鱼鳞布 等全名变体
+    # 'LB特软' 覆盖订单里的短名写法(不含「鱼鳞布」字面)
+    '鱼鳞布', 'LB特软',
+})
 
 # 【2026-08-27 修复】已知有表格线标签, 显式排除 — 不会被任何轨命中 form_nolines。
 # 背景:订单 TD-2026-08-27-006(879/阿桂)三条「环保磅布三文治」OCR 不全。
@@ -924,6 +944,188 @@ _SPEC_INDICATOR_RE = re.compile(
 )
 
 
+# ── 自由文本路径:商品表预过滤(2026-09-22 入库页「🤖 智能文本」)────────────
+# 把整个 product 表 1145 行塞进 prompt 会拖慢响应 + reasoning 不稳。
+# 替代方案:从用户输入里抽 2+ 字中文关键词,LIKE 模糊查 product 表,取
+# 命中度最强的前 N 行(默认 15)塞进 prompt 让 LLM 就近匹配。
+# 命中数 = 0 时不注入,LLM 自由生成(原行为)。
+_CN_KEYWORD_RE = re.compile(r'[一-龥]{2,4}')  # 2~4 字中文短语,过滤单字噪声(旧版,留作历史)
+_CN_KEYWORD_BASE_RE = re.compile(r'[一-龥]{2,}')  # ≥2 字中文段(2026-09-22 口语化改造)
+# 口语虚词:扫中文段时跳过这些字头的(避免「那个」「点的」「面的」污染 LIKE 召回)
+_SPOKEN_STOPWORDS = frozenset({
+    '那个', '这个', '什么', '哪种', '这种', '那种', '一种', '一点',
+    '一个', '几个', '一些', '一样', '面的', '点的', '一点的',
+    '那个的', '这个的', '的', '了', '着', '过', '是',
+})
+_MAX_PRODUCT_CANDIDATES = 15  # 候选产品上限 — 控制 prompt 长度 ≤ ~500 chars
+
+
+def _extract_spoken_keywords(text):
+    """从口语化输入里抽取业务关键词(2~6 字),用于 LIKE 查 product 表。
+
+    抽取规则(2026-09-22 改造,见上):
+      - 扫所有 ≥2 字中文段,跳过口语虚词
+      - 加末尾 2-3 字核心后缀(产品名通常是「修饰+核心」,如「黑皮糠纸」→「皮糠」+「皮糠纸」)
+      - 加中间 2 字业务子串(跳过首 1-2 字修饰词)
+
+    实测:7 个口语化用例从 0 召回到 15 命中,标准用例不受影响。
+    """
+    if not text:
+        return []
+    seen = set()
+    for m in _CN_KEYWORD_BASE_RE.finditer(text):
+        w = m.group()
+        if w in _SPOKEN_STOPWORDS or len(w) < 2:
+            continue
+        seen.add(w)
+        # 末尾 2-3 字核心后缀(「白杂胶」→「杂胶」)
+        if len(w) >= 3:
+            seen.add(w[-2:])
+        if len(w) >= 4:
+            seen.add(w[-3:])
+        # 中间 2 字业务子串(跳过首 1-2 字修饰词「黑/白/那个」)
+        if len(w) >= 4:
+            for s in range(1, len(w) - 1):
+                if len(w) - s >= 2:
+                    seen.add(w[s:s + 2])
+    return [kw for kw in seen if len(kw) >= 2]
+
+
+def _select_relevant_products(text, max_n=_MAX_PRODUCT_CANDIDATES):
+    """根据输入文本,从 product 表预过滤出最相关的 N 行。
+
+    算法:
+      1. 用 _extract_spoken_keywords 抽口语关键词(2026-09-22 改造)
+      2. 对每个关键词,在 product.product_name / product.specification 上做 LIKE %kw%
+      3. 命中行按"被多少个不同关键词命中"排序(命中多 > 命中少)
+      4. 同命中数时按 product_name 长度 asc(短名优先,通常标准名)
+      5. 取前 max_n 行,返回 [(product_name, specification), ...]
+
+    性能:< 50ms。文本里没有任何中文关键词(如纯阿拉伯数字)时,返回 []。
+    """
+    keywords = _extract_spoken_keywords(text)
+    if not keywords:
+        return []
+    try:
+        from models._db import get_db as _get_db
+        conn = _get_db()
+        cur = conn.cursor()
+        # 一次查全部,Python 端算命中数 — LIKE 通配是同一字段多次 OR,
+        # SQLite 单条语句 + 命中数字典比多次 SQL COUNT 快得多。
+        cur.execute(
+            'SELECT product_name, specification FROM product '
+            'WHERE product_name IS NOT NULL OR specification IS NOT NULL'
+        )
+        rows = cur.fetchall()
+        conn.close()
+    except Exception:
+        # DB 不可用时降级为「不注入候选」,不影响主流程
+        return []
+    scored = {}  # (pn, spec) -> 命中关键词数
+    for r in rows:
+        pn = (r[0] or '').strip()
+        sp = (r[1] or '').strip()
+        if not pn and not sp:
+            continue
+        combined = pn + ' ' + sp
+        hits = sum(1 for kw in keywords if kw in combined)
+        if hits > 0:
+            key = (pn, sp)
+            if key not in scored or scored[key] < hits:
+                scored[key] = hits
+    # 排序:命中数 desc, 同命中数时按 pn 长度 asc(短名优先, 通常是标准名)
+    ranked = sorted(scored.items(), key=lambda kv: (-kv[1], len(kv[0][0])))
+    return [(k[0], k[1]) for k, _ in ranked[:max_n]]
+
+
+def _fuzzy_align_to_products(items, candidates, name_threshold=95, spec_threshold=85):
+    """LLM 输出后,用 RapidFuzz 把每行的 product_name/specification
+    对照候选产品清单做近似匹配,贴近的强制替换为标准名/规格。
+
+    阈值口径(2026-09-22 与用户确认):
+      - product_name: 95 — 严格贴近才替换,避免「环保杂胶」被强行改成
+        「7P环保杂胶」这种「业务语义偏差」型错配;LLM 输出保留更尊重
+        用户原意(「环保」「7P」是不同业务类别,不能擅自加前缀)。
+      - specification: 85 — 规格里有数字/字母/单位,小差异(空格/标点)
+        经常是同款,贴近即可对齐;用户在前端可继续手动编辑。
+
+    Returns: 改动后的 items 列表(原列表会被修改,无需深拷)
+    """
+    if not items or not candidates:
+        return items
+    try:
+        from rapidfuzz import fuzz
+    except ImportError:
+        return items
+    cand_names = [c[0] for c in candidates]
+    cand_specs = [c[1] for c in candidates]
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        # product_name 对齐 — 严格阈值 95
+        pn = (it.get('product_name') or '').strip()
+        if pn:
+            best = None
+            best_score = 0
+            for i, cand in enumerate(cand_names):
+                if not cand:
+                    continue
+                # 只用 fuzz.ratio(全串比较),不用 partial_ratio —
+                # partial 会把「环保杂胶」认成「7P环保杂胶」=100%,造成加前缀错配
+                s = fuzz.ratio(pn, cand)
+                if s > best_score:
+                    best_score = s
+                    best = cand
+            if best and best_score >= name_threshold:
+                it['product_name'] = best
+        # specification 对齐 — 宽松阈值 85(规格短,空格/标点差异是噪声)
+        sp = (it.get('specification') or '').strip()
+        if sp:
+            best = None
+            best_score = 0
+            for i, cand in enumerate(cand_specs):
+                if not cand:
+                    continue
+                s = max(fuzz.ratio(sp, cand), fuzz.partial_ratio(sp, cand))
+                if s > best_score:
+                    best_score = s
+                    best = cand
+            if best and best_score >= spec_threshold:
+                it['specification'] = best
+    return items
+
+
+def _compose_user_supplements(max_n: int = 50) -> str:
+    """读 category_prompts 表 scope='text_recognize' 的全部活跃提示词,
+    拼成一段要注入 prompt 末尾的「用户累积补充提示词」。
+
+    设计:全局注入,不分关键词(详见 models/category_prompt.list_active_text_recognize_supplements)。
+    用户每发现一个 LLM 错配 → 加一条约束 → 下次同类输入不再错。
+    调用失败(DB 错误 / import 失败)返回空串,不影响主流程。
+
+    Args:
+        max_n: 最大注入条数,防止 prompt 爆涨(默认 50,够用 6+ 个月迭代)。
+              超出按 id ASC 截断(老的先注入,业务语义固定优先)。
+
+    Returns:
+        拼好的 prompt 片段。无任何提示词时返回空串。
+    """
+    try:
+        from models.category_prompt import CategoryPrompt
+        items = CategoryPrompt.list_active_text_recognize_supplements(limit=max_n)
+    except Exception:
+        return ''
+    items = [it for it in items if (it.get('prompt_text') or '').strip()]
+    if not items:
+        return ''
+    lines = ['## 用户累积补充提示词(基于此前 bad case 修正,必须遵守)']
+    for idx, it in enumerate(items, 1):
+        txt = (it.get('prompt_text') or '').strip()
+        if txt:
+            lines.append(f'{idx}. {txt}')
+    return '\n'.join(lines) + '\n\n'
+
+
 def _extract_lines(ocr_result):
     """从 PaddleOCR 结果中提取文本行，返回 [(text, y_center, x_min), ...]。
 
@@ -996,7 +1198,10 @@ def _adaptive_y_threshold(ys):
            跳跃点左侧都是「行内 gap」(0~3 像素),
            跳跃点右侧都是「行间 gap」(>= 15 像素) —— 这是表格行天然的边界。
         3. 阈值 =「行间 gap 最小值」× 0.6 (留 40% 余量给图片缩放/抖动),
-           clamp 到 [10, 35] 区间。
+           clamp 到 [5, 20] 区间。
+           2026-09-18 调整:原 [10, 35] 区间对 8-12px 紧凑表格行(典型装车单)
+           会把相邻行误合并;放宽下界到 5 让短行距也能分开,收紧上界到 20
+           避免行内波动被错判为跨行。
         4. 兜底:gap 分布均匀 (无明显跳跃) → 用中位数 × 0.6 推断;
            数据极少 (< 2 个 Y) → 返回 18。
 
@@ -1019,7 +1224,7 @@ def _adaptive_y_threshold(ys):
         return 18.0
     if len(gaps) == 1:
         # 仅有 2 条 Y,无法定位「行内/行间」边界,按其 60% 推断。
-        return max(10.0, min(gaps[0] * 0.6, 35.0))
+        return max(5.0, min(gaps[0] * 0.6, 20.0))
     # 找最大跳跃 —— 行内 → 行间 的天然分界点。
     max_jump = 0.0
     jump_idx = -1
@@ -1031,7 +1236,7 @@ def _adaptive_y_threshold(ys):
     if jump_idx > 0 and jump_idx < len(gaps):
         # 跳跃点之后的最小 gap =「行间下界」,这是最安全的阈值锚点。
         threshold = gaps[jump_idx] * 0.6
-        return max(10.0, min(threshold, 35.0))
+        return max(5.0, min(threshold, 20.0))
     # 兜底:gap 分布均匀 → 用中位数 60% 推断。
     threshold = gaps[len(gaps) // 2] * 0.6
     return max(8.0, min(threshold, 35.0))
@@ -1248,9 +1453,13 @@ class MoonshotEngine(BaseOCREngine):
     API_KEY = os.environ.get('MOONSHOT_API_KEY', '')
     BASE_URL = 'https://api.moonshot.cn/v1'
     MODEL = 'kimi-k2.6'  # Moonshot 当前视觉模型;下线时改这里
-    MAX_TOKENS = 4000
+    MAX_TOKENS = 24000  # 【2026-09-17】从 12000 加倍到 24000:实测 reasoning 长度对同图
+    # 随机波动,12000 仍偶发 finish_reason='length'(09-17 11:03 单次 2 行跑了 69s
+    # 才成功,reasoning 几乎榨干)。加倍给 24K token reasoning 余量。
+    # 同步 TIMEOUT 60→120(见下)。
     TEMPERATURE = 1  # Kimi k2.6 锁死 temperature 必须为 1
-    TIMEOUT = 60
+    TIMEOUT = 120  # 【2026-09-17】reasoning 用满 24K token 在慢网络下可能跑 90s+,
+    # 60s 必超时 ReadTimeout。从 60 翻倍到 120 留 2 倍冗余。
 
     PROMPT = (
         '你是一个商品信息提取助手。请仔细看这张图片，识别其中的商品列表。\n'
@@ -1376,10 +1585,28 @@ class MoonshotEngine(BaseOCREngine):
                 }],
                 max_tokens=self.MAX_TOKENS,
                 temperature=self.TEMPERATURE,
-                timeout=self.TIMEOUT
+                timeout=self.TIMEOUT,
+                # 【2026-09-15】对齐 DeepSeek:强制 JSON 直出
+                # 不加这个,Kimi k2.6 内部 reasoning 消耗 max_tokens 把 budget 烧光,
+                # 即使只有 3 行商品也会 finish_reason='length' 截断(JSON 还没写完)
+                # 见 DeepSeekEngine 注释(2026-09-02 历史 bug)。
+                response_format={'type': 'json_object'},
             )
             raw_text = response.choices[0].message.content.strip()
             raw_text = self._clean_response(raw_text)
+            finish_reason = response.choices[0].finish_reason
+            # 【2026-09-17】finish_reason='length' 表示 max_tokens 用尽 → 响应被截断。
+            # 真因是 Kimi k2.6 内部 chain-of-thought reasoning 把 budget 吃光,
+            # 即使只有 1-2 行商品也会截断(reasoning 长度对同图随机波动)。
+            # 不要告诉用户去拆单/删备注——那是无效操作,只会增加挫败感。
+            if finish_reason == 'length':
+                return {
+                    'success': False,
+                    'error': 'Moonshot 响应被截断(AI 推理超出预算)',
+                    'hint': '真因是模型内部推理消耗 token,与订单行数/备注长度无关。'
+                            '建议:1) 直接重试(下次推理可能更短);2) 切换到 PaddleOCR 或 DeepSeek 引擎;'
+                            '3) 换张更清晰的图片(模糊图会迫使模型推理更久)'
+                }
             data = json.loads(raw_text)
 
             # 兼容新旧格式：新格式 {"doc_number":"...", "items":[...]}，旧格式 [...]
@@ -1477,6 +1704,10 @@ class PaddleOCREngine(BaseOCREngine):
         import torch  # noqa: F401
         from paddleocr import PaddleOCR
         if self._ocr is None:
+            # ── 「_ocr」= 订单截图/扫描件 OCR 默认实例 ──
+            # 用途:智能添加里出货单/送货单/装车单的整图 OCR(电脑截图、扫描件,
+            # 文字清晰、可能有表格线),走 extract_text(kind=None) 默认分支 + Y 聚类。
+            # **不要**给实物商品标签用 — 实物标签模糊,需走下面 _wrinkle_ocr。
             self._ocr = PaddleOCR(
                 lang='ch',
                 use_angle_cls=True,   # 自动纠正旋转/倒置图片
@@ -1485,9 +1716,12 @@ class PaddleOCREngine(BaseOCREngine):
                 det_db_box_thresh=0.4,  # 默认 0.6 — 关键:调低才能框出小字厚度
                 use_dilation=True,    # 连通断裂笔画,利好细小数字
             )
-        # 无表格线表单专用 OCR 实例:更激进的检测阈值(det_db_thresh=0.15 / det_db_box_thresh=0.30)
-        # 默认实例的阈值适合清晰印刷体;表单标签经分行 OCR 后每行文字相对孤立,
-        # 需降低阈值以避免漏检。use_dilation=True 让文字区域更"胖",便于粘连字符切分。
+        # ── 「_wrinkle_ocr」= 实物商品标签 OCR 激进实例 ──
+        # 用途:行级图 OCR(磅布三文治、杂胶等实物照片),文字可能反光/红章/模糊/字号极小,
+        # 由 extract_text(kind='form_nolines' / 'glare' / 'redstamp') 触发。
+        # 阈值比 _ocr 更激进(det_db_thresh=0.15 / det_db_box_thresh=0.30),保留弱检;
+        # use_dilation 让文字区域更"胖",便于粘连字符切分(磅布三文治左列单字 vs 右列字段)。
+        # **不要**给订单截图用 — 该图清晰印刷体,激进阈值会过度切分。
         # _wrinkle_ocr 加载失败时,extract_text 仍可路由回 _ocr(_ensure_model 用 try/except 保护)。
         if self._wrinkle_ocr is None:
             try:
@@ -1873,29 +2107,45 @@ class PaddleOCREngine(BaseOCREngine):
         """多 pass OCR 取优(2026-09-02):用于 KIND_REDSTAMP 三遍 OCR 合并。
 
         输入:passes = [(lines1, confs1), (lines2, confs2), (lines3, confs3), ...]
-        打分 = (line_count, total_chars, prefix_bonus),高者胜。
+        打分 = (thickness_pattern, line_count, total_chars, prefix_bonus),高者胜。
         同分时索引小的胜(原图 > 红章擦除 > 锐化版,越靠后越激进/噪声越多)。
 
         背景:环保杂胶 / 杂胶 / 纯胶等橡胶类商品的标签含印刷体+手写体混排。
         PaddleOCR 对手写数字识别弱,不同锐化参数能捕捉不同字符(实测:r2p200 抓
         「4」,r4p300 抓「1」)。整体取优至少能拿到 1 个数字。
 
+        【2026-09-14 改进】加 thickness_pattern_bonus(权重 1000):
+          形如「数字.数字」(0.8/1.0/1.2 等厚度规格)的字符在原图常被串扰成
+          「928 / #08 / 9750-8707」(红章污染),而擦除图/锐化图能恢复正确的
+          0.8/1.0,但字符总数比污染版少 → 旧打分输给原图。
+          实测订单 1001/record 2805 三张图: orig(928-黑色)13 字符胜 pre(0.8-黑色)10 字符。
+          加 thickness_pattern_bonus 后: pre 命中「0.8」+1000 → pre 稳胜 orig。
+        排序键优先级:thickness_pattern > 行数 > 字符数 > 前缀数。
+
         Args:
             passes: list of (lines, confs) tuples,按"保守→激进"顺序排列。
         Returns:
             (winner_lines, winner_confs): 最高分 pass 的结果。
         """
+        # 厚度模式: 数字.数字(如 0.8 / 1.0 / 1.2 / 0.6 等)
+        # 用 re.compile 缓存到闭包避免重复编译
+        import re as _re_thick
+        _thickness_pat = _re_thick.compile(r'\d+\.\d+')
+
         def score(lines):
             if not lines:
-                return (-1, -1, -1)
+                return (-1, -1, -1, -1)
             n_lines = len(lines)
             total_chars = sum(len(l) for l in lines)
             known_prefixes = ('品名', '规格', '颜色', '厚度', '手感', '底布', '成份', '克重')
             prefix_bonus = sum(1 for l in lines
                               if any(p in l for p in known_prefixes))
-            return (n_lines, total_chars, prefix_bonus)
+            # 厚度模式计数:多行算多次(如「0.8黑色」+「1.0」算 2 次)
+            thickness_pattern = sum(
+                len(_thickness_pat.findall(l)) for l in lines)
+            return (thickness_pattern, n_lines, total_chars, prefix_bonus)
 
-        best_score = (-1, -1, -1)
+        best_score = (-1, -1, -1, -1)
         best_idx = -1
         for idx, (lines, confs) in enumerate(passes):
             s = score(lines)
@@ -2000,6 +2250,10 @@ class PaddleOCREngine(BaseOCREngine):
                     # 三遍 OCR 整体取优:按 (line_count, total_chars, prefix_bonus)
                     # 打分,同分时原图胜(更保守)。
                     # 详见 memory: ocr-handwritten-paddleocr-fallback-2026-09-02
+                    # 【2026-09-14】打分首键加 thickness_pattern(数字.数字),让擦除图
+                    # 修对的 0.8 厚度压过原图 928 错读;附行级修补把 orig 品名行拼回去
+                    # (擦除图常把品名前缀 LB 一并擦掉,见 test_redstamp_thickness_pattern_pick
+                    # + extract_text_with_conf 同款分支)。
                     orig_lines, orig_confs = self._collect(ocr.ocr(img_np, cls=True))
                     pre = _preprocess_for_kind(img_np, kind)
                     pre_lines, pre_confs = self._collect(ocr.ocr(pre, cls=True))
@@ -2010,6 +2264,23 @@ class PaddleOCREngine(BaseOCREngine):
                         (pre_lines, pre_confs),
                         (sharp_lines, sharp_confs),
                     ])
+                    # 行级修补:winner 含厚度但首行短于 orig → 从 orig 借首行
+                    # 必须与 extract_text_with_conf 的 KIND_REDSTAMP 分支严格同构。
+                    # 判定:winner 首行不是 orig 首行的子串(说明品名前缀 LB 等被擦除)。
+                    if lines and orig_lines and lines is not orig_lines:
+                        import re as _re_fix
+                        winner_has_thickness = any(
+                            _re_fix.search(r'\d+\.\d+', _l) for _l in lines)
+                        orig_first = orig_lines[0]
+                        winner_first = lines[0] if lines else ''
+                        # winner 首行不是 orig 首行的子串 → 修补(借 orig 首行)
+                        if (winner_has_thickness
+                                and winner_first
+                                and orig_first not in winner_first
+                                and orig_first != winner_first):
+                            # 把 orig 首行替换 winner 首行,保留 winner 其它行(含厚度)
+                            lines = [orig_first] + [
+                                _l for _l in lines if _l != winner_first]
                 else:
                     pre = _preprocess_for_kind(img_np, kind)
                     lines, _confs = self._collect(ocr.ocr(pre, cls=True))
@@ -2101,6 +2372,31 @@ class PaddleOCREngine(BaseOCREngine):
                         (pre_lines, pre_confs),
                         (sharp_lines, sharp_confs),
                     ])
+                    # 【2026-09-14】行级修补:擦除/锐化图常把品名前缀(LB 等)一并擦掉,
+                    # 而原图保留了完整品名行;打分函数只择一 → winner 含厚度但缺品名。
+                    # 修补规则:winner 含 数字.数字 厚度行 + 首行短于 orig 最长行 ≥3 字符
+                    # → 用 orig 最长行(通常是品名)替换 winner 首行。
+                    # 与 extract_text 的 KIND_REDSTAMP 分支严格同构(见对应注释)。
+                    if lines and orig_lines and lines is not orig_lines:
+                        import re as _re_fix
+                        winner_has_thickness = any(
+                            _re_fix.search(r'\d+\.\d+', _l) for _l in lines)
+                        orig_first = orig_lines[0]
+                        winner_first = lines[0] if lines else ''
+                        # winner 首行不是 orig 首行子串 → 修补(借 orig 首行)
+                        if (winner_has_thickness
+                                and winner_first
+                                and orig_first not in winner_first
+                                and orig_first != winner_first):
+                            lines = [orig_first] + [
+                                _l for _l in lines if _l != winner_first]
+                            # confs 同步:借用 orig 首行置信度,其余用 winner 原置信度
+                            orig_first_conf = (orig_confs[0]
+                                               if orig_confs else 0.95)
+                            tail_confs = confs[1:] if len(confs) > 1 else []
+                            confs = [orig_first_conf] + tail_confs
+                            if len(confs) != len(lines):
+                                confs = [0.95] * len(lines)
                 else:
                     pre = _preprocess_for_kind(img_np, kind)
                     lines, confs = self._collect(ocr.ocr(pre, cls=True))
@@ -2182,11 +2478,14 @@ class DeepSeekEngine(BaseOCREngine):
     API_KEY = os.environ.get('DEEPSEEK_API_KEY', '')
     BASE_URL = 'https://api.deepseek.com/v1'
     MODEL = 'deepseek-v4-flash'  # 当前活跃;v4-flash 比 v4-pro 便宜约 10 倍,纯文本结构化够用
-    MAX_TOKENS = 8000
+    MAX_TOKENS = 24000  # 【2026-09-17】从 12000 加倍到 24000,跟 MoonshotEngine 对齐。
+    # reasoning token 长度对同图随机波动,12K 仍偶发 finish_reason='length',24K 留 2x 余量。
+    # 同步 TIMEOUT 60→120(见下)。
     # 【2026-09-02】30s 太短 — 长 prompt(3000+ chars 注入自适应提示词)在高峰时段
-    # 偶发响应超过 30s 触发 ReadTimeout。日志实证(image 3832 在 18:20-18:21 连续
-    # 3 次均恰好 30.91-30.96s 失败)。调到 60s 给长 prompt 留 2 倍冗余。
-    TIMEOUT = 60
+    # 偶发响应超过 30s 触发 ReadTimeout。调到 60s 给长 prompt 留 2 倍冗余。
+    # 【2026-09-17】MAX_TOKENS 翻倍后,reasoning 用满 24K token 在慢网络下可能跑 90s+,
+    # 60s 必超时 ReadTimeout。从 60 翻倍到 120 留 2 倍冗余。
+    TIMEOUT = 120
 
     STRUCT_PROMPT = (
         '你是一个商品信息提取助手。以下是从出货单/送货单/装车单图片中 OCR 识别出的文字，'
@@ -2213,6 +2512,26 @@ class DeepSeekEngine(BaseOCREngine):
         '  - OCR 中存在多个候选结果时要合并互补信息，不要用较短的候选覆盖已经识别出的更长、更完整的候选。\n\n'
         '  - 订单表格按【OCR行】提供；每一行的文字按图片从左到右排列，表格空白单元格仍要保留位置，不能把上一行或下一行的同名列串过来。\n'
         '  - 单位、备注等单元格没有识别到文字时输出空字符串，不能根据上下文猜填；品名/规格/数量也必须按表头和行列位置分别提取。\n\n'
+        '════════════════════════════════════════\n'
+        '【关键规则 — 表格行严格按「行号」列对齐（防止品名/规格/数量串行）】\n'
+        '════════════════════════════════════════\n'
+        '订单单据每一行商品有唯一的"行号"（1、2、3…）。OCR 已经把每个文字块的 (x, y) 坐标保留下来，'
+        '并按 Y 聚类成行，"OCR第N行：……" 中的 N 就是行号。\n'
+        '必须严格按以下对齐规则（违反会导致品名+规格+数量串行，例如把第一行的"纯胶"标错到第二行的"3504"）：\n'
+        '  1) **同行的字段才属于同一商品**。商品行结构："行号 + 商品全名 + 规格 + 单位 + 数量 + 备注"。\n'
+        '     识别一行时只取同一 OCR 行内的文字，不能跨行拼接。\n'
+        '  2) **行号列只读，不是商品字段**。"1"、"2"、"3" 是行号，绝对不能当 quantity 或 specification。\n'
+        '  3) **数量与品名不能错配**。OCR 已按 Y 把同一行所有文字放在一起："纯胶 1.2黑软纯胶 码 3504 96支" 是完整一行。\n'
+        '     如果 OCR 第 2 行是 "三文治 1.0黑双 码 2001 58支"，那 2001 是三文治的数量，不是纯胶的。\n'
+        '  4) **校验兜底**：每条 items[i].quantity 必须与该行 OCR 中的数字字段一致。\n'
+        '     如果 LLM 输出的 quantity 与该行 OCR 数字不匹配 → 立刻从 OCR 行重读修正。\n'
+        '  5) **空白单元格不猜填**：某行 OCR 中"数量"位置无数字 → quantity 填 "1"，备注说明缺失，不要从其他行借数字。\n'
+        '  6) **2026-09-18 强化：相邻行同数字禁止互换**。OCR 经常出现 2~4 行 "环保三文治 + 1.0黑双 / 0.8黑双 / 0.6黑双 + 194/242.5/727.5" 这种相邻行的数字排列；\n'
+        '     **绝对不允许把相邻两行的数字互换**——例如把第 2 行的"1.0黑双" 配成第 3 行的数字 242.5。\n'
+        '     数字归属该行的依据是它在该 OCR 行内**实际出现的字符串**,而不是它在全部 OCR 中的位置。\n'
+        '  7) **2026-09-18 强化：双数字配对检查**。相邻两行的数字如果长度、形态相近（如 "194" vs "242.5" 都是 3 位 y 数），'
+        '必须在 items 输出前**逐条**回答 "OCR 第 N 行的所有数字按出现顺序是: [列表]",然后按这个列表直接配对。\n'
+        '     不要在脑子里"看着相近"自动交换。\n\n'
         '单位标准化规则：\n'
         '  "支"/"PCS"/"pc"/"个"/"只" → "支"\n'
         '  "码"/"y"/"Y"/"YDS" → "y"\n'
@@ -2623,6 +2942,13 @@ class DeepSeekEngine(BaseOCREngine):
         (这些 SDK 标识头会让 DeepSeek governor 模块误判为异常流量,返回
         'Authentication Fails (governor)'。curl 直接打 200,openai 库 401)。
 
+        2026-09-17 改造:解析前显式检查 finish_reason='length',抛
+        DeepSeekResponseTruncated(RuntimeError 子类),让上层
+        ocr_pipeline.classify 把它当作"deepseek 失败 → fallback 本地 fuzzy",
+        而不是含糊的 APIError('DeepSeek 返回非 JSON: ...')。该路径之前的
+        APIError 调用缺 request= 参数,会再抛 TypeError(实测 2026-09-17
+        log/202609/ocr-2026-09-17.log:155-158),走不到 fallback。
+
         multi=True  → expect list[{record_id, match_status, reason}]
         multi=False → expect {match_status, reason} 或 [{...}](单 record 容错)
         """
@@ -2668,17 +2994,42 @@ class DeepSeekEngine(BaseOCREngine):
             raise openai.APIConnectionError(
                 message=f'无法连接 DeepSeek 服务: {type(e).__name__}: {e}',
                 request=e.request) from e
+        # ── finish_reason 必须在解析 JSON 前显式检查:length 表示 max_tokens 用尽,
+        # JSON 还没写完,json.loads 会抛 JSONDecodeError 而非真正的"格式异常"。
+        # 抛专用异常,让上层 fallback 路径能区分"截断"和"格式错"。
+        finish_reason = ''
+        try:
+            finish_reason = (data.get('choices') or [{}])[0].get('finish_reason', '') or ''
+        except (KeyError, IndexError, TypeError, AttributeError):
+            finish_reason = ''
+        if finish_reason == 'length':
+            # 【2026-09-17】reasoning token 经常吃光 budget(JSON 还没写),
+            # 截断时 raw 多半是半截 JSON 或空串 → 一律按截断处理。
+            logger.warning(
+                'DeepSeek 响应被截断(max_tokens=%s, multi=%s, prompt_chars=%s)',
+                self.MAX_TOKENS, multi, len(prompt_text))
+            raise DeepSeekResponseTruncated(
+                f'DeepSeek 响应被截断(max_tokens={self.MAX_TOKENS}, '
+                f'prompt_chars={len(prompt_text)}, multi={multi})')
         raw = ''
         try:
-            raw = data['choices'][0]['message']['content'].strip()
-        except (KeyError, IndexError, TypeError) as e:
-            raise openai.APIError(f'DeepSeek 响应结构异常: {data}') from e
+            raw = (data.get('choices') or [{}])[0].get('message', {}).get('content', '') or ''
+            raw = raw.strip()
+        except (KeyError, IndexError, TypeError, AttributeError) as e:
+            # 响应结构异常(openai.APIError 必须传 request=,此处无原生 request 对象,
+            # 改用我们的专用异常透传给上层)
+            raise DeepSeekResponseTruncated(
+                f'DeepSeek 响应结构异常: {str(e)[:200]}') from e
         raw = re.sub(r'^\s*```[a-zA-Z]*\s*\n?', '', raw)
         raw = re.sub(r'\n?\s*```\s*$', '', raw).strip()
         try:
             parsed = json.loads(raw)
         except json.JSONDecodeError as e:
-            raise openai.APIError(f'DeepSeek 返回非 JSON: {raw[:200]}') from e
+            # 仍有可能 finish_reason='stop' 但 content 是坏 JSON(罕见,可能是模型返回了
+            # 中文逗号 / 前言文本)。同样按 truncated 处理,让上层 fallback 本地 fuzzy。
+            logger.warning('DeepSeek 返回非 JSON (finish_reason=%s): %s', finish_reason, raw[:200])
+            raise DeepSeekResponseTruncated(
+                f'DeepSeek 返回非 JSON(finish_reason={finish_reason}): {raw[:200]}') from e
         if multi:
             return parsed if isinstance(parsed, list) else parsed.get('results', [])
         return parsed
@@ -2687,9 +3038,25 @@ class DeepSeekEngine(BaseOCREngine):
         self._ocr_engine = PaddleOCREngine()
 
     def _ocr_image(self, image_bytes):
-        """调用 PaddleOCR 提取纯文本行，并保留表格的行列顺序。"""
+        """调用 PaddleOCR 提取纯文本行,并保留表格的行列顺序。
+
+        2026-09-18 路径分离:本函数**只服务订单截图/扫描件** OCR(出货单/送货单/
+        装车单 等有表格线单据,文字清晰、可能压缩/截图)。调用 PaddleOCR 默认
+        实例 _ocr + Y 自适应聚类(默认 _adaptive_y_threshold clamp [5, 20])。
+
+        **不要**走 `KIND_FORM_NOLINES` / `KIND_GLARE` / `KIND_REDSTAMP` 分支 ——
+        那三条是给**实物商品标签**(模糊/反光/红章)OCR 用的(见 PaddleOCREngine.
+        extract_text kind 参数)。订单截图是清晰印刷体,激进阈值会过度切分;实物标签
+        的预处理(CLAHE/glare 抑制/redstamp 擦除)会损坏清晰截图的细节。
+
+        历史回滚:曾改走 KIND_FORM_NOLINES(2026-09-18 初版修复),装车单是有表格线
+        的多行单据,form_nolines 固定 4 行切分会把 5+ 行表格压成 4 段,反而更乱。
+        回滚到默认 _ocr + Y 聚类,并把 clamp 从 [10, 35] 收紧到 [5, 20](装车单行距
+        8-12 px 太密集,原下界 10 会合并相邻行)。
+        """
         self._ocr_engine._ensure_model()
         resized = self._ocr_engine._resize_if_needed(image_bytes)
+        # 用默认 _ocr 实例,不用 _wrinkle_ocr(那是给实物标签的激进实例)
         result = self._ocr_engine._ocr.ocr(resized, cls=True)
         lines, _ = self._ocr_engine._collect(result)
         return self._format_table_rows(result, lines)
@@ -2755,13 +3122,26 @@ class DeepSeekEngine(BaseOCREngine):
             )
             finish_reason = response.choices[0].finish_reason
             raw = response.choices[0].message.content.strip()
-            # finish_reason='length' 表示 max_tokens 用尽 → 响应被截断,通常是 reasoning
-            # token 把 budget 吃完,JSON 还没写完。明确告知用户,而不是说「格式无法解析」
+            # 【2026-09-17】finish_reason='length' 表示 max_tokens 用尽 → 响应被截断。
+            # 真因是 DeepSeek v4-flash 内部 chain-of-thought reasoning 把 budget 吃光,
+            # 即使只有 1-2 行商品也会截断(reasoning 长度对同图随机波动,09-16/09-17
+            # 日志实证:同 7KB 图 30s 成功 / 43s 截断交替)。不要告诉用户去拆单/
+            # 删备注——那是无效操作,只会增加挫败感。
             if finish_reason == 'length':
+                # 【2026-09-17】DeepSeek 截断时自动 fallback 到 MiniMax 多模态引擎重试 1 次。
+                # 截断真因是 DeepSeek v4-flash 内部 chain-of-thought reasoning 把 budget
+                # 吃光(reasoning 长度对同图随机波动,见 09-16/09-17 日志)。换不同推理模型
+                # 有合理概率成功。仅在 MiniMax API key 已配置 + 同图重试 1 次 — 避免
+                # 对用户隐藏问题(成功路径会带 fallback_minimax=True 标记)。
+                fallback = _try_minimax_fallback(image_bytes, filename)
+                if fallback is not None:
+                    return fallback
                 return {
                     'success': False,
-                    'error': 'DeepSeek 响应被截断(订单行数过多或备注过长)',
-                    'hint': '建议:1) 拆分订单图片(每张 ≤ 10 行);2) 简化商品行的备注文字;3) 重试一次'
+                    'error': 'DeepSeek 响应被截断(AI 推理超出预算)',
+                    'hint': '真因是模型内部推理消耗 token,与订单行数/备注长度无关。'
+                            '建议:1) 直接重试(下次推理可能更短);2) 切换到 Moonshot 或 PaddleOCR 引擎;'
+                            '3) 换张更清晰的图片(模糊图会迫使模型推理更久)'
                 }
             # stop 但 content 为空:模型返回了空响应(罕见,可能是 prompt 触发)
             if not raw:
@@ -2795,11 +3175,13 @@ class DeepSeekEngine(BaseOCREngine):
                     'hint': '请重试或切换到其他引擎'
                 }
             items, _removed = _filter_summary_items(items)
+            # 2026-09-18:把 OCR 原文一起回前端,让人工核对(防 DeepSeek 串行错配)
             return {
                 'success': True,
                 'items': items,
                 'doc_number': doc_number,
                 'customer_name': customer_name,
+                'ocr_text': ocr_text,
             }
 
         except ImportError:
@@ -2846,21 +3228,443 @@ class DeepSeekEngine(BaseOCREngine):
                 'hint': '请重试或切换到其他引擎'
             }
 
+    # ── 自由文本 → 结构化明细行(2026-09-22 入库页新 tab)───────────────────────
+    # 场景:用户粘贴/手敲「普通加面杂胶: 0.6白软加面 53支+30码」等自由格式,
+    # 跳 PaddleOCR,直接用 DeepSeek 解析成 {product_name, specification,
+    # quantity, unit, remark} 行结构。复用 STRUCT_PROMPT + 码基产品对齐规则 +
+    # _filter_summary_items,输出 schema 与图片路径完全对齐,前端可共用同一套
+    # #aiResultBody 编辑/添加流程。
+    TEXT_STRUCT_PROMPT = (
+        '你是一个商品信息提取助手。用户会用自由格式(可能含中文冒号/英文冒号/'
+        '换行/数量+单位组合等)描述一批商品,你需要把它们解析成结构化的明细行。\n\n'
+        '【常见输入形态(参考)】\n'
+        '- 「普通加面杂胶: 0.6白软加面 53支+30码」 — 一段描述,品名和规格都包含在内\n'
+        '- 「环保杂胶 1.2米 20支 / 软性纯胶 0.8mm 15支」 — 多行,分隔符多样\n'
+        '- 「PVC桌布 1.2×1.8m 50支」 — 标准 品名/规格/数量 格式\n'
+        '- 「0.6白软加面 53支+30码」 — 只有规格+数量\n'
+        '- 「川盛皮纺: 普通加面杂胶 0.6白软加面 53支+30码 / 软性纯胶 0.8黑中软纯胶 80支」 — 抬头是客户,后面跟多个商品\n\n'
+        '【数量 + 单位 + 备注的解析规则】\n'
+        '- 「53支+30码」型:quantity=53,unit="支",remark="30码"(多余单位挪到备注)\n'
+        '- 「53支 30码」型:同上,空格或+都视为分隔\n'
+        '- 「30码」型(没支数):quantity=30,unit="y",remark=""\n'
+        '- 「50支」型(没码数):quantity=50,unit="支",remark=""\n'
+        '- 「100」型(纯数字):unit 默认为 "支",若数字明显是码(>30 且商品为杂胶/纯胶等码基)改 unit="y"\n\n'
+        '【品名/规格拆分规则】\n'
+        '- 如果品名整体带「:」或「：」,冒号前是品名族(如"普通加面杂胶"),冒号后是规格\n'
+        '- 没冒号时,按空格拆 — 第一段通常是品名(如「环保杂胶」「软性纯胶」「PVC桌布」),'
+        '中间带数字/字母/单位的(如「0.6白软加面」「1.2×1.8m」「B白300」)归为规格\n'
+        '- 同义前缀(普通/定制/环保/加面/双面/单面)归到品名段\n\n'
+        '返回 JSON 对象,包含以下字段:\n'
+        '- doc_number: 单据编号 — 自由文本里若显式出现"订单号/单据编号/单号/编号/Order No"等,'
+        '提取冒号后/空格后的内容;无则空字符串\n'
+        '- customer_name: 客户名称 — 文本开头/标题位置的"川盛皮纺""ABC Co."等单位名;'
+        '**只取名称本身,不要把"客户/Customer/客户单位"等字段标签算进去**。'
+        '若不确定,空字符串。\n'
+        '- items: 商品列表数组,每条商品:\n'
+        '  - product_name: 商品名称(必须)\n'
+        '  - specification: 规格型号(必须,无则空字符串)\n'
+        '  - quantity: 数量(必须,字符串形式的数字如 "53" 或 "30")\n'
+        '  - unit: 单位(必须,候选 "支"/"y"/"kg"/"桶"/"张"/"件"/"箱"/"卷"/"块"/"令"/"斤")\n'
+        '  - remark: 备注(必须填写!剩余的码数、颜色、规格后缀等放进来,无则空字符串)\n\n'
+        '════════════════════════════════════════\n'
+        '【关键规则 — 严禁编造】\n'
+        '════════════════════════════════════════\n'
+        '- 文本里没有的商品不要瞎填,客户名和单据号不确定就空字符串\n'
+        '- 数量必须是文本里出现过的数字,不要根据常识猜\n'
+        '- 多个商品用换行/斜杠/分号/空格分隔时,按分隔符逐个提取\n'
+        '- 只返回 JSON,不要任何额外解释或 markdown 围栏\n\n'
+        '════════════════════════════════════════\n'
+        '【数据一致性硬约束(2026-09-22 用户要求)】\n'
+        '════════════════════════════════════════\n'
+        '- **每个返回的 product_name + specification 组合,必须在下方「候选产品清单」里能找到贴近的项**。\n'
+        '  如果找不到,改用最贴近的候选名(可以贴边但不脱离清单);\n'
+        '  如果候选清单为空(没召回任何商品),才允许按文本自由生成。\n'
+        '- 不要发明不存在的品名前缀(如「7P」「普通」「普通环保」等业务类别前缀,'
+        '必须是商品表里真实存在的);不要发明不存在的规格(如「0.99米」「ABC-123」等)。\n'
+        '- 口语化输入(如「白杂胶」「黑皮糠纸」「环保在胶」)→ 映射到候选里的标准名/规格,'
+        '不要直接照抄口语原文。\n\n'
+    )
+
+    def recognize_text(self, text):
+        """直接接收用户输入的自由文本,DeepSeek 解析为结构化明细行。
+
+        输入: 自由文本字符串(可能含多行/多种分隔符)
+        返回: 与 recognize() 一致的 dict 结构
+            success=True:  {success, items, doc_number, customer_name, ocr_text: <原始文本>}
+            success=False: {success=False, error, hint}
+        """
+        if not self.API_KEY or self.API_KEY.startswith('sk-your-'):
+            return {
+                'success': False,
+                'error': 'DeepSeek API key 未配置',
+                'hint': '请在 .env 中设置 DEEPSEEK_API_KEY 后重启应用'
+            }
+        text = (text or '').strip()
+        if not text:
+            return {'success': False, 'error': '输入文本为空', 'hint': '请先粘贴或输入商品描述'}
+        # 截断极端输入(防 DeepSeek reasoning 把 budget 吃光,跟图片路径同样的根因)
+        max_chars = 4000
+        truncated = False
+        if len(text) > max_chars:
+            text = text[:max_chars]
+            truncated = True
+
+        try:
+            # ── 候选产品预过滤(2026-09-22)─────────────────────────
+            # 从输入文本抽中文关键词 → LIKE 查 product 表 → 取 top 15 行注入 prompt,
+            # 让 LLM 就近匹配标准名/规格,避免自由发挥出"0.6白软加面"等近似错别字。
+            # 候选清单为空时(纯数字/英文文本),L 退化为原「无候选」模式自由生成。
+            candidates = _select_relevant_products(text)
+            candidate_rule = ''
+            if candidates:
+                lines = ['  - ' + (pn or '(无)') + ' | ' + (sp or '(无)')
+                         for pn, sp in candidates]
+                candidate_rule = (
+                    '\n════════════════════════════════════════\n'
+                    f'【候选产品清单 — 共 {len(candidates)} 项 / 全文 1145 件】\n'
+                    '════════════════════════════════════════\n'
+                    '以下是从商品表按文本关键词预筛的标准品名/规格,**优先从这里挑选**,'
+                    ' 避免拼写/标点/前后空格等近似错别字。如果某行商品不在清单里才允许自由生成。\n'
+                    '格式:「品名 | 规格」\n'
+                    + '\n'.join(lines) + '\n\n'
+                )
+
+            # 注入码基产品清单(与图片路径完全一致,避免 quantity/unit 颠倒)
+            yard_names = _load_yard_product_names()
+            yard_rule = ''
+            if yard_names:
+                yard_rule = (
+                    '\n════════════════════════════════════════\n'
+                    '【关键规则 — 码基产品字段对齐(必须遵守)】\n'
+                    '════════════════════════════════════════\n'
+                    '以下产品按码(y)计量,字段必须这样填:\n'
+                    '  quantity = 码数(若文本里同时出现码数和支数,码数进 quantity)\n'
+                    '  unit = "y"\n'
+                    '  remark = 支数(形如"45支")\n'
+                    '即:若文本同时出现"45支"和码数(如 1642.5),码数进 quantity、unit 填 y、"45支"进 remark。\n'
+                    '码基产品清单: ' + '、'.join(yard_names) + '\n\n'
+                )
+            # ── 2026-09-22 用户累积的「口语→结构化」补充提示词(全局注入)───
+            # 见 _compose_user_supplements() 的设计:用户加一条 → 后续别再犯。
+            user_supplements = _compose_user_supplements()
+            supplements = ''  # 占位 — 未来扩展点(动态生成的提示词),现阶段为空
+            prompt = self.TEXT_STRUCT_PROMPT + candidate_rule + yard_rule + supplements + user_supplements + '用户输入的文本如下：\n' + text
+            client = openai.OpenAI(api_key=self.API_KEY, base_url=self.BASE_URL)
+            response = client.chat.completions.create(
+                model=self.MODEL,
+                messages=[{'role': 'user', 'content': prompt}],
+                max_tokens=self.MAX_TOKENS,
+                timeout=self.TIMEOUT,
+                response_format={'type': 'json_object'},
+            )
+            finish_reason = response.choices[0].finish_reason
+            raw = response.choices[0].message.content.strip()
+            if finish_reason == 'length':
+                return {
+                    'success': False,
+                    'error': 'DeepSeek 响应被截断(AI 推理超出预算)',
+                    'hint': '真因是模型内部推理消耗 token,与文本长度无关。建议:1) 直接重试;'
+                            '2) 把文本拆成两段分别解析。'
+                }
+            if not raw:
+                return {
+                    'success': False,
+                    'error': 'DeepSeek 返回内容为空',
+                    'hint': '可能原因:输入文本过长。建议重试或把文本拆短'
+                }
+            raw = re.sub(r'^\s*```[a-zA-Z]*\s*\n?', '', raw)
+            raw = re.sub(r'\n?\s*```\s*$', '', raw)
+            raw = raw.strip()
+            logger.info("DeepSeek recognize_text raw (first 500 chars): %s", raw[:500])
+            data = json.loads(raw)
+
+            if isinstance(data, list):
+                items = data
+                doc_number = ''
+                customer_name = ''
+            else:
+                items = data.get('items', [])
+                doc_number = data.get('doc_number', '') or ''
+                customer_name = data.get('customer_name', '') or ''
+
+            if not isinstance(items, list):
+                return {
+                    'success': False,
+                    'error': 'DeepSeek 返回格式异常',
+                    'hint': '请重试或把文本改写得更结构化(如每行一个商品)'
+                }
+            # 复用图片路径的汇总行安全网(防止 LLM 把"合计/N行"当成商品行)
+            items, _removed = _filter_summary_items(items)
+            result = {
+                'success': True,
+                'items': items,
+                'doc_number': doc_number,
+                'customer_name': customer_name,
+                'ocr_text': text,  # 跟图片路径保持同名,前端统一处理
+            }
+            if truncated:
+                result['truncated'] = True
+                result['hint'] = f'输入文本超过 {max_chars} 字符,已截断前 {max_chars} 字符解析'
+            return result
+        except ImportError:
+            return {
+                'success': False,
+                'error': 'openai 包未安装',
+                'hint': '请运行: pip install openai'
+            }
+        except openai.AuthenticationError:
+            return {
+                'success': False,
+                'error': 'DeepSeek API key 失效(401)',
+                'hint': '请检查 .env 中的 DEEPSEEK_API_KEY 是否正确'
+            }
+        except openai.APIConnectionError:
+            return {
+                'success': False,
+                'error': '无法连接 DeepSeek 服务',
+                'hint': '请检查网络连接'
+            }
+        except openai.RateLimitError:
+            return {
+                'success': False,
+                'error': 'DeepSeek 调用频率过高(429)',
+                'hint': '请稍候几秒后重试'
+            }
+        except openai.APIStatusError as e:
+            return {
+                'success': False,
+                'error': f'DeepSeek 服务返回异常({e.status_code}){_api_error_detail(e)}',
+                'hint': '请根据错误信息检查请求参数,或检查 DeepSeek 平台状态'
+            }
+        except json.JSONDecodeError:
+            return {
+                'success': False,
+                'error': 'DeepSeek 返回格式无法解析',
+                'hint': '请重试,或把文本改写成"品名 规格 数量 单位"的标准格式'
+            }
+        except Exception as e:
+            logger.exception('DeepSeek recognize_text 失败: %s', e)
+            return {
+                'success': False,
+                'error': f'DeepSeek 解析失败:{type(e).__name__}',
+                'hint': '请重试'
+            }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# DeepSeek 截断 fallback 到 MiniMax 多模态(2026-09-17)
+# ═══════════════════════════════════════════════════════════════════
+
+def _try_minimax_fallback(image_bytes, filename):
+    """DeepSeek 截断时调 MiniMax 多模态重试 1 次。
+
+    返回 None 表示 fallback 不可用(无 key / MiniMax 也失败 / MiniMax 抛异常),
+    调用方继续走 DeepSeek 原报错 — MiniMax 是静默 fallback,其错误不该泄漏给用户。
+    返回 dict 表示 MiniMax 成功结果(已带 fallback_minimax=True 标记)。
+
+    仅当 MINIMAX_API_KEY 已配置时才启用 — 跟现有 DEEPSEEK_API_KEY 一致走 .env。
+
+    多模态路径:不传 PaddleOCR 文本,让 MiniMax-M3 直接看图。DeepSeek 已用
+    PaddleOCR 抽过一轮文本,但多模态模型看原图通常更准(09-17 决策)。
+    """
+    minimax_key = os.environ.get('MINIMAX_API_KEY', '').strip()
+    if not minimax_key or minimax_key.startswith('sk-your-'):
+        logger.info(
+            'DeepSeek 截断,但 MiniMax 未配置(MINIMAX_API_KEY 未设),跳过 fallback')
+        return None
+    try:
+        logger.info('DeepSeek 截断,fallback 到 MiniMax 多模态(图片 + OCR 文本)')
+        result = MiniMaxEngine().recognize(image_bytes, filename)
+        if not result.get('success'):
+            # MiniMax 也失败 → 不让 MiniMax 错误覆盖 DeepSeek 错误,返回 None
+            # 让上层继续走 DeepSeek 的"AI 推理超出预算"提示
+            logger.warning('MiniMax fallback 失败: %s', result.get('error', '?'))
+            return None
+        # 成功路径:加审计标记
+        result['fallback_minimax'] = True
+        result['original_engine'] = 'deepseek'
+        logger.info(
+            'MiniMax fallback 成功(items=%s, doc_number=%s)',
+            len(result.get('items') or []),
+            result.get('doc_number') or '')
+        return result
+    except Exception as e:
+        # fallback 自身炸了不能影响主流程,只 log
+        logger.exception('MiniMax fallback 异常: %s', e)
+        return None
+
+
+# ═══════════════════════════════════════════════════════════════════
+# MiniMax 云端多模态引擎(2026-09-17,DeepSeek 截断 fallback + 可作主引擎)
+# ═══════════════════════════════════════════════════════════════════
+
+class MiniMaxEngine(BaseOCREngine):
+    """MiniMax M3 多模态视觉引擎(国内 OpenAI 兼容 API)。
+
+    用途:
+    - 主路径:整单 / 入库 / 装柜 ai-recognize 选 MiniMax 作为识别引擎
+    - fallback 路径:DeepSeek 截断时自动调 MiniMax 重试 1 次(见 _try_minimax_fallback)
+
+    文档:https://platform.minimax.cn/docs/api-reference/text-chat-openai
+    端点:https://api.minimaxi.com/v1(国内 OpenAI 兼容)
+    模型:MiniMax-M3(支持 image_url 多模态输入,JPEG/PNG/GIF/WEBP,最大 10MB)
+
+    配置:在 .env 写入 MINIMAX_API_KEY=sk-api-...,与 DEEPSEEK_API_KEY 一致不入 git。
+    """
+
+    API_KEY = os.environ.get('MINIMAX_API_KEY', '')
+    BASE_URL = 'https://api.minimaxi.com/v1'
+    MODEL = 'MiniMax-M3'
+    MAX_TOKENS = 24000  # 与 DeepSeekEngine / MoonshotEngine 对齐(2026-09-17 加倍)
+    TEMPERATURE = 1  # M3 推荐 1,见官方 quickstart
+    TIMEOUT = 120  # 与 DeepSeekEngine 对齐(2026-09-17 加倍)
+
+    # 复用 DeepSeekEngine 的 STRUCT_PROMPT — 提取规则完全相同,只是推理模型不同
+    STRUCT_PROMPT = DeepSeekEngine.STRUCT_PROMPT
+
+    def recognize(self, image_bytes, filename=''):
+        if not self.API_KEY or self.API_KEY.startswith('sk-your-'):
+            return {
+                'success': False,
+                'error': 'MiniMax API key 未配置',
+                'hint': '请在 .env 中设置 MINIMAX_API_KEY 后重启应用'
+            }
+
+        # MiniMax 跟 Moonshot 一样支持多模态:image_url + text 一起发。
+        # 不走 PaddleOCR(避免重复 OCR),让模型直接看图 + 我们的提示词。
+        # PaddleOCR 的 OCR 文本(若 DeepSeek fallback 场景下传入)暂时丢弃 — 多模态
+        # 模型直接看图准确率更高。DeepSeek fallback 调用方传进来的 ocr_text 参数
+        # 仅作日志/debug 用。
+        import base64
+        b64 = base64.b64encode(image_bytes).decode('ascii')
+        # data URL 前缀按文件扩展名猜,MiniMax 文档说支持 JPEG/PNG/GIF/WEBP
+        ext = (filename.rsplit('.', 1)[-1] if '.' in filename else 'png').lower()
+        mime = {'jpg': 'jpeg', 'jpeg': 'jpeg', 'png': 'png',
+                'gif': 'gif', 'webp': 'webp'}.get(ext, 'png')
+        data_url = f'data:image/{mime};base64,{b64}'
+
+        # 注入码基产品清单(同 DeepSeekEngine.recognize)
+        yard_names = _load_yard_product_names()
+        yard_rule = ''
+        if yard_names:
+            yard_rule = (
+                '\n════════════════════════════════════════\n'
+                '【关键规则 — 码基产品字段对齐(必须遵守)】\n'
+                '════════════════════════════════════════\n'
+                '以下产品按码(y)计量,字段必须这样填:\n'
+                '  quantity = 码数(图片里的实际码长,数字,如 1642.5)\n'
+                '  unit = "y"\n'
+                '  remark = 支数(形如"45支")\n'
+                '即:若图片同时出现"45支"和码数(如 1642.5),码数进 quantity、unit 填 y、"45支"进 remark。\n'
+                '码基产品清单: ' + '、'.join(yard_names) + '\n\n'
+            )
+        prompt = self.STRUCT_PROMPT + yard_rule
+
+        try:
+            client = openai.OpenAI(api_key=self.API_KEY, base_url=self.BASE_URL)
+            response = client.chat.completions.create(
+                model=self.MODEL,
+                messages=[{
+                    'role': 'user',
+                    'content': [
+                        {'type': 'image_url', 'image_url': {'url': data_url}},
+                        {'type': 'text', 'text': prompt},
+                    ],
+                }],
+                max_tokens=self.MAX_TOKENS,
+                temperature=self.TEMPERATURE,
+                timeout=self.TIMEOUT,
+                response_format={'type': 'json_object'},
+            )
+            finish_reason = response.choices[0].finish_reason
+            raw = (response.choices[0].message.content or '').strip()
+            if finish_reason == 'length':
+                return {
+                    'success': False,
+                    'error': 'MiniMax 响应被截断(AI 推理超出预算)',
+                    'hint': '建议:1) 直接重试;2) 切换到 PaddleOCR 本地引擎'
+                }
+            if not raw:
+                return {
+                    'success': False,
+                    'error': 'MiniMax 返回内容为空',
+                    'hint': '可能原因:prompt 触发。建议重试或切换引擎'
+                }
+            raw = re.sub(r'^\s*```[a-zA-Z]*\s*\n?', '', raw)
+            raw = re.sub(r'\n?\s*```\s*$', '', raw).strip()
+            logger.info("MiniMax raw response (first 500 chars): %s", raw[:500])
+            data = json.loads(raw)
+
+            if isinstance(data, list):
+                items = data
+                doc_number = ''
+                customer_name = ''
+            else:
+                items = data.get('items', [])
+                doc_number = data.get('doc_number', '') or ''
+                customer_name = data.get('customer_name', '') or ''
+
+            if not isinstance(items, list):
+                return {
+                    'success': False,
+                    'error': 'MiniMax 返回格式异常',
+                    'hint': '请重试或切换到其他引擎'
+                }
+            items, _removed = _filter_summary_items(items)
+            return {
+                'success': True,
+                'items': items,
+                'doc_number': doc_number,
+                'customer_name': customer_name,
+            }
+        except openai.APIConnectionError as e:
+            return {
+                'success': False,
+                'error': f'MiniMax 连接失败:{type(e).__name__}',
+                'hint': '检查网络 / API key 是否正确'
+            }
+        except openai.RateLimitError:
+            return {
+                'success': False,
+                'error': 'MiniMax 调用频率过高（429）',
+                'hint': '请稍候几秒后重试'
+            }
+        except openai.APIStatusError as e:
+            return {
+                'success': False,
+                'error': f'MiniMax 服务返回异常（{getattr(e, "status_code", "?")}）',
+                'hint': '请根据错误信息检查请求参数,或检查 MiniMax 平台状态'
+            }
+        except json.JSONDecodeError:
+            return {
+                'success': False,
+                'error': 'MiniMax 返回格式无法解析',
+                'hint': '请重试或切换到其他引擎'
+            }
+        except Exception as e:
+            logger.exception('MiniMax 引擎失败: %s', e)
+            return {
+                'success': False,
+                'error': f'MiniMax 引擎失败:{type(e).__name__}',
+                'hint': '请重试或切换到其他引擎'
+            }
+
 
 # ═══════════════════════════════════════════════════════════════════
 # 引擎工厂
 # ═══════════════════════════════════════════════════════════════════
 
 _engine_cache = {}
-_VALID_ENGINES = ('moonshot', 'paddleocr', 'deepseek')
+_VALID_ENGINES = ('moonshot', 'paddleocr', 'deepseek', 'minimax')
 
 # 引擎 → 当前活跃模型(防回归参考表)
-# 维护原则:DeepSeek/Moonshot 偶尔下线旧模型,出现 400 + "model not found" 时来这里对照,
+# 维护原则:DeepSeek/Moonshot/MiniMax 偶尔下线旧模型,出现 400 + "model not found" 时来这里对照,
 # 到对应平台 docs 查最新清单后改对应引擎类的 MODEL 常量。
 _ACTIVE_MODELS = {
     'moonshot': 'kimi-k2.6',
     'deepseek': 'deepseek-v4-flash',  # v4-pro 备选,价格 10x
     'paddleocr': '(本地模型,无需 token)',
+    'minimax': 'MiniMax-M3',
 }
 
 
@@ -2881,7 +3685,7 @@ def get_ocr_engine(engine_name=None):
     if engine_name not in _VALID_ENGINES:
         raise ValueError(
             f'不支持的 OCR 引擎: {engine_name}，'
-            f'请使用 "moonshot"、"paddleocr" 或 "deepseek"'
+            f'请使用 "moonshot"、"paddleocr"、"deepseek" 或 "minimax"'
         )
 
     if engine_name not in _engine_cache:
@@ -2889,6 +3693,8 @@ def get_ocr_engine(engine_name=None):
             _engine_cache[engine_name] = MoonshotEngine()
         elif engine_name == 'deepseek':
             _engine_cache[engine_name] = DeepSeekEngine()
+        elif engine_name == 'minimax':  # 2026-09-17 新增,DeepSeek 截断 fallback
+            _engine_cache[engine_name] = MiniMaxEngine()
         else:
             try:
                 _engine_cache[engine_name] = PaddleOCREngine()

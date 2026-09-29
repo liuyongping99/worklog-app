@@ -197,6 +197,62 @@ def calc_hint(quantity_str, ypp, unit=None, remark=None):
     return ''
 
 
+def compute_total_yards_from_remark(remark, ypp, quantity_str=None):
+    """从备注(优先)或 quantity(兜底)算出总码数。
+
+    与 check_remark 共享同一套正则(* 形式 + 散码),逻辑等价于其内部
+    `expected = pieces * yards_per_piece + loose`,但返回数值供业务复用
+    (如「按 y 卖」商品入库智能文本添加自动归一化为码数合计)。
+
+    Args:
+        remark: 备注字符串(如 "10支+2码"、"3支*48.5y+2y"、"5支");允许为空
+        ypp:   该商品的 yards_per_piece(码/支);<=0 表示不适用
+        quantity_str: 数量字符串(可选)。当备注里没 X支 但 DeepSeek 给的
+                      quantity 是数字(支数)时,按 quantity × ypp 兜底算出总码数
+                      —— 处理「环保杂胶 1.2白硬加面 10」这种输入 DeepSeek
+                      不会主动把支+码写进 remark 的场景。
+
+    Returns:
+        float 总码数;无法解析返回 None(ypp 无效 / quantity 也不可用)。
+    """
+    if ypp <= 0:
+        return None
+    # 1) remark 路径:精确,带散码
+    if remark:
+        m_pieces = re.search(r'(\d+)支', remark)
+        if m_pieces:
+            pieces = int(m_pieces.group(1))
+            # 抓 * 形式(两种顺序都支持)
+            per_piece = None
+            m_mul1 = re.search(r'(\d+(?:\.\d+)?)\s*[yY码]\s*\*\s*(\d+)支', remark)
+            if m_mul1:
+                per_piece = float(m_mul1.group(1))
+            else:
+                m_mul2 = re.search(r'(\d+)支\s*\*\s*(\d+(?:\.\d+)?)\s*[yY码]', remark)
+                if m_mul2:
+                    per_piece = float(m_mul2.group(2))
+            # 把 * 形式整段抠掉,剩下 [+Yy / 裸 Yy] 才算散码
+            remark_no_mul = re.sub(
+                r'(\d+(?:\.\d+)?)\s*[yY码]\s*\*\s*(\d+)支', '', remark
+            )
+            remark_no_mul = re.sub(
+                r'(\d+)支\s*\*\s*(\d+(?:\.\d+)?)\s*[yY码]', '', remark_no_mul
+            )
+            loose = sum(
+                float(m) for m in re.findall(r'(\d+(?:\.\d+)?)[yY码]', remark_no_mul)
+            )
+            yards_per_piece = per_piece if per_piece is not None else ypp
+            return round(pieces * yards_per_piece + loose, 2)
+    # 2) quantity 兜底:把 quantity 当成「支数」,总码 = pieces × ypp
+    if quantity_str:
+        try:
+            qty = float(quantity_str)
+            return round(qty * ypp, 2)
+        except (ValueError, TypeError):
+            return None
+    return None
+
+
 def check_remark(remark, quantity_str, ypp):
     """校验备注里 "X支" + 散码是否与 quantity 一致。
 
@@ -418,15 +474,31 @@ def summarize_remarks(records):
     }
 
 
+# 2026-09-18: 桶装商品(白乳胶/喷胶/万能胶 等,unit='桶') 也需要清点核对,
+# 加进白名单后 quantity 即目标桶数;同时也是 placement_match 比对口径的基础。
+_COUNTABLE_UNITS = frozenset({'支', '令', '张', '桶'})
+
+
+def is_countable_unit(unit):
+    """单位是否可按 quantity 整数兜底作为 placement 期望值。
+
+    True ⇒ 该单位下,quantity 本身就是点数目标值(用于 compute_placement_expected_zhi 兜底)。
+    计数单位(支/桶/令/张)走 quantity;连续单位(kg/y/码) 不走(浮点计数无意义)。
+    """
+    return (unit or '').strip() in _COUNTABLE_UNITS
+
+
 def compute_placement_expected_zhi(remark, quantity_str, unit):
     """按 record 计算 placement 期望支数与是否有支目标。
 
-    规则(2026-09-03 placement 期望值兜底;2026-09-09 扩展到令/张):
+    规则(2026-09-03 placement 期望值兜底;2026-09-09 扩展到令/张;
+         2026-09-18 扩展到桶):
       1. 先按 remark 解析所有「X支」之和。
-      2. 若 remark 无「X支」且 unit in ('支','令','张'):
+      2. 若 remark 无「X支」且 unit 属于可数单位(支/令/张/桶):
            用 float(quantity_str) 兜底作为 expected_zhi, has_zhi=True。
            (quantity 解析失败或 ≤0 → 兜底失效, has_zhi=False。)
-           — 拷贝纸(令)/日本纸(张)的 quantity 本身就是点数目标值。
+           — 拷贝纸(令)/日本纸(张)/桶装胶水(银/白乳胶 等) 的 quantity
+              本身就是点数目标值。
       3. 否则沿用 remark 解析结果。
 
     Returns:
@@ -447,9 +519,9 @@ def compute_placement_expected_zhi(remark, quantity_str, unit):
     remark_zhi = sum(int(x.group(1)) for x in zhi_m)
     has_remark_zhi = len(zhi_m) > 0
 
-    # 2. 兜底:unit in ('支','令','张') 且备注无支数 → 用 quantity
-    #    (拷贝纸=令 / 日本纸=张,quantity 即目标令/张数)
-    if not has_remark_zhi and (unit or '').strip() in ('支', '令', '张'):
+    # 2. 兜底:unit 属于可数单位 且备注无支数 → 用 quantity
+    #    (拷贝纸=令 / 日本纸=张 / 桶装胶水=桶,quantity 即清点目标值)
+    if not has_remark_zhi and is_countable_unit(unit):
         try:
             qty_val = float(qty_str)
         except (ValueError, TypeError):

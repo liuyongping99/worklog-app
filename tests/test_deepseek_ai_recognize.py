@@ -47,9 +47,21 @@ class DeepSeekRecognizeTruncationTests(unittest.TestCase):
         from blueprints.ocr_engine import DeepSeekEngine
         self._api_key_patch = mock.patch.object(DeepSeekEngine, 'API_KEY', 'sk-test-fake-key')
         self._api_key_patch.start()
+        # 【2026-09-17】MiniMax fallback 默认禁用 — 测试场景是"DeepSeek 截断后
+        # 的标准行为",fallback 由独立测试覆盖。环境变量里可能真有 MINIMAX_API_KEY
+        # (用户自己配过),必须显式置空才能跑通回归。
+        import os as _os
+        self._orig_minimax_key = _os.environ.get('MINIMAX_API_KEY')
+        _os.environ['MINIMAX_API_KEY'] = ''
 
     def tearDown(self):
         self._api_key_patch.stop()
+        # 还原环境变量
+        import os as _os
+        if self._orig_minimax_key is None:
+            _os.environ.pop('MINIMAX_API_KEY', None)
+        else:
+            _os.environ['MINIMAX_API_KEY'] = self._orig_minimax_key
 
     def _call_recognize(self, mock_openai_class, content='', finish_reason='stop'):
         """调 DeepSeekEngine.recognize, mock openai.OpenAI。"""
@@ -86,6 +98,15 @@ class DeepSeekRecognizeTruncationTests(unittest.TestCase):
             f'应明确告知用户响应被截断,而不是「格式无法解析」,实际错误: {result["error"]}')
         self.assertNotIn('格式无法解析', result['error'],
             '截断场景不应说「格式无法解析」(误导用户重试图片)')
+        # 【2026-09-17】hint 不再误导用户去拆单/删备注——真因是 reasoning token
+        # 吃光 budget,与订单大小无关。改为"重试/换引擎/换图"。
+        hint = result.get('hint', '')
+        self.assertIn('推理', hint,
+            'hint 应说明真因是 AI 推理消耗 token,而非订单大小')
+        self.assertNotIn('拆分订单图片', hint,
+            'hint 不应再说"拆分订单图片"——那对 reasoning 截断无效')
+        self.assertNotIn('简化', hint,
+            'hint 不应再说"简化备注"——那对 reasoning 截断无效')
         # 必须给可操作 hint
         self.assertIn('hint', result)
         self.assertTrue(len(result['hint']) > 10, 'hint 应给出可操作建议')

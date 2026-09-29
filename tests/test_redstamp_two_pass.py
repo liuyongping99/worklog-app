@@ -88,9 +88,12 @@ class RedstampTwoPassTests(unittest.TestCase):
              patch('blueprints.ocr_engine.np.array', side_effect=[np_orig, np_pre]), \
              patch('blueprints.ocr_engine._suppress_red_stamp',
                    side_effect=lambda *a, **kw: np_pre):
+            # 【2026-09-02】升 3-pass: 原图 + 擦除图 + 锐化图(同构于 extract_text)
+            # 锐化版 mock 等同 orig 版本 — 本测试焦点在 2-pass 取优保留原图逻辑。
             engine._ocr.ocr.side_effect = [
-                _ocr_return('品名：高弹纯胶', '规格：0.6白色软性'),
-                _ocr_return('品名：高弹纯胶', '规格：0.6白色'),
+                _ocr_return('品名：高弹纯胶', '规格：0.6白色软性'),  # orig
+                _ocr_return('品名：高弹纯胶', '规格：0.6白色'),      # pre(擦除)
+                _ocr_return('品名：高弹纯胶', '规格：0.6白色软性'),  # sharp(等同 orig)
             ]
             text, conf = engine.extract_text_with_conf(b'fake', preprocess_kind='redstamp')
 
@@ -116,11 +119,13 @@ class RedstampTwoPassTests(unittest.TestCase):
              patch('blueprints.ocr_engine.np.array', side_effect=[np_orig, np_pre]), \
              patch('blueprints.ocr_engine._suppress_red_stamp',
                    side_effect=lambda *a, **kw: np_pre):
-            # 原图:4 行,但 '1.2' 缺失
-            # 擦除图:4 行,但有 '1.2白色' (字符更多)
+            # 【2026-09-02】升 3-pass: 原图 + 擦除图 + 锐化图
+            # 锐化版 mock 等同擦除版本(保留 1.2 字段)—— 本测试焦点是
+            # "擦除图多字段时应选擦除"的择优逻辑。
             engine._ocr.ocr.side_effect = [
-                _ocr_return('品名：环保杂胶', '规格：', '白色', '手感', '中性'),
-                _ocr_return('品名：环保杂胶', '规格：', '1.2白色', '手感', '中性'),
+                _ocr_return('品名：环保杂胶', '规格：', '白色', '手感', '中性'),  # orig(漏 1.2)
+                _ocr_return('品名：环保杂胶', '规格：', '1.2白色', '手感', '中性'),  # pre(有 1.2)
+                _ocr_return('品名：环保杂胶', '规格：', '1.2白色', '手感', '中性'),  # sharp(等同 pre)
             ]
             text, conf = engine.extract_text_with_conf(b'fake', preprocess_kind='redstamp')
 
