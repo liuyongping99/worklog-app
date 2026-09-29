@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+{% block title %}YPP 规则冲突核查 - 入库{% endblock %}
+
+{% block content %}
+<div class="container" style="max-width: 1200px; margin: 0 auto; padding: 1rem;">
+    {% with
+        YPP_API = '/api/v1/shipping-orders/ypp-review/scan?biz=inbound',
+        YPP_TITLE = '⚖️ YPP 规则冲突核查 - 入库',
+        YPP_DESC = '全表所有入库明细',
+        YPP_RECORD_BASE_URL = '/inbound-records',
+        YPP_CONFIG_COUNT = ypp_config_count
+    %}
+        {% include '_ypp_review_include.html' %}
+    {% endwith %}
+</div>
+{% endblock %}

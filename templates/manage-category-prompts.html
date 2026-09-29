@@ -1,0 +1,817 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="manage-page">
+<style>
+  /* ════════════════════════════════════════════════════════════════
+     分类提示词管理 —— 「分类目录」风
+     设计:每行当条目,左侧 4px 色带 = Level 2 大类(目录分组)
+     配色:暖白档案底 + 琥珀强调 + 祖母绿已填 + 暗墨正文
+     ════════════════════════════════════════════════════════════════ */
+  :root {
+    --mg-paper:        #F8F7F4;   /* 页面底:暖白,似旧档案纸 */
+    --mg-card:         #FFFFFF;
+    --mg-ink:          #1F2937;   /* 主文本:墨色 */
+    --mg-ink-soft:     #4B5563;
+    --mg-muted:        #6B7280;
+    --mg-line:         #E7E4DE;   /* 分隔线:暖灰 */
+    --mg-line-soft:    #F1EEE7;
+    --mg-amber:        #D97706;   /* 强调色:温暖,做主要动作按钮 */
+    --mg-amber-soft:   #FEF3C7;
+    --mg-amber-deep:   #92400E;
+    --mg-emerald:      #059669;   /* 已填 */
+    --mg-emerald-soft: #D1FAE5;
+    --mg-stamp-border: #1F2937;   /* 等宽"图章"边框色 */
+
+    /* Level 2 大类色带 — 01 纸品 / 02 辅料 / 03 胶水 / 04 防潮
+       / 05 棉类 / 06 PE/PVC / 07 特材 / 08 编织 */
+    --mg-band-01: #4F46E5;   /* 纸品  靛蓝 */
+    --mg-band-02: #D97706;   /* 辅料  琥珀 */
+    --mg-band-03: #059669;   /* 胶水  翠绿 */
+    --mg-band-04: #7C3AED;   /* 防潮  紫罗兰 */
+    --mg-band-05: #DB2777;   /* 棉类  玫粉 */
+    --mg-band-06: #0891B2;   /* PE/PVC 青蓝 */
+    --mg-band-07: #DC2626;   /* 特材  橙红 */
+    --mg-band-08: #92400E;   /* 编织  棕 */
+  }
+
+  .manage-page {
+    background: var(--mg-paper);
+    min-height: 100vh;
+    margin: -1.5rem -1rem -2rem;
+    padding: 2rem 2.5rem 3rem;
+  }
+
+  /* ── 顶部头部 ───────────────────────────── */
+  .mg-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 2rem;
+    margin-bottom: 1.5rem;
+    padding-bottom: 1.25rem;
+    border-bottom: 1px solid var(--mg-line);
+  }
+  .mg-title-block .mg-eyebrow {
+    font-family: 'JetBrains Mono', 'Cascadia Mono', 'Consolas', ui-monospace, monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.18em;
+    color: var(--mg-amber-deep);
+    text-transform: uppercase;
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+  }
+  .mg-title-block h1 {
+    font-size: 1.85rem;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    color: var(--mg-ink);
+    margin: 0 0 0.4rem;
+  }
+  .mg-title-block .mg-sub {
+    color: var(--mg-muted);
+    font-size: 0.95rem;
+    max-width: 64ch;
+    line-height: 1.55;
+  }
+  .mg-title-block code {
+    background: var(--mg-amber-soft);
+    color: var(--mg-amber-deep);
+    padding: 0.05em 0.45em;
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', 'Consolas', monospace;
+    font-size: 0.85em;
+  }
+
+  /* ── 进度卡(右上角) ───────────────────────── */
+  .mg-progress {
+    background: var(--mg-card);
+    border: 1px solid var(--mg-line);
+    border-radius: 12px;
+    padding: 1rem 1.25rem;
+    min-width: 220px;
+    box-shadow: 0 1px 0 rgba(0,0,0,0.02);
+  }
+  .mg-progress-label {
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    color: var(--mg-muted);
+    text-transform: uppercase;
+    font-weight: 600;
+    margin-bottom: 0.4rem;
+  }
+  .mg-progress-num {
+    font-family: 'JetBrains Mono', 'Consolas', monospace;
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--mg-ink);
+    line-height: 1;
+  }
+  .mg-progress-num .of { color: var(--mg-muted); font-size: 1.1rem; font-weight: 500; }
+  .mg-progress-num .filled { color: var(--mg-emerald); }
+  .mg-bar {
+    margin-top: 0.6rem;
+    height: 6px;
+    background: var(--mg-line-soft);
+    border-radius: 999px;
+    overflow: hidden;
+  }
+  .mg-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--mg-amber), var(--mg-emerald));
+    border-radius: 999px;
+    transition: width 0.4s ease;
+  }
+
+  /* ── 过滤栏(sticky) ───────────────────────── */
+  .mg-toolbar {
+    position: sticky;
+    top: 60px;
+    z-index: 10;
+    background: rgba(248, 247, 244, 0.92);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid var(--mg-line);
+    border-radius: 12px;
+    padding: 0.75rem 1rem;
+    margin-bottom: 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.04);
+  }
+  .mg-search {
+    position: relative;
+    flex: 1;
+    min-width: 220px;
+  }
+  .mg-search svg {
+    position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+    width: 16px; height: 16px;
+    color: var(--mg-muted);
+  }
+  .mg-search input {
+    width: 100%;
+    padding: 0.55rem 0.75rem 0.55rem 38px;
+    border: 1px solid var(--mg-line);
+    border-radius: 8px;
+    font-size: 0.92rem;
+    background: #fff;
+    color: var(--mg-ink);
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .mg-search input:focus {
+    outline: none;
+    border-color: var(--mg-amber);
+    box-shadow: 0 0 0 3px var(--mg-amber-soft);
+  }
+  .mg-select {
+    padding: 0.55rem 2rem 0.55rem 0.85rem;
+    border: 1px solid var(--mg-line);
+    border-radius: 8px;
+    background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10' fill='none'%3E%3Cpath d='M2 4l3 3 3-3' stroke='%236B7280' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 0.7rem center;
+    -webkit-appearance: none;
+    appearance: none;
+    font-size: 0.9rem;
+    color: var(--mg-ink);
+    cursor: pointer;
+  }
+  .mg-select:focus {
+    outline: none; border-color: var(--mg-amber);
+    box-shadow: 0 0 0 3px var(--mg-amber-soft);
+  }
+
+  .mg-btn {
+    padding: 0.55rem 1.1rem;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, transform 0.05s;
+    white-space: nowrap;
+    display: inline-flex; align-items: center; gap: 0.4rem;
+  }
+  .mg-btn:active { transform: translateY(1px); }
+  .mg-btn-primary {
+    background: var(--mg-amber);
+    color: #fff;
+  }
+  .mg-btn-primary:hover { background: #B45309; }
+  .mg-btn-ghost {
+    background: #fff;
+    border-color: var(--mg-line);
+    color: var(--mg-ink-soft);
+  }
+  .mg-btn-ghost:hover { background: var(--mg-line-soft); border-color: var(--mg-ink-soft); }
+  .mg-btn-success {
+    background: var(--mg-emerald);
+    color: #fff;
+    padding: 0.35rem 0.75rem;
+    font-size: 0.82rem;
+  }
+  .mg-btn-success:hover { background: #047857; }
+  .mg-btn-danger {
+    background: #fff;
+    border-color: var(--mg-line);
+    color: var(--mg-muted);
+    padding: 0.35rem 0.65rem;
+    font-size: 0.78rem;
+  }
+  .mg-btn-danger:hover { color: var(--mg-amber-deep); border-color: var(--mg-amber); }
+
+  /* ── 主表 ───────────────────────────── */
+  .mg-list {
+    background: var(--mg-card);
+    border: 1px solid var(--mg-line);
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 1px 0 rgba(0,0,0,0.02);
+  }
+  .mg-row {
+    display: grid;
+    grid-template-columns: 4px 90px 140px 84px 1fr auto;
+    align-items: stretch;
+    border-top: 1px solid var(--mg-line-soft);
+    transition: background 0.1s;
+    position: relative;
+  }
+  .mg-row:first-child { border-top: none; }
+  .mg-row:hover { background: #FBF9F4; }
+  .mg-row.is-filled { background: linear-gradient(90deg, rgba(5,150,105,0.02), transparent 30%); }
+
+  /* Level 2 大类色带(整列左侧) */
+  .mg-band {
+    background: var(--mg-band-01);
+  }
+  .mg-row[data-prefix="01"] .mg-band { background: var(--mg-band-01); }
+  .mg-row[data-prefix="02"] .mg-band { background: var(--mg-band-02); }
+  .mg-row[data-prefix="03"] .mg-band { background: var(--mg-band-03); }
+  .mg-row[data-prefix="04"] .mg-band { background: var(--mg-band-04); }
+  .mg-row[data-prefix="05"] .mg-band { background: var(--mg-band-05); }
+  .mg-row[data-prefix="06"] .mg-band { background: var(--mg-band-06); }
+  .mg-row[data-prefix="07"] .mg-band { background: var(--mg-band-07); }
+  .mg-row[data-prefix="08"] .mg-band { background: var(--mg-band-08); }
+
+  /* 等宽代码块:像图章 */
+  .mg-code {
+    padding: 1rem 0.75rem;
+    font-family: 'JetBrains Mono', 'Cascadia Mono', 'Consolas', ui-monospace, monospace;
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--mg-ink);
+    letter-spacing: 0.02em;
+    display: flex;
+    align-items: center;
+    border-right: 1px dashed var(--mg-line);
+  }
+
+  /* 品类名 */
+  .mg-name {
+    padding: 1rem 0.85rem;
+    font-size: 0.95rem;
+    color: var(--mg-ink);
+    display: flex;
+    align-items: center;
+    border-right: 1px solid var(--mg-line-soft);
+  }
+
+  /* 状态徽章 */
+  .mg-status {
+    padding: 1rem 0.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .mg-pill {
+    display: inline-flex; align-items: center; gap: 0.3rem;
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+  .mg-pill-empty {
+    background: var(--mg-line-soft);
+    color: var(--mg-muted);
+  }
+  .mg-pill-filled {
+    background: var(--mg-emerald-soft);
+    color: #065F46;
+  }
+  .mg-pill-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: currentColor;
+  }
+
+  /* 提示词 textarea */
+  .mg-prompt {
+    padding: 0.75rem 1rem;
+    display: flex;
+    align-items: stretch;
+  }
+  .mg-prompt textarea {
+    width: 100%;
+    border: 1px solid var(--mg-line);
+    border-radius: 8px;
+    padding: 0.65rem 0.8rem;
+    font-family: 'JetBrains Mono', 'Consolas', ui-monospace, monospace;
+    font-size: 0.86rem;
+    line-height: 1.55;
+    color: var(--mg-ink);
+    background: #FAFAF8;
+    resize: vertical;
+    min-height: 56px;
+    transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+  }
+  .mg-prompt textarea::placeholder {
+    color: #B5B0A6;
+    font-style: italic;
+  }
+  .mg-prompt textarea:focus {
+    outline: none;
+    background: #fff;
+    border-color: var(--mg-amber);
+    box-shadow: 0 0 0 3px var(--mg-amber-soft);
+  }
+  .mg-row.is-filled .mg-prompt textarea {
+    background: #FBFCFB;
+    border-color: rgba(5,150,105,0.25);
+  }
+
+  /* 操作 */
+  .mg-actions {
+    padding: 1rem 0.85rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    align-items: stretch;
+    min-width: 88px;
+  }
+  .mg-actions .mg-btn { justify-content: center; }
+
+  /* ── 空状态 ───────────────────────────── */
+  .mg-empty {
+    padding: 3rem 1.5rem;
+    text-align: center;
+    color: var(--mg-muted);
+    font-size: 0.95rem;
+  }
+  .mg-empty-icon {
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+    opacity: 0.5;
+  }
+
+  /* ── 批量填充 modal ───────────────────────────── */
+  .mg-modal-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(31, 41, 55, 0.55);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 100;
+  }
+  .mg-modal-backdrop[hidden] { display: none !important; }
+  .mg-modal {
+    background: var(--mg-card);
+    border-radius: 14px;
+    width: min(560px, 92vw);
+    box-shadow: 0 24px 64px rgba(0,0,0,0.25);
+    overflow: hidden;
+  }
+  .mg-modal-head {
+    padding: 1.1rem 1.5rem 0.6rem;
+    border-bottom: 1px solid var(--mg-line-soft);
+  }
+  .mg-modal-head h3 {
+    margin: 0 0 0.3rem;
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--mg-ink);
+  }
+  .mg-modal-head p {
+    margin: 0;
+    font-size: 0.88rem;
+    color: var(--mg-muted);
+  }
+  .mg-modal-body {
+    padding: 1.1rem 1.5rem;
+  }
+  .mg-modal-body textarea {
+    width: 100%;
+    border: 1px solid var(--mg-line);
+    border-radius: 8px;
+    padding: 0.7rem 0.85rem;
+    font-family: 'JetBrains Mono', 'Consolas', ui-monospace, monospace;
+    font-size: 0.88rem;
+    line-height: 1.55;
+    background: #FAFAF8;
+    resize: vertical;
+    min-height: 100px;
+  }
+  .mg-modal-body textarea:focus {
+    outline: none; background: #fff;
+    border-color: var(--mg-amber);
+    box-shadow: 0 0 0 3px var(--mg-amber-soft);
+  }
+  .mg-modal-foot {
+    padding: 0.85rem 1.5rem 1.1rem;
+    display: flex; justify-content: flex-end; gap: 0.5rem;
+    background: var(--mg-paper);
+    border-top: 1px solid var(--mg-line-soft);
+  }
+
+  /* ── 全选 checkbox 视觉 ───────────────────────────── */
+  .mg-checkbox {
+    width: 16px; height: 16px;
+    cursor: pointer;
+    accent-color: var(--mg-amber);
+  }
+
+  /* ── 响应式 ───────────────────────────── */
+  @media (max-width: 1100px) {
+    .mg-row {
+      grid-template-columns: 4px 88px 1fr auto;
+    }
+    .mg-name, .mg-status {
+      display: none;
+    }
+    .mg-code::after {
+      content: attr(data-name);
+      font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+      font-weight: 400;
+      font-size: 0.85rem;
+      color: var(--mg-muted);
+      margin-left: 0.75rem;
+    }
+  }
+  .mg-code .mg-level {
+    display: inline-block;
+    margin-left: 0.45rem;
+    padding: 0.05rem 0.4rem;
+    font-size: 0.68rem;
+    font-weight: 700;
+    line-height: 1.4;
+    border-radius: 4px;
+    background: var(--mg-line-soft);
+    color: var(--mg-muted);
+    vertical-align: middle;
+  }
+  @media (max-width: 768px) {
+    .manage-page { padding: 1.25rem 1rem 2rem; }
+    .mg-header { flex-direction: column; align-items: stretch; gap: 1rem; }
+    .mg-progress { min-width: 0; }
+    .mg-toolbar { top: 56px; padding: 0.6rem 0.75rem; }
+    .mg-row { grid-template-columns: 4px 1fr auto; }
+    .mg-code { padding: 0.75rem 0.5rem; font-size: 0.95rem; }
+    .mg-code::after { display: none; }
+    .mg-prompt { padding: 0.5rem 0.75rem; }
+    .mg-actions { padding: 0.75rem 0.5rem; min-width: 70px; }
+  }
+</style>
+
+<!-- ── 顶部头部 ───────────────────────────── -->
+<div class="mg-header">
+  <script>
+    window.__CATEGORIES__ = {{ categories | tojson }};
+  </script>
+  <div class="mg-title-block">
+    <div class="mg-eyebrow">CATEGORY PROMPTS · CATALOG</div>
+    <h1>分类提示词管理</h1>
+    <p class="mg-sub">
+      为所有 <strong>Level 3 及更深</strong>（Level 3 / Level 4 / 更深层）的商品分类节点维护一段自适应提示词，AI 比对时自动注入到 DeepSeek prompt 末尾的
+      <code>## 大类补充提示词</code> 段。
+      只要一个节点是<strong>商品分类</strong>就纳入本页——即便它下面直接挂了商品（例如「7PPVC人造革」及其下层「7P环保杂胶」等）；真正的"实际商品"是 product 表里的 SKU 行，不在本页维护。Level 1/2 大类不纳入。
+      App 启动时已自动 seed 占位空白行；下方可逐行编辑或批量填充。
+    </p>
+  </div>
+
+  <!-- 进度卡(右上) -->
+  <div class="mg-progress">
+    <div class="mg-progress-label">已填进度</div>
+    <div class="mg-progress-num">
+      <span class="filled" id="filled-num">0</span><span class="of">/87</span>
+    </div>
+    <div class="mg-bar"><div class="mg-bar-fill" id="bar-fill" style="width:0%"></div></div>
+  </div>
+</div>
+
+<!-- ── 过滤栏 ───────────────────────────── -->
+<div class="mg-toolbar">
+  <div class="mg-search">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+    <input id="filter_q" type="text" placeholder="搜索 category_code 或品类名(如 0204 / HA猪皮纹)">
+  </div>
+  <select id="filter_filled" class="mg-select" title="按填充状态过滤">
+    <option value="all">全部状态</option>
+    <option value="empty">空白（待填）</option>
+    <option value="filled">已填</option>
+  </select>
+  <button id="btn_bulk" class="mg-btn mg-btn-primary">✦ 批量填充</button>
+  <button id="btn_select_all" class="mg-btn mg-btn-ghost">全选</button>
+  <button id="btn_clear_sel" class="mg-btn mg-btn-ghost" style="display:none;">清除选择</button>
+  <span id="stats" class="text-sm" style="color:var(--mg-muted); margin-left:auto;"></span>
+</div>
+
+<!-- ── 主列表 ───────────────────────────── -->
+<div class="mg-list" id="rows">
+  <!-- rows by JS -->
+</div>
+
+<p id="rows_empty" class="mg-empty" hidden>
+  <div class="mg-empty-icon">📭</div>
+  当前筛选下没有匹配的品类 — 试试清空搜索或切换「全部状态」
+</p>
+<p id="rows_error" class="mg-empty" hidden style="color:var(--mg-amber-deep);"></p>
+
+<!-- ── 批量填充 modal ───────────────────────────── -->
+<div id="bulk_modal" class="mg-modal-backdrop" hidden>
+  <div class="mg-modal">
+    <div class="mg-modal-head">
+      <h3>批量填充提示词</h3>
+      <p>把下方文本写入选中的 <span id="bulk_count" style="font-weight:700;color:var(--mg-amber-deep);"></span> 条 category，覆盖已有内容。</p>
+    </div>
+    <div class="mg-modal-body">
+      <textarea id="bulk_text" rows="5" placeholder="例：环保类统一加上「厚度 ±0.1mm 可放宽，黑/白底色视为同款」..."></textarea>
+    </div>
+    <div class="mg-modal-foot">
+      <button id="bulk_cancel" class="mg-btn mg-btn-ghost">取消</button>
+      <button id="bulk_confirm" class="mg-btn mg-btn-primary">确认写入</button>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<script>
+// ===== 工具 =====
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+function buildParams(obj) {
+  return Object.entries(obj)
+    .filter(([_, v]) => v !== '' && v !== null && v !== undefined)
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .join('&');
+}
+
+function autoGrow(ta) {
+  ta.style.height = 'auto';
+  ta.style.height = Math.max(56, ta.scrollHeight + 2) + 'px';
+}
+
+// ===== 状态 =====
+const state = {
+  cats: [],
+  prompts: {},
+  filter: { filled: 'all', q: '' },
+  selectedIds: new Set(),
+};
+
+// ===== 数据加载 =====
+async function loadPrompts() {
+  state.prompts = {};
+  const params = buildParams({ include_empty: 1 });
+  const res = await fetch('/api/v1/manage/category-prompts/list?' + params);
+  const data = await res.json();
+  if (!data.success) {
+    document.getElementById('rows_error').hidden = false;
+    document.getElementById('rows_error').textContent = data.error || '加载失败';
+    return;
+  }
+  for (const r of (data.rows || [])) {
+    if (r.category_code) state.prompts[r.category_code] = r;
+  }
+  render();
+}
+
+// ===== 渲染 =====
+function render() {
+  const list = document.getElementById('rows');
+  list.innerHTML = '';
+
+  const q = state.filter.q.trim().toLowerCase();
+  const filledFilter = state.filter.filled;
+
+  const filtered = state.cats.filter(c => {
+    if (q) {
+      const code = (c.category_code || '').toLowerCase();
+      const name = (c.category_name || '').toLowerCase();
+      if (!code.includes(q) && !name.includes(q)) return false;
+    }
+    const p = state.prompts[c.category_code];
+    const isEmpty = !p || !p.prompt_text;
+    if (filledFilter === 'empty' && !isEmpty) return false;
+    if (filledFilter === 'filled' && isEmpty) return false;
+    return true;
+  });
+
+  for (const c of filtered) {
+    const p = state.prompts[c.category_code];
+    const hasPrompt = !!p;
+    const isEmpty = !hasPrompt || !p.prompt_text;
+    const pid = hasPrompt ? p.id : '';
+    const prefix = (c.category_code || '').slice(0, 2);
+
+    const row = document.createElement('div');
+    row.className = 'mg-row' + (!isEmpty ? ' is-filled' : '');
+    row.dataset.code = c.category_code;
+    row.dataset.pid = pid;
+    row.dataset.prefix = prefix;
+    row.innerHTML = `
+      <div class="mg-band" title="大类 ${prefix}"></div>
+      <div class="mg-code" data-name="${escapeHtml(c.category_name || '')}">${escapeHtml(c.category_code)}<span class="mg-level">L${c.level || 3}</span></div>
+      <div class="mg-name">${escapeHtml(c.category_name || '')}</div>
+      <div class="mg-status">
+        ${isEmpty
+          ? '<span class="mg-pill mg-pill-empty"><span class="mg-pill-dot"></span>空白</span>'
+          : '<span class="mg-pill mg-pill-filled"><span class="mg-pill-dot"></span>已填</span>'}
+      </div>
+      <div class="mg-prompt">
+        <textarea data-pid="${pid}" rows="2"
+          placeholder="${pid ? '（待填）输入此分类的 AI 比对偏好规则...' : '（无 prompt 行,刷新页面后会 seed）'}">${escapeHtml(hasPrompt ? p.prompt_text : '')}</textarea>
+      </div>
+      <div class="mg-actions">
+        ${pid ? `
+          <button class="mg-btn mg-btn-success btn_save">✓ 保存</button>
+          <button class="mg-btn mg-btn-danger btn_clear">清空</button>
+        ` : '<span style="font-size:.72rem;color:var(--mg-muted);text-align:center;">等待 seed</span>'}
+      </div>
+    `;
+    list.appendChild(row);
+
+    // 自动 grow textarea + 绑定 change 触发勾选
+    const ta = row.querySelector('textarea');
+    autoGrow(ta);
+    ta.addEventListener('input', () => autoGrow(ta));
+  }
+
+  document.getElementById('rows_empty').hidden = filtered.length > 0;
+  updateStats(filtered.length);
+}
+
+function updateStats(filteredCount) {
+  const total = state.cats.length;
+  const filled = Object.values(state.prompts).filter(p => p.prompt_text).length;
+  document.getElementById('filled-num').textContent = filled;
+  document.getElementById('bar-fill').style.width = (total ? (filled / total * 100) : 0) + '%';
+  document.getElementById('stats').textContent =
+    `${filteredCount} / ${total} 行`;
+  // 显示/隐藏清除选择
+  document.getElementById('btn_clear_sel').style.display =
+    state.selectedIds.size > 0 ? 'inline-flex' : 'none';
+}
+
+// ===== 行操作 =====
+document.addEventListener('click', async (ev) => {
+  const row = ev.target.closest('.mg-row');
+  if (!row) return;
+  const pid = row.dataset.pid;
+  const ta = row.querySelector('.prompt-text, textarea');
+  if (!ta) return;
+
+  if (ev.target.classList.contains('btn_save')) {
+    await saveRow(pid, ta.value.trim(), row, ev.target);
+  } else if (ev.target.classList.contains('btn_clear')) {
+    ta.value = '';
+    autoGrow(ta);
+    await saveRow(pid, '', row, ev.target);
+  }
+});
+
+async function saveRow(pid, text, row, btn) {
+  if (!pid) { alert('该行未 seed,请刷新页面'); return; }
+  btn.disabled = true;
+  const origText = btn.textContent;
+  btn.textContent = '...';
+  try {
+    const res = await fetch(`/api/v1/manage/category-prompts/${pid}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt_text: text }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      btn.textContent = '✓ 已保存';
+      const p = state.prompts[row.dataset.code];
+      if (p) p.prompt_text = text;
+      setTimeout(() => { btn.textContent = origText; btn.disabled = false; render(); }, 700);
+    } else {
+      btn.textContent = '✗';
+      alert('保存失败: ' + (data.error || ''));
+      setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 1500);
+    }
+  } catch (e) {
+    btn.textContent = '✗';
+    alert('网络错误: ' + e.message);
+    setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 1500);
+  }
+}
+
+// ===== 过滤 =====
+document.getElementById('filter_filled').addEventListener('change', applyFilter);
+document.getElementById('filter_q').addEventListener('input', applyFilter);
+function applyFilter() {
+  state.filter.filled = document.getElementById('filter_filled').value;
+  state.filter.q = document.getElementById('filter_q').value;
+  render();
+}
+
+// ===== 勾选 — 用每行 checkbox 简化(全选通过 JS 遍历) =====
+// 注:为保持 16 测试 JS 接口不变,这里仍走"全选"+selectedIds Set
+// 通过 hidden checkbox 的样式实现勾选 → 简化为按钮组:全选 / 清空
+let selMode = false;
+document.getElementById('btn_select_all').addEventListener('click', () => {
+  document.querySelectorAll('.mg-row').forEach(r => {
+    const pid = r.dataset.pid;
+    if (pid) state.selectedIds.add(pid);
+  });
+  selMode = true;
+  updateBulkBtn();
+  render();
+});
+document.getElementById('btn_clear_sel').addEventListener('click', () => {
+  state.selectedIds.clear();
+  selMode = false;
+  updateBulkBtn();
+  render();
+});
+function updateBulkBtn() {
+  const btn = document.getElementById('btn_bulk');
+  const n = state.selectedIds.size;
+  btn.textContent = n > 0 ? `✦ 批量填充 (${n})` : '✦ 批量填充';
+  document.getElementById('btn_clear_sel').style.display = n > 0 ? 'inline-flex' : 'none';
+}
+
+// ===== 批量填充 =====
+document.getElementById('btn_bulk').addEventListener('click', () => {
+  if (state.selectedIds.size === 0) {
+    alert('请先点「全选」或手动勾选要填充的行');
+    return;
+  }
+  document.getElementById('bulk_count').textContent = state.selectedIds.size;
+  document.getElementById('bulk_text').value = '';
+  document.getElementById('bulk_modal').hidden = false;
+  setTimeout(() => document.getElementById('bulk_text').focus(), 50);
+});
+document.getElementById('bulk_cancel').addEventListener('click', () => {
+  document.getElementById('bulk_modal').hidden = true;
+});
+document.getElementById('bulk_confirm').addEventListener('click', async () => {
+  const text = document.getElementById('bulk_text').value;
+  if (!text.trim()) { alert('内容不能为空'); return; }
+  const ids = Array.from(state.selectedIds).map(s => parseInt(s, 10));
+  const btn = document.getElementById('bulk_confirm');
+  btn.disabled = true;
+  btn.textContent = '写入中...';
+  try {
+    const res = await fetch('/api/v1/manage/category-prompts/bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids, prompt_text: text }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      btn.textContent = `✓ 写入 ${data.updated} 条`;
+      setTimeout(() => {
+        document.getElementById('bulk_modal').hidden = true;
+        btn.textContent = '确认写入';
+        btn.disabled = false;
+        state.selectedIds.clear();
+        updateBulkBtn();
+        loadPrompts();
+      }, 800);
+    } else {
+      btn.textContent = '确认写入';
+      btn.disabled = false;
+      alert('批量失败: ' + (data.error || ''));
+    }
+  } catch (e) {
+    btn.textContent = '确认写入';
+    btn.disabled = false;
+    alert('网络错误: ' + e.message);
+  }
+});
+
+// ESC 关闭 modal
+document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape') {
+    const m = document.getElementById('bulk_modal');
+    if (!m.hidden) m.hidden = true;
+  }
+});
+
+// ===== 初始化 =====
+state.cats = window.__CATEGORIES__ || [];
+
+document.addEventListener('DOMContentLoaded', () => {
+  loadPrompts();
+});
+</script>
+{% endblock %}

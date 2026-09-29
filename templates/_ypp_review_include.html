@@ -1,0 +1,166 @@
+{# 2026-09-21: 三页(出货/入库/装柜)共用 YPP 规则冲突核查块
+   使用说明:
+   {% include '_ypp_review_include.html' with context %}
+   在 includes 之前需传:
+     YPP_API    = '/api/v1/shipping-orders/ypp-review/scan?biz=shipping' (或 inbound/loading)
+     YPP_TITLE  = '⚖️ YPP 规则冲突核查 - 出货' (或其他业务名)
+     YPP_DESC   = '全表所有出货明细'(或其他业务)
+     YPP_RECORD_BASE_URL = '/shipping-records' (或 /inbound-records / /loading-orders)
+     YPP_CONFIG_COUNT = 37 (可由 view 计算后传过来)
+#}
+
+<div style="display:flex; align-items:center; gap:1rem; margin-bottom:1rem;">
+    <h2 style="margin:0; font-size:1.3rem;">{{ YPP_TITLE or '⚖️ YPP 规则冲突核查' }}</h2>
+    <span style="font-size:0.8rem; color:#868e96;">
+        已配置 YPP 的品名:<strong id="yppConfigCount">{{ YPP_CONFIG_COUNT or 0 }}</strong> 个
+    </span>
+</div>
+
+<div style="background:#fff8e1; border-left:4px solid #fdcb6e; padding:0.75rem 1rem; border-radius:6px; margin-bottom:1rem; font-size:0.85rem; color:#2d3436;">
+    <strong>📌 规则说明:</strong>
+    对每条按码卖(有 YPP 配置)的明细,根据其备注里的「X支*Yy」或「X支+Yy」
+    算出期望数量 = pieces × 每支码数 + 散码,再与实际数量比对。
+    <br>
+    <span style="color:#d63031;">●</span> 偏差 ≥ 2 支 → <strong>🔴 warn</strong>(红行,严重)
+    &nbsp;&nbsp;
+    <span style="color:#e17055;">●</span> 偏差 = 1 支 → <strong>🟡 info</strong>(粉行,轻微)
+    &nbsp;&nbsp;
+    <span style="color:#00b894;">●</span> 偏差 ≤ 0.01 → 一致(不列出)
+    <br>
+    本页扫描<strong>{{ YPP_DESC or '全表明细' }}</strong>,不受主页日期范围过滤影响。
+</div>
+
+<div style="margin-bottom:1rem;">
+    <button id="scanBtn" onclick="runScan()" style="padding:0.5rem 1.5rem; background:#6c5ce7; color:#fff; border:none; border-radius:6px; font-size:0.95rem; cursor:pointer; font-weight:600;">
+        🔍 开始扫描
+    </button>
+    <span id="scanStatus" style="margin-left:0.75rem; font-size:0.85rem; color:#636e72;"></span>
+</div>
+
+<div id="resultArea" style="display:none;">
+    <div id="resultSummary" style="background:#f8f9fa; border:1px solid #dfe6e9; border-radius:6px; padding:0.75rem 1rem; margin-bottom:0.75rem; font-size:0.9rem;"></div>
+    <div id="resultTableWrap"></div>
+</div>
+
+<style>
+.ypp-warn-row { background:#ffe8e8 !important; }
+.ypp-warn-row:hover td { background:#ffcccc !important; }
+.ypp-info-row { background:#fff0e1 !important; }
+.ypp-info-row:hover td { background:#ffe1c2 !important; }
+.ypp-table { width:100%; border-collapse:collapse; font-size:0.85rem; }
+.ypp-table th { background:#dfe6e9; padding:0.5rem 0.6rem; text-align:left; font-weight:600; color:#2d3436; }
+.ypp-table td { padding:0.45rem 0.6rem; border-bottom:1px solid #f1f3f5; }
+.ypp-row-link { cursor:pointer; }
+.ypp-sev-warn { color:#d63031; font-weight:700; }
+.ypp-sev-info { color:#e17055; font-weight:700; }
+.ypp-diff-pos { color:#d63031; font-weight:700; }
+.ypp-diff-neg { color:#e17055; font-weight:700; }
+</style>
+
+<script>
+var _yppApi = {{ YPP_API | tojson }};
+var _yppRecordBaseUrl = {{ YPP_RECORD_BASE_URL | tojson }};
+
+function runScan() {
+    var btn = document.getElementById('scanBtn');
+    var status = document.getElementById('scanStatus');
+    btn.disabled = true; btn.textContent = '⏳ 扫描中...';
+    status.textContent = '';
+    fetch(_yppApi, { method: 'POST' })
+        .then(function(r){ return r.json(); })
+        .then(function(data) {
+            btn.disabled = false; btn.textContent = '🔍 开始扫描';
+            if (!data.success) {
+                status.style.color = '#d63031';
+                status.textContent = '❌ ' + (data.error || '扫描失败');
+                return;
+            }
+            renderResults(data);
+        })
+        .catch(function(err) {
+            btn.disabled = false; btn.textContent = '🔍 开始扫描';
+            status.style.color = '#d63031';
+            status.textContent = '❌ 请求失败:' + err;
+        });
+}
+
+function renderResults(data) {
+    var area = document.getElementById('resultArea');
+    var sumEl = document.getElementById('resultSummary');
+    var wrap = document.getElementById('resultTableWrap');
+    area.style.display = 'block';
+
+    var items = data.items || [];
+    var warnCount = items.filter(function(x){ return x.severity === 'warn'; }).length;
+    var infoCount = items.filter(function(x){ return x.severity === 'info'; }).length;
+
+    if (items.length === 0) {
+        sumEl.style.background = '#d4f4dd';
+        sumEl.style.color = '#1e7e34';
+        sumEl.innerHTML = '✅ 扫描 ' + data.scanned_total + ' 条明细,无 YPP 冲突。';
+        wrap.innerHTML = '';
+        return;
+    }
+
+    sumEl.style.background = '#fff5e1';
+    sumEl.style.color = '#2d3436';
+    sumEl.innerHTML = '扫描 <strong>' + data.scanned_total + '</strong> 条明细 → '
+        + '<span class="ypp-sev-warn">🔴 ' + warnCount + ' 条 warn</span> · '
+        + '<span class="ypp-sev-info">🟡 ' + infoCount + ' 条 info</span>';
+    sumEl.innerHTML += ' &nbsp; <span style="color:#868e96; font-size:0.8rem;">点行跳转回原订单</span>';
+
+    var html = '<table class="ypp-table"><thead><tr>'
+        + '<th>严重度</th><th>日期</th><th>客户</th><th>商品</th><th>规格</th>'
+        + '<th>备注</th><th>支数</th><th>期望</th><th>实际</th><th>偏差</th>'
+        + '</tr></thead><tbody>';
+    items.forEach(function(m) {
+        var rowCls = m.severity === 'warn' ? 'ypp-warn-row' : 'ypp-info-row';
+        var sevLabel = m.severity === 'warn' ? '🔴 warn' : '🟡 info';
+        var perPiece = m.per_piece_yards != null
+            ? ('×' + m.per_piece_yards + '码/支')
+            : ('×' + m.ypp + '码/支');
+        var expected = m.pieces + '支 ' + perPiece
+            + (m.loose_yards > 0 ? (' + ' + m.loose_yards + '码散码') : '')
+            + ' = ' + m.expected;
+        var diffCls = m.diff > 0 ? 'ypp-diff-pos' : (m.diff < 0 ? 'ypp-diff-neg' : '');
+        var diffStr = m.diff != null ? (m.diff > 0 ? '+' : '') + m.diff : '?';
+        var link = buildFocusLink(m.record_id, m.date);
+        html += '<tr class="ypp-row-link ' + rowCls + '" '
+            + 'onclick="window.location=\'' + link + '\'" '
+            + 'title="点击跳转到该明细所在订单(' + link + ')">'
+            + '<td class="' + (m.severity === 'warn' ? 'ypp-sev-warn' : 'ypp-sev-info') + '">' + sevLabel + '</td>'
+            + '<td>' + (m.date || '') + '</td>'
+            + '<td>' + escHtml(m.customer || '') + '</td>'
+            + '<td>' + escHtml(m.product_name || '') + '</td>'
+            + '<td>' + escHtml(m.specification || '') + '</td>'
+            + '<td>' + escHtml(m.remark || '') + '</td>'
+            + '<td>' + m.pieces + '支</td>'
+            + '<td>' + expected + '</td>'
+            + '<td>' + (m.actual != null ? m.actual : '?') + '</td>'
+            + '<td class="' + diffCls + '">' + diffStr + '</td>'
+            + '</tr>';
+    });
+    html += '</tbody></table>';
+    wrap.innerHTML = html;
+}
+
+function escHtml(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&').replace(/</g, '<').replace(/>/g, '>')
+        .replace(/"/g, '"').replace(/'/g, '&#39;');
+}
+
+// 构造跳转 URL:把日期范围带上 ±1 天,确保目标行在主页可见
+function buildFocusLink(recordId, dateStr) {
+    if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+        return _yppRecordBaseUrl + '?focus=' + recordId;
+    }
+    var d = new Date(dateStr + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() - 1);
+    var start = d.toISOString().split('T')[0];
+    d.setUTCDate(d.getUTCDate() + 2);
+    var end = d.toISOString().split('T')[0];
+    return _yppRecordBaseUrl + '?focus=' + recordId
+        + '&start_date=' + start + '&end_date=' + end;
+}
+</script>

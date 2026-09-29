@@ -588,6 +588,37 @@ class CategoryPrompt:
         conn.close()
         return rows
 
+    # ── 2026-09-22 「🤖 智能文本」补充提示词(全局注入)──────────────────
+    # 用户在「🤖 智能文本」tab 累积的口语→结构化 业务约束,挂在 category_prompts
+    # 表 scope=NEW ('text_recognize') 下,所有激活提示词每次解析都注入。
+    # 跟 category/spec scope 的差别是 text_recognize 没有品类绑定 — 它是「全局业务语义」,
+    # 比如「环保≠7P」「白软≠中软」「白杂胶 = 杂胶 0.6白软加面」等。
+    #
+    # 设计取舍:
+    #   - 复用同表而非新建表,避免 schema 膨胀 + 跟现有「分类提示词」管理页生态保持
+    #   - 不分关键词触发:绝大多数 text_recognize 提示词是横向业务约束,按关键词触发
+    #     会让维护成本翻倍(text_recognize 提示词数预期 < 30 条,全量注入可控)
+    #   - 软删(status='archived'):误加的可禁用,不直接 delete 留作 audit
+    #
+    # 数据形状:
+    #   scope='text_recognize', category_code='', spec_pattern='',
+    #   product_name_keyword='', prompt_text='...', source_ocr_text='' (可选,本条目作"现场补充")
+    @staticmethod
+    def list_active_text_recognize_supplements(limit: int = 50) -> list:
+        """返回所有 text_recognize scope 的活跃补充提示词,按 id ASC(注入顺序稳定)。"""
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM category_prompts "
+            "WHERE status = 'active' AND scope = 'text_recognize' "
+            "AND prompt_text != '' "
+            "ORDER BY id ASC LIMIT ?",
+            (limit,)
+        )
+        rows = [dict(r) for r in cursor.fetchall()]
+        conn.close()
+        return rows
+
 
 def list_management_categories() -> list:
     """返回管理页要列出的分类节点快照(供 /manage/category-prompts 渲染)。
