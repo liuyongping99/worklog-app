@@ -872,15 +872,15 @@
         <table class="record-table{% if not has_eco and not has_jia_mian %} no-eco{% endif %}">
             <thead>
                 <tr>
-                    <th style="width:32px; text-align:center;">#</th>
-                    <th class="eco-col" style="width:32px;">重点</th>
-                    <th style="width: 16%;">商品名称</th>
-                    <th style="width: 12%;">规格</th>
-                    <th style="width: 9%;">数量</th>
-                    <th style="width: 7%;">单位</th>
-                    <th style="width: 12%;">备注</th>
-                    <th style="width: 10%;">辅助单位提示</th>
-                    <th style="width: 28%; white-space: nowrap;">操作</th>
+                    <th style="width:35px;">序号</th>
+                    <th class="eco-col" style="width:35px;">重点</th>
+                    <th style="width:22%;">商品名称</th>
+                    <th style="width:18%;">规格</th>
+                    <th style="width:12%;">数量</th>
+                    <th style="width:8%;">单位</th>
+                    <th style="width:15%;">备注</th>
+                    <th style="width:12%;">辅助单位提示</th>
+                    <th style="width:240px;">操作</th>
                 </tr>
             </thead>
             <tbody>
@@ -893,18 +893,18 @@
                     data-verified="{{ '1' if record.verified else '0' }}"
                     data-verified-warnings="{{ record.verified_warnings or '{}' }}">
                     <td style="text-align:center; color:#868e96; font-size:0.85rem;">{% if record.qty_invalid %}<span class="stock-icon" title="数量异常">❌</span>{% elif record.mismatch == 'warn' or record.piece_mismatch == 'warn' %}❌ {% elif record.mismatch == 'info' or record.piece_mismatch == 'info' %}💡 {% endif %}{{ loop.index }}</td>
-                    <td class="eco-col">{% if '环保' in record.product_name %}<span class="eco-icon" title="环保产品">🌿</span>{% endif %}{% if '杂胶' in record.product_name and '加面' in (record.specification or '') %}<svg class="jia-mian-icon" viewBox="0 0 16 16" width="14" height="14" title="加面工艺"><defs><pattern id="mesh-{{ record.id }}" width="3" height="3" patternUnits="userSpaceOnUse"><path d="M0,3 L3,0" stroke="currentColor" stroke-width="0.6"/><path d="M0,0 L3,3" stroke="currentColor" stroke-width="0.6"/></pattern></defs><rect width="16" height="16" fill="url(#mesh-{{ record.id }})"/></svg>{% endif %}</td>
-                    <td class="product-name product-name-cell" style="max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ record.product_name }}">{{ record.product_name }}</td>
-                    <td class="spec spec-cell">{{ record.specification }}</td>
+                    <td class="eco-col">{% if '环保' in record.product_name %}<span class="eco-icon" title="环保产品">🌿</span>{% endif %}{% if '杂胶' in record.product_name and '加面' in (record.specification or '') %}<svg class="jia-mian-icon" viewBox="0 0 16 16" width="14" height="14" title="加面工艺"><defs><pattern id="mesh-{{ record.id }}" width="2" height="2" patternUnits="userSpaceOnUse"><path d="M 2 0 L 0 0 0 2" fill="none" stroke="currentColor" stroke-width="0.5"/></pattern></defs><rect width="16" height="16" fill="url(#mesh-{{ record.id }})"/><line x1="0" y1="8" x2="16" y2="8" stroke="currentColor" stroke-width="1"/></svg>{% endif %}</td>
+                    <td class="product-name-cell" data-record-id-cell="{{ record.id }}" title="{{ record.product_name }}">{{ record.product_name }}</td>
+                    <td class="spec-cell">{{ record.specification }}</td>
                     <td class="qty-cell"><span class="qty-badge">{{ record.quantity }}</span></td>
                     <td class="unit-cell"><span class="unit-badge">{{ record.unit }}</span></td>
-                    <td class="remark-cell{% if record.remark %} has-content{% endif %}">{{ record.remark or '-' }}</td>
+                    <td class="remark-cell{% if record.remark %} has-content{% endif %}">{{ record.remark or '—' }}</td>
                     <td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">{{ record.unit_hint or '—' }}{% if record.piece_hint %}<br><span style="color:#0984e3;">{{ record.piece_hint }}</span>{% endif %}</td>
-                    <td style="white-space: nowrap;">
+                    <td class="actions-cell" style="white-space: nowrap;">
                         <button type="button" class="btn btn-sm move-up-btn lock-hide" data-id="{{ record.id }}" title="上移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.2rem 0.4rem;font-size:0.75rem;">▲</button>
                         <button type="button" class="btn btn-sm move-down-btn lock-hide" data-id="{{ record.id }}" title="下移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.2rem 0.4rem;font-size:0.75rem;">▼</button>
                         <button type="button" class="btn btn-primary btn-sm edit-inbound-btn lock-hide" data-id="{{ record.id }}">✏️</button>
-                        <button type="button" class="btn btn-danger btn-sm lock-hide delete-record-btn" onclick="deleteInboundRecord({{ record.id }}, this)" title="删除明细">✕</button>
+                        <button type="button" class="btn btn-danger btn-sm lock-hide delete-record-btn" onclick="deleteInboundRecord({{ record.id }}, this)" title="删除明细">🗑️</button>
                         <button type="button" class="btn btn-sm record-image-btn lock-hide{% if record.has_image %} has-image{% endif %}" data-record-id="{{ record.id }}" title="上传图片到此商品{% if record.has_image %}（已上传）{% endif %}" style="background:#74b9ff;color:#fff;">🖼️</button>
                         {# 2026-09-05: 摆放图(计数用) 按钮 — 对齐出货 shipping-records.html:920 #}
                         {% if record.unit == '桶' or '支' in (record.unit_hint or '') or '支' in (record.piece_hint or '') %}<button type="button" class="placement-add-btn lock-hide{% if record.placement_match %} placement-ok{% endif %}" data-record-id="{{ record.id }}" data-order-id="{{ group.id }}" title="添加点数图(供清点{{ record.unit }}数)" onclick="openPlacementImageModal('{{ record.id }}','{{ group.id }}')">点数</button>{% endif %}
@@ -914,25 +914,15 @@
                     </td>
                 </tr>
                 {% endfor %}
-                {% if group.summary_pieces > 0 or group.summary_loose_pieces > 0 or group.summary_unit_pieces > 0 %}
-                <tr class="summary-row" style="background:#f0fdf4; font-weight:600; border-top:2px solid #00b894;">
-                    <td style="padding:0.6rem 0.75rem;"></td>
-                    <td class="eco-col" style="padding:0.6rem 0.75rem;"></td>
-                    <td colspan="4" style="text-align:right; padding:0.6rem 0.75rem; color:#00b894; font-size:0.9rem;">📊 备注支数：</td>
-                    <td style="padding:0.6rem 0.75rem; color:#2d3436; font-size:0.9rem;">
-                        {{ group.summary_pieces }}支
-                        {% if group.summary_loose_pieces > 0 %}
-                        +{{ group.summary_loose_pieces }}支散码
-                        {% endif %}
-                    </td>
-                    <td style="padding:0.6rem 0.75rem; color:#00b894; font-size:0.9rem;">
-                        📊 明细支数：{{ group.summary_unit_pieces }}支
-                    </td>
-                    <td style="padding:0.6rem 0.75rem;"></td>
-                </tr>
-                {% endif %}
             </tbody>
         </table>
+        {% if group.summary_pieces > 0 or group.summary_loose_pieces > 0 or group.summary_unit_pieces > 0 %}
+        {# 汇总行从表格里拎出来当独立 div,不再受 colspan 束缚,各 stat 自适应宽度 —— 对齐出货 shipping-records.html:1038 #}
+        <div class="summary-row" style="background:#f0fdf4; font-weight:600; border-top:2px solid #00b894; padding:0.6rem 0.75rem; display:flex; justify-content:flex-end; align-items:center; gap:1.5rem; flex-wrap:wrap;">
+            <span style="color:#00b894; font-size:0.9rem;">📊 备注支数：<span class="summary-pieces-val" style="color:#2d3436;">{{ group.summary_pieces }}支{% if group.summary_loose_pieces > 0 %}+{{ group.summary_loose_pieces }}支散码{% endif %}</span></span>
+            <span style="color:#00b894; font-size:0.9rem; white-space:nowrap;">📊 明细支数：<span class="summary-unit-pieces-val">{{ group.summary_unit_pieces }}</span>支</span>
+        </div>
+        {% endif %}
 
         <!-- 图片预览区域（合并订单级 + 行级图片） -->
         {% set all_order_imgs = group.images | selectattr('source', 'ne', 'ai') | list %}
@@ -1058,8 +1048,7 @@
             {% endfor %}
         </div>
 
-        <!-- 添加明细表单 -->
-        {% if not group.is_locked %}
+        <!-- 添加明细表单（锁定控制走 CSS lock-hide，与出货页一致） -->
         <div class="lock-hide" style="width:100%;box-sizing:border-box;padding:0.5rem 0.75rem;background:#fafafa;border-top:1px solid #eee;">
             <form class="add-item-form" data-order-pk="{{ group.id }}" style="display:flex;gap:0.5rem;align-items:center;width:100%;">
                 <input type="hidden" name="order_pk" value="{{ group.id }}">
@@ -1076,7 +1065,6 @@
                 <button type="submit" style="margin-left:auto;flex-shrink:0;background:#00b894;color:#fff;border:none;padding:0.4rem 1.2rem;border-radius:4px;cursor:pointer;font-size:0.85rem;font-weight:600;">➕ 添加</button>
             </form>
         </div>
-        {% endif %}
     </div>
     {% else %}
     <div class="empty-state">
@@ -2029,7 +2017,7 @@ setTimeout(() => {
             var remarkCell = row.querySelector('.remark-cell');
             if (remarkCell) {
                 var remark = remarkCell.textContent.trim();
-                if (remark && remark !== '-') {
+                if (remark && remark !== '—') {
                     var m = remark.match(/(\d+)支/);
                     if (m) totalPieces += parseInt(m[1]);
                     var looseMatches = remark.match(/\d+(?:\.\d+)?[yY码]/g);
@@ -2050,8 +2038,8 @@ setTimeout(() => {
             totalUnitPieces = Math.floor(totalUnitPieces);
         }
 
-        // 移除旧汇总行（包括服务端渲染的 and JS 创建的）
-        var oldSummary = tbody.querySelector('.summary-row');
+        // 移除旧汇总行（包括服务端渲染的 and JS 创建的）—— 汇总行现在是 dateGroup 下的 div（不在 tbody 里）
+        var oldSummary = dateGroup.querySelector('.summary-row');
         if (oldSummary) oldSummary.remove();
 
         if (totalPieces === 0 && totalLoosePieces === 0 && totalUnitPieces === 0) return;
@@ -2059,16 +2047,19 @@ setTimeout(() => {
         var summaryText1 = totalPieces + '支';
         if (totalLoosePieces > 0) summaryText1 += '+' + totalLoosePieces + '支散码';
 
-        var summaryRow = document.createElement('tr');
+        var summaryRow = document.createElement('div');
         summaryRow.className = 'summary-row';
-        summaryRow.style.cssText = 'background:#f0fdf4;font-weight:600;border-top:2px solid #00b894;';
+        summaryRow.style.cssText = 'background:#f0fdf4;font-weight:600;border-top:2px solid #00b894;padding:0.6rem 0.75rem;display:flex;justify-content:flex-end;align-items:center;gap:1.5rem;flex-wrap:wrap;';
         summaryRow.innerHTML =
-            '<td colspan="4" style="text-align:right;padding:0.6rem 0.75rem;color:#00b894;font-size:0.9rem;">📊 备注支数：</td>' +
-            '<td style="padding:0.6rem 0.75rem;color:#2d3436;font-size:0.9rem;">' + summaryText1 + '</td>' +
-            '<td style="padding:0.6rem 0.75rem;color:#00b894;font-size:0.9rem;">📊 明细支数：' + totalUnitPieces + '支</td>' +
-            '<td style="padding:0.6rem 0.75rem;"></td>' +
-            '<td style="padding:0.6rem 0.75rem;"></td>';
-        tbody.appendChild(summaryRow);
+            '<span style="color:#00b894;font-size:0.9rem;">📊 备注支数：<span class="summary-pieces-val" style="color:#2d3436;">' + summaryText1 + '</span></span>' +
+            '<span style="color:#00b894;font-size:0.9rem;white-space:nowrap;">📊 明细支数：<span class="summary-unit-pieces-val">' + totalUnitPieces + '</span>支</span>';
+        // 插入到 record-table 之后（与出货页布局对齐）
+        var tableEl = dateGroup.querySelector('.record-table');
+        if (tableEl && tableEl.parentNode) {
+            tableEl.parentNode.insertBefore(summaryRow, tableEl.nextSibling);
+        } else {
+            dateGroup.appendChild(summaryRow);
+        }
     }
 
     // ── AI 图片删除按钮绑定（供 _smart_add_modal.html 的 insertAiImage 调用）──

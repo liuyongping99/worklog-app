@@ -715,7 +715,7 @@
     <div style="background: linear-gradient(90deg, #fff5e1 0%, #ffeaa7 100%); border: 1px solid #fdcb6e; border-left: 4px solid #e17055; border-radius: 8px; padding: 0.55rem 1rem; margin: 0.6rem 0; display: flex; align-items: center; gap: 0.8rem; font-size: 0.88rem; color: #6c5d00; flex-wrap: wrap; line-height: 1.55;">
         <span style="font-weight: 600; flex: 0 0 auto;">📸 <strong>装车单扫描</strong></span>
         <span style="color:#b2bec3;">|</span>
-        <span>有装车单必须同时扫描装车单和同价单后面的<strong>竖线</strong></span>
+        <span>有装车单必须同时扫描装车单和同价单</span>
         <span style="color:#b2bec3;">|</span>
         <span>出货商品保证出<strong>同一批外包装</strong>,<strong>不要多批次</strong></span>
     </div>
@@ -989,7 +989,7 @@ document.getElementById('voiceInputBtn').addEventListener('click', function () {
                         <th style="width:8%;">单位</th>
                         <th style="width:15%;">备注</th>
                         <th style="width:12%;">辅助单位提示</th>
-                        <th style="width:65px;">操作</th>
+                        <th style="width:240px;">操作</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -1019,11 +1019,15 @@ document.getElementById('voiceInputBtn').addEventListener('click', function () {
                         <button type="button" class="placement-add-btn lock-hide{% if item.placement_match %} placement-ok{% endif %}" data-record-id="{{ item.id }}" data-order-id="{{ group.id }}" title="添加点数图(供清点{{ item.unit }}数)" onclick="openPlacementImageModal('{{ item.id }}','{{ group.id }}')">点数</button>
                         {% endif %}
                         {% if not item.is_board and not item.is_copy_paper %}<button type="button" class="btn btn-sm record-image-btn lock-hide{% if item.has_image %} has-image{% endif %}" data-record-id="{{ item.id }}" title="上传图片到此商品{% if item.has_image %}（已上传）{% endif %}" style="background:#74b9ff;color:#fff;">🖼️</button>{% endif %}
-                        {% if item.unit == '桶' or '支' in (item.unit_hint or '') or '支' in (item.piece_hint or '') %}<button type="button" class="placement-add-btn lock-hide{% if item.placement_match %} placement-ok{% endif %}" data-record-id="{{ item.id }}" data-order-id="{{ group.id }}" title="添加点数图(供清点{{ item.unit }}数)" onclick="openPlacementImageModal('{{ item.id }}','{{ group.id }}')">点数</button>{% endif %}
+                        {# 2026-09-30: 桶 + 张(成品纸:A级正度/A级大度/正度白板/灰板/绿精灵特规/美牛 等) + 支 走 placement 点数;
+                            加 not item.is_copy_paper 避免与 1019 行的 copy_paper 路径重复渲染同一个按钮 #}
+                        {% if (item.unit == '桶' or item.unit == '张' or '支' in (item.unit_hint or '') or '支' in (item.piece_hint or '')) and not item.is_copy_paper %}<button type="button" class="placement-add-btn lock-hide{% if item.placement_match %} placement-ok{% endif %}" data-record-id="{{ item.id }}" data-order-id="{{ group.id }}" title="添加点数图(供清点{{ item.unit }}数)" onclick="openPlacementImageModal('{{ item.id }}','{{ group.id }}')">点数</button>{% endif %}
                         <input type="file" class="record-image-input" data-record-id="{{ item.id }}" accept="image/*" multiple style="display:none;">
                         {% if item.verified %}<span class="status-badge verified-badge lock-show" title="该行已核查">✓ 已核查</span>{% endif %}
                         {# 2026-09-09: 拷贝纸/日本纸 点数走 placement 体系(单位=令/张),同样可显示"✓ 点数"标记 #}
-                        {% if item.unit == '桶' or item.is_copy_paper or '支' in (item.unit_hint or '') or '支' in (item.piece_hint or '') %}{% if item.placement_match %}<span class="status-badge placement-badge lock-show" title="该行已添加点数图">✓ 点数</span>{% endif %}{% endif %}
+                        {# 2026-09-30: 同步 unit=='张'(A级正度/A级大度 等)行也能显示 ✓ 点数 标记;
+                            copy_paper(令/件/支)仍由 is_copy_paper or 覆盖 #}
+                        {% if item.unit == '桶' or item.unit == '张' or item.is_copy_paper or '支' in (item.unit_hint or '') or '支' in (item.piece_hint or '') %}{% if item.placement_match %}<span class="status-badge placement-badge lock-show" title="该行已添加点数图">✓ 点数</span>{% endif %}{% endif %}
                     </td>
                 </tr>
                 {% endfor %}
