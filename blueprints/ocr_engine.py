@@ -3696,13 +3696,246 @@ class MiniMaxEngine(BaseOCREngine):
                 'hint': '请重试或切换到其他引擎'
             }
 
+    # ── 文本 → 结构化明细行(2026-10-04 出货页 PaddleOCR+MiniMax 选项)──────
+    # 场景:用户选「🤖 PaddleOCR + MiniMax（推荐）」时,前端走
+    # /api/v1/<page>-orders/ai-recognize → get_ocr_engine('paddleocr_minimax')
+    # → PaddleOCRMiniMaxEngine.recognize(image_bytes) → 本方法把已抽好的 OCR 文字
+    # 喂给 MiniMax 做结构化。与 DeepSeekEngine.recognize_text 完全同构(都走
+    # STRUCT_PROMPT + 码基规则 + _filter_summary_items),失败时上层会降级到
+    # DeepSeekEngine.recognize_text,所以本方法只关心成功路径 + 准确的失败
+    # 错误消息,不引入二级 fallback(避免 fallback chain 不可控)。
+    def recognize_text(self, text):
+        if not self.API_KEY or self.API_KEY.startswith('sk-your-'):
+            return {
+                'success': False,
+                'error': 'MiniMax API key 未配置',
+                'hint': '请在 .env 中设置 MINIMAX_API_KEY 后重启应用'
+            }
+        text = (text or '').strip()
+        if not text:
+            return {'success': False, 'error': '输入文本为空', 'hint': '请先上传图片或粘贴文本'}
+        # 截断极端输入(与 DeepSeek 同款防御 — 跟图片路径同样的根因)
+        max_chars = 4000
+        truncated = False
+        if len(text) > max_chars:
+            text = text[:max_chars]
+            truncated = True
+
+        try:
+            # 注入码基产品清单(与 DeepSeekEngine.recognize_text 同款)
+            yard_names = _load_yard_product_names()
+            yard_rule = ''
+            if yard_names:
+                yard_rule = (
+                    '\n════════════════════════════════════════\n'
+                    '【关键规则 — 码基产品字段对齐(必须遵守)】\n'
+                    '════════════════════════════════════════\n'
+                    '以下产品按码(y)计量,字段必须这样填:\n'
+                    '  quantity = 码数(若文本里同时出现码数和支数,码数进 quantity)\n'
+                    '  unit = "y"\n'
+                    '  remark = 支数(形如"45支")\n'
+                    '即:若文本同时出现"45支"和码数(如 1642.5),码数进 quantity、unit 填 y、"45支"进 remark。\n'
+                    '码基产品清单: ' + '、'.join(yard_names) + '\n\n'
+                )
+            prompt = self.STRUCT_PROMPT + yard_rule + 'OCR 识别的文字如下：\n' + text
+            client = openai.OpenAI(api_key=self.API_KEY, base_url=self.BASE_URL)
+            response = client.chat.completions.create(
+                model=self.MODEL,
+                messages=[{'role': 'user', 'content': prompt}],
+                max_tokens=self.MAX_TOKENS,
+                temperature=self.TEMPERATURE,
+                timeout=self.TIMEOUT,
+                response_format={'type': 'json_object'},
+            )
+            finish_reason = response.choices[0].finish_reason
+            raw = (response.choices[0].message.content or '').strip()
+            # 截断直接失败 — PaddleOCRMiniMaxEngine 会自动降级到 DeepSeek 重跑
+            if finish_reason == 'length':
+                return {
+                    'success': False,
+                    'error': 'MiniMax 响应被截断(AI 推理超出预算)',
+                    'hint': '真因是模型内部推理消耗 token。建议重试;上层会自动降级到 DeepSeek 重跑'
+                }
+            if not raw:
+                return {
+                    'success': False,
+                    'error': 'MiniMax 返回内容为空',
+                    'hint': '可能原因:输入文本触发模型空响应。建议重试'
+                }
+            raw = re.sub(r'^\s*```[a-zA-Z]*\s*\n?', '', raw)
+            raw = re.sub(r'\n?\s*```\s*$', '', raw).strip()
+            logger.info("MiniMax recognize_text raw (first 500 chars): %s", raw[:500])
+            data = json.loads(raw)
+
+            if isinstance(data, list):
+                items = data
+                doc_number = ''
+                customer_name = ''
+            else:
+                items = data.get('items', [])
+                doc_number = data.get('doc_number', '') or ''
+                customer_name = data.get('customer_name', '') or ''
+
+            if not isinstance(items, list):
+                return {
+                    'success': False,
+                    'error': 'MiniMax 返回格式异常',
+                    'hint': '请重试'
+                }
+            # 复用图片路径的汇总行安全网
+            items, _removed = _filter_summary_items(items)
+            result = {
+                'success': True,
+                'items': items,
+                'doc_number': doc_number,
+                'customer_name': customer_name,
+                'ocr_text': text,  # 与 DeepSeekEngine.recognize_text 同名,前端统一处理
+            }
+            if truncated:
+                result['truncated'] = True
+                result['hint'] = f'输入文本超过 {max_chars} 字符,已截断前 {max_chars} 字符解析'
+            return result
+        except ImportError:
+            return {
+                'success': False,
+                'error': 'openai 包未安装',
+                'hint': '请运行: pip install openai'
+            }
+        except openai.AuthenticationError:
+            return {
+                'success': False,
+                'error': 'MiniMax API key 失效(401)',
+                'hint': '请检查 .env 中的 MINIMAX_API_KEY 是否正确'
+            }
+        except openai.APIConnectionError:
+            return {
+                'success': False,
+                'error': '无法连接 MiniMax 服务',
+                'hint': '请检查网络连接'
+            }
+        except openai.RateLimitError:
+            return {
+                'success': False,
+                'error': 'MiniMax 调用频率过高(429)',
+                'hint': '请稍候几秒后重试'
+            }
+        except openai.APIStatusError as e:
+            return {
+                'success': False,
+                'error': f'MiniMax 服务返回异常({e.status_code}){_api_error_detail(e)}',
+                'hint': '请根据错误信息检查请求参数,或检查 MiniMax 平台状态'
+            }
+        except json.JSONDecodeError:
+            return {
+                'success': False,
+                'error': 'MiniMax 返回格式无法解析',
+                'hint': '请重试'
+            }
+        except Exception as e:
+            logger.exception('MiniMax recognize_text 失败: %s', e)
+            return {
+                'success': False,
+                'error': f'MiniMax 解析失败:{type(e).__name__}',
+                'hint': '请重试'
+            }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# PaddleOCR + MiniMax 复合引擎(2026-10-04 出货页新选项,MiniMax 优先 + DeepSeek 兜底)
+# ═══════════════════════════════════════════════════════════════════
+class PaddleOCRMiniMaxEngine(BaseOCREngine):
+    """PaddleOCR 抽文字 → MiniMax 结构化 → 失败时降级 DeepSeek。
+
+    用户场景:出货/入库/装柜「智能添加 → 📷 AI 图片识别」tab 选
+    「🤖 PaddleOCR + MiniMax（推荐）」时走本引擎。架构与原
+    DeepSeekEngine.recognize() 完全同构 — 唯一差别是把 LLM 主路径换成
+    MiniMax,失败时(API 401/429/连接错误/截断/JSON 解析失败)降级到
+    DeepSeekEngine.recognize_text 完成结构化。
+
+    关键契约:
+      - 返回 dict 含 ocr_text 字段(前端两栏对照弹框 _smart_add_modal.html:124 用)
+      - 成功路径 ocr_text = PaddleOCR 抽出的原文
+      - 降级路径带 fallback_minimax_failed=True + original_engine='paddleocr_minimax'
+      - 两边都失败 → 返回 MiniMax 错误 + ocr_text 字段(主路径优先)
+
+    ⚠️ MiniMaxEngine 多模态路径(recognize)是 DeepSeek 截断时的内部 fallback
+    (_try_minimax_fallback 调用),与本引擎职责不冲突。
+    """
+
+    def __init__(self):
+        # 注意:_ocr_image 是 DeepSeekEngine 的实例方法(内部封装了 PaddleOCREngine
+        # + _format_table_rows 表格行格式化),所以 OCR 抽取走 self._deepseek._ocr_image。
+        # self._deepseek 同时也用作降级路径的 fallback 调用,一物两用不浪费。
+        self._minimax = MiniMaxEngine()
+        self._deepseek = DeepSeekEngine()
+
+    def recognize(self, image_bytes, filename=''):
+        # 1) PaddleOCR 抽文字(经 DeepSeekEngine 包装,带 _format_table_rows 行格式化)
+        try:
+            ocr_text = self._deepseek._ocr_image(image_bytes)
+        except Exception as e:
+            logger.exception('PaddleOCRMiniMaxEngine: PaddleOCR 抽文字失败: %s', e)
+            return {
+                'success': False,
+                'error': f'PaddleOCR 失败:{type(e).__name__}',
+                'hint': '请确认 PaddleOCR 已安装,或切换到其他引擎(Moonshot/MiniMax 多模态)',
+                'ocr_text': ''
+            }
+        if not ocr_text:
+            return {
+                'success': True,
+                'items': [],
+                'doc_number': '',
+                'customer_name': '',
+                'ocr_text': ''
+            }
+
+        # 2) MiniMax 结构化(文本路径)
+        try:
+            result = self._minimax.recognize_text(ocr_text)
+        except Exception as e:
+            # 即便本方法内部已捕获所有异常,这里再兜一层防御
+            logger.exception('PaddleOCRMiniMaxEngine: MiniMax 调用异常,降级 DeepSeek: %s', e)
+            result = {'success': False, 'error': f'{type(e).__name__}: {e}', 'hint': ''}
+
+        if result.get('success'):
+            # MiniMaxEngine.recognize_text 已自带 ocr_text,这里冗余写一次确保字段存在
+            result['ocr_text'] = ocr_text
+            return result
+
+        # 3) 降级 DeepSeek
+        logger.warning(
+            'PaddleOCRMiniMaxEngine: MiniMax 失败(%s),降级到 DeepSeek 重跑',
+            result.get('error', '?')
+        )
+        try:
+            fallback = self._deepseek.recognize_text(ocr_text)
+        except Exception as e:
+            logger.exception('PaddleOCRMiniMaxEngine: DeepSeek 兜底也失败: %s', e)
+            result['ocr_text'] = ocr_text
+            return result
+
+        if fallback.get('success'):
+            fallback['ocr_text'] = ocr_text
+            fallback['fallback_minimax_failed'] = True
+            fallback['original_engine'] = 'paddleocr_minimax'
+            return fallback
+
+        # 4) 两边都失败 → 返回 MiniMax 错误(主路径)+ ocr_text 字段(供前端展示)
+        logger.warning(
+            'PaddleOCRMiniMaxEngine: MiniMax 与 DeepSeek 都失败,返回 MiniMax 错误: %s / %s',
+            result.get('error', '?'), fallback.get('error', '?')
+        )
+        result['ocr_text'] = ocr_text
+        return result
+
 
 # ═══════════════════════════════════════════════════════════════════
 # 引擎工厂
 # ═══════════════════════════════════════════════════════════════════
 
 _engine_cache = {}
-_VALID_ENGINES = ('moonshot', 'paddleocr', 'deepseek', 'minimax')
+_VALID_ENGINES = ('moonshot', 'paddleocr', 'deepseek', 'minimax', 'paddleocr_minimax')
 
 # 引擎 → 当前活跃模型(防回归参考表)
 # 维护原则:DeepSeek/Moonshot/MiniMax 偶尔下线旧模型,出现 400 + "model not found" 时来这里对照,
@@ -3712,6 +3945,7 @@ _ACTIVE_MODELS = {
     'deepseek': 'deepseek-v4-flash',  # v4-pro 备选,价格 10x
     'paddleocr': '(本地模型,无需 token)',
     'minimax': 'MiniMax-M3',
+    'paddleocr_minimax': 'MiniMax-M3(+PaddleOCR,DeepSeek fallback)',  # 2026-10-04 出货页新选项
 }
 
 
@@ -3719,7 +3953,7 @@ def get_ocr_engine(engine_name=None):
     """获取 OCR 引擎实例（单例缓存）。
 
     Args:
-        engine_name: 'moonshot' | 'paddleocr' | 'deepseek'，
+        engine_name: 'moonshot' | 'paddleocr' | 'deepseek' | 'minimax' | 'paddleocr_minimax'，
                      None 时读 .env 的 OCR_BACKEND。
 
     Returns:
@@ -3732,7 +3966,7 @@ def get_ocr_engine(engine_name=None):
     if engine_name not in _VALID_ENGINES:
         raise ValueError(
             f'不支持的 OCR 引擎: {engine_name}，'
-            f'请使用 "moonshot"、"paddleocr"、"deepseek" 或 "minimax"'
+            f'请使用 "moonshot"、"paddleocr"、"deepseek"、"minimax" 或 "paddleocr_minimax"'
         )
 
     if engine_name not in _engine_cache:
@@ -3742,6 +3976,8 @@ def get_ocr_engine(engine_name=None):
             _engine_cache[engine_name] = DeepSeekEngine()
         elif engine_name == 'minimax':  # 2026-09-17 新增,DeepSeek 截断 fallback
             _engine_cache[engine_name] = MiniMaxEngine()
+        elif engine_name == 'paddleocr_minimax':  # 2026-10-04 出货页新选项
+            _engine_cache[engine_name] = PaddleOCRMiniMaxEngine()
         else:
             try:
                 _engine_cache[engine_name] = PaddleOCREngine()
