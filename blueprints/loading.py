@@ -22,9 +22,10 @@ from blueprints._helpers import (
     get_upload_dir as get_helpers_upload_dir,
     get_ypp, calc_hint, check_remark, summarize_remarks,
     get_piece_conversion, calc_piece_quantity, check_piece_mismatch,
+    annotate_import_validation, summarize_import_validation,
     validate_image_content, check_uploaded_image,
     match_label_to_row, detect_bg_color,
-    compute_placement_expected_zhi, apply_user_rotation,
+    compute_placement_expected_zhi, apply_user_rotation, parse_loose_yards,
 )
 from blueprints.ocr_engine import PaddleOCREngine, get_ocr_engine, OCR_MATCH_PROMPT_VERSION, ocr_preprocess_kind
 from blueprints.ocr_pipeline import RecordImageProcessor, _OCR_LOCK, _ASYNC_JOBS
@@ -33,15 +34,18 @@ from models._db import get_db
 from blueprints.ocr_log import set_log_context
 # 2026-09-09: 拷贝纸/日本纸 共享常量 + 判定函数(对齐出货,出货 9/9 已加)
 # 跨 blueprint import:shipping.py 不反向 import loading.py,无循环风险。
-from blueprints.shipping import COPY_PAPER_LABEL_SOURCE, _is_copy_paper_item
+from blueprints.shipping import (
+    COPY_PAPER_LABEL_SOURCE,
+    _is_no_ai_match_item,  # 2026-10-04 新增(含 0108 腊光纸),2026-10-08 成为唯一谓词
+)
 
 bp = Blueprint('loading', __name__)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# 2026-09-09: 散码正则(对齐 shipping.py:SANMA_RE)
-# 匹配「5y」「5 y」「3Y」等形式,且前面不能是数字/小数点(避免吃掉码数如 3.5y 被误读成 5y)
-SANMA_RE = re.compile(r'(?<![\d.])(\d+)\s*[yY]')
+# 2026-10-09: 散码解析统一调 _helpers.parse_loose_yards(先抠掉「X支*Yy」乘法项)。
+#   旧 SANMA_RE = (?<![\d.])(\d+)\s*[yY] 已被删除 —— 把 105支*32y+37y 里的
+#   32y(每支码数)误算进散码,导致 expected_sanma=69(应=37)。
 
 # 行级图 OCR pipeline 共用处理器(装柜专用,显式注入 LoadingOrderImage)
 # 替代端点内嵌的 OCR + AI 比对代码(2026-08-19 抽取到 ocr_pipeline)。
@@ -267,9 +271,7 @@ def loading_orders():
                     _total += -_base if p.get('is_unload') else _base
                     _loose += p.get('loose_count') or 0
                 _exp_zhi, _has_zhi = compute_placement_expected_zhi(_remark, _qty, _unit)
-                _san_m = list(SANMA_RE.finditer(_remark))
-                _exp_san = sum(int(x.group(1)) for x in _san_m)
-                _has_san = len(_san_m) > 0
+                _exp_san, _has_san = parse_loose_yards(_remark)
                 _matched_zhi = (not _has_zhi) or (abs(_total - _exp_zhi) <= 0.01)
                 _matched_san = (not _has_san) or (abs(_loose - _exp_san) <= 0.01)
                 if (_has_zhi or _has_san) and _matched_zhi and _matched_san:
@@ -324,9 +326,7 @@ def loading_orders():
             expected_zhi, has_zhi = compute_placement_expected_zhi(
                 remark, rec.get('quantity') or '', rec.get('unit') or ''
             )
-            san_m = list(SANMA_RE.finditer(remark))
-            expected_sanma = sum(int(x.group(1)) for x in san_m)
-            has_sanma = len(san_m) > 0
+            expected_sanma, has_sanma = parse_loose_yards(remark)
             current['items'].append({
                 'record_id': rec['id'],
                 'specification': rec.get('specification') or '',
@@ -533,11 +533,26 @@ def api_v1_loading_orders_add_records_batch(order_id):
                 'product_name': rec.get('product_name', ''),
                 'specification': rec.get('specification', ''),
                 'quantity': str(rec.get('quantity', '')),
-                'unit': rec.get('unit', '支'),
+                # 2026-10-09:回传归一化后的 unit(与入库/出货同口径)。
+                # 原代码回传 rec.get('unit') —— DB 存的是 'y',响应却是 '码',
+                # 导致前端渲染与校验拿到跟库里不一致的单位。
+                'unit': unit,
                 'remark': rec.get('remark', '')
             })
         conn.commit()
-        return jsonify({'success': True, 'count': len(result_records), 'records': result_records}), 201
+        # 2026-10-09 概述 §f:导入即校验 —— 原地打 mismatch/piece_mismatch/qty_invalid 回传前端。
+        # 判定函数与列表页渲染共用同一套(check_remark/check_piece_mismatch);不落库,刷新现算。
+        validation = None
+        try:
+            annotate_import_validation(result_records)
+            validation = summarize_import_validation(result_records)
+        except Exception:
+            from flask import current_app
+            current_app.logger.exception('装柜导入校验失败(不影响已插入的明细): order_id=%s', order_id)
+        resp = {'success': True, 'count': len(result_records), 'records': result_records}
+        if validation:
+            resp['validation'] = validation
+        return jsonify(resp), 201
     except Exception as e:
         conn.rollback()
         from flask import current_app
@@ -651,11 +666,11 @@ def loading_ai_recognize():
         os.environ.get('OCR_BACKEND', 'moonshot')
     )
 
-    if engine_name not in ('moonshot', 'paddleocr', 'deepseek'):
+    if engine_name not in ('moonshot', 'paddleocr', 'deepseek', 'minimax', 'paddleocr_minimax'):
         return jsonify({
             'success': False,
             'error': f'不支持的识别引擎: {engine_name}',
-            'hint': '请使用 "moonshot"、"paddleocr" 或 "deepseek"'
+            'hint': '请使用 "moonshot"、"paddleocr"、"deepseek"、"minimax" 或 "paddleocr_minimax"'
         }), 400
 
     if 'image' not in request.files:
@@ -678,7 +693,7 @@ def loading_ai_recognize():
         return jsonify({'success': False, 'error': '引擎初始化失败', 'hint': str(e)}), 500
     except ValueError as e:
         return jsonify({'success': False, 'error': str(e),
-                        'hint': '请使用 "moonshot"、"paddleocr" 或 "deepseek"'}), 400
+                        'hint': '请使用 "moonshot"、"paddleocr"、"deepseek"、"minimax" 或 "paddleocr_minimax"'}), 400
 
     try:
         result = engine.recognize(img_bytes, file.filename)
@@ -830,11 +845,12 @@ def api_v1_loading_orders_record_upload_images(record_id):
     if order and order.get('is_locked'):
         return jsonify({'success': False, 'error': '该订单已锁定，无法上传图片'}), 403
     # 2026-09-12: 拷贝纸/日本纸行禁止走普通 /images 端点 → 必须用 /copy-paper-images
-    # 后端硬拦截,与出货页一致(出货/装柜共用 _is_copy_paper_item 判定)
-    if _is_copy_paper_item(record):
+    # 2026-10-04: 扩展到腊光纸(0108)—— 包装贴纸与商品本身不一致,OCR 误识刷红牌
+    # 后端硬拦截,与出货页一致(出货/装柜共用 _is_no_ai_match_item 判定)
+    if _is_no_ai_match_item(record):
         return jsonify({
             'success': False,
-            'error': '该明细为拷贝纸/日本纸,请使用 🖼️ 标签按钮上传(不需 OCR)'
+            'error': '该明细为非 OCR 类(拷贝纸/日本纸/快巴纸/腊光纸),不需 OCR 比对'
         }), 400
 
     upload_dir, month_str = _get_upload_dir()
@@ -1237,9 +1253,7 @@ def _compute_loading_placement_match(record_pk):
     exp_zhi, has_zhi = compute_placement_expected_zhi(
         remark, rec.get('quantity') or '', rec.get('unit') or ''
     )
-    san_m = list(SANMA_RE.finditer(remark))
-    exp_san = sum(int(x.group(1)) for x in san_m)
-    has_san = len(san_m) > 0
+    exp_san, has_san = parse_loose_yards(remark)
     matched_zhi = (not has_zhi) or (abs(total - exp_zhi) <= 0.01)
     matched_san = (not has_san) or (abs(loose - exp_san) <= 0.01)
     return (has_zhi or has_san) and matched_zhi and matched_san

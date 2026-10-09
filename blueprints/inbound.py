@@ -19,10 +19,11 @@ from blueprints._helpers import (
     get_upload_dir as get_helpers_upload_dir,
     get_ypp, calc_hint, check_remark, summarize_remarks,
     get_piece_conversion, calc_piece_quantity, check_piece_mismatch,
+    annotate_import_validation, summarize_import_validation,
     validate_image_content, check_uploaded_image,
     match_label_to_row, detect_bg_color,
     apply_user_rotation,
-    compute_placement_expected_zhi,
+    compute_placement_expected_zhi, parse_loose_yards,
 )
 from blueprints.ocr_engine import PaddleOCREngine, get_ocr_engine, OCR_MATCH_PROMPT_VERSION, ocr_preprocess_kind
 from blueprints.ocr_pipeline import RecordImageProcessor
@@ -30,8 +31,9 @@ from blueprints.ocr_log import set_log_context
 
 bp = Blueprint('inbound', __name__)
 
-# 2026-08-26: align shipping placement - sanma regex
-SANMA_RE = re.compile(r'(?<![\\d.])(\\d+(?:\\.\\d+)?)\\s*[yY]')
+# 2026-10-09: 散码解析统一调 _helpers.parse_loose_yards(先抠掉「X支*Yy」乘法项)。
+#   旧 SANMA_RE(以及字符串字面量里的 `\\d` 漏写反斜杠导致变成字符 'd' 的 bug)
+#   已被删除 —— 同样的"32y + 37y = 69"误算场景。
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -201,11 +203,9 @@ def inbound_records():
                 _exp_zhi, _has_zhi = compute_placement_expected_zhi(
                     _remark, item.get('quantity') or '', item.get('unit') or ''
                 )
-                _san_m = list(SANMA_RE.finditer(_remark))
-                _exp_san = sum(float(x.group(1)) for x in _san_m)
+                _exp_san, _has_san = parse_loose_yards(_remark)
                 if _exp_san == int(_exp_san):
                     _exp_san = int(_exp_san)
-                _has_san = len(_san_m) > 0
                 _matched_zhi = (not _has_zhi) or (abs(_total - _exp_zhi) <= 0.01)
                 _matched_san = (not _has_san) or (abs(_loose - _exp_san) <= 0.01)
                 if (_has_zhi or _has_san) and _matched_zhi and _matched_san:
@@ -239,11 +239,9 @@ def inbound_records():
             expected_zhi, has_zhi = compute_placement_expected_zhi(
                 remark, rec.get('quantity') or '', rec.get('unit') or ''
             )
-            san_m = list(SANMA_RE.finditer(remark))
-            expected_sanma = sum(float(x.group(1)) for x in san_m)
+            expected_sanma, has_sanma = parse_loose_yards(remark)
             if expected_sanma == int(expected_sanma):
                 expected_sanma = int(expected_sanma)
-            has_sanma = len(san_m) > 0
             current['items'].append({
                 'record_id': rec['id'],
                 'specification': rec.get('specification') or '',
@@ -476,7 +474,19 @@ def api_v1_inbound_orders_add_records_batch(order_id):
         conn.commit()
         if result_records:
             AuditLog.log('batch_add_records', 'inbound_order', order_id, detail={'count': len(result_records)})
-        return jsonify({'success': True, 'count': len(result_records), 'records': result_records}), 201
+        # 2026-10-09 概述 §f:导入即校验 —— 原地打 mismatch/piece_mismatch/qty_invalid 回传前端。
+        # 判定函数与列表页渲染共用同一套(check_remark/check_piece_mismatch);不落库,刷新现算。
+        validation = None
+        try:
+            annotate_import_validation(result_records)
+            validation = summarize_import_validation(result_records)
+        except Exception:
+            from flask import current_app
+            current_app.logger.exception('入库导入校验失败(不影响已插入的明细): order_id=%s', order_id)
+        resp = {'success': True, 'count': len(result_records), 'records': result_records}
+        if validation:
+            resp['validation'] = validation
+        return jsonify(resp), 201
     except Exception as e:
         conn.rollback()
         from flask import current_app
@@ -654,11 +664,9 @@ def _inbound_placement_match_for_image(image_id):
     exp_zhi, has_zhi = compute_placement_expected_zhi(
         remark, rec.get('quantity') or '', rec.get('unit') or ''
     )
-    san_m = list(SANMA_RE.finditer(remark))
-    exp_san = sum(float(x.group(1)) for x in san_m)
+    exp_san, has_san = parse_loose_yards(remark)
     if exp_san == int(exp_san):
         exp_san = int(exp_san)
-    has_san = len(san_m) > 0
     matched_zhi = (not has_zhi) or (abs(total - exp_zhi) <= 0.01)
     matched_san = (not has_san) or (abs(loose - exp_san) <= 0.01)
     return bool((has_zhi or has_san) and matched_zhi and matched_san), record_pk
@@ -872,11 +880,11 @@ def inbound_ai_recognize():
         os.environ.get('OCR_BACKEND', 'moonshot')
     )
 
-    if engine_name not in ('moonshot', 'paddleocr', 'deepseek'):
+    if engine_name not in ('moonshot', 'paddleocr', 'deepseek', 'minimax', 'paddleocr_minimax'):
         return jsonify({
             'success': False,
             'error': f'不支持的识别引擎: {engine_name}',
-            'hint': '请使用 "moonshot"、"paddleocr" 或 "deepseek"'
+            'hint': '请使用 "moonshot"、"paddleocr"、"deepseek"、"minimax" 或 "paddleocr_minimax"'
         }), 400
 
     # ── 文本分支(2026-09-22 入库页「🤖 智能文本」tab)───────────────

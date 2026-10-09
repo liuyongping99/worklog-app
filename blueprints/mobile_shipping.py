@@ -8,6 +8,7 @@ from flask import Blueprint, render_template
 from models.orders import ShippingOrder, ShippingRecord, ShippingImage, PlacementImage, OcrMatchEvent
 from blueprints.ocr_log import set_log_context
 from blueprints.shipping import _enrich_copy_paper_for_item, COPY_PAPER_LABEL_SOURCE
+from blueprints._helpers import parse_loose_yards
 
 bp = Blueprint("mobile_shipping", __name__)
 
@@ -80,9 +81,8 @@ def _placement_compare(rec: dict) -> dict:
     zhi_m = list(re.finditer(r"(\d+)\s*支", remark))
     expected_zhi = sum(int(x.group(1)) for x in zhi_m)
     has_zhi = len(zhi_m) > 0
-    san_m = list(re.finditer(r"(\d+)\s*[yY]", remark))
-    expected_san = sum(int(x.group(1)) for x in san_m)
-    has_san = len(san_m) > 0
+    # 2026-10-09: 散码解析统一调 parse_loose_yards(先抠掉「X支*Yy」乘法项)
+    expected_san, has_san = parse_loose_yards(remark)
     zhi_match = (not has_zhi) or zhi_actual == expected_zhi
     san_match = (not has_san) or loose_actual == expected_san
     return {
@@ -169,7 +169,7 @@ def shipping_order_detail(oid: int):
         # 2026-09-06: enrich copy-paper 字段(同步 PC shipping-records 的 _enrich_copy_paper_for_item)
         _enrich_copy_paper_for_item(rec)
         imgs = record_images[rec["id"]]
-        # 2026-09-09: 拷贝纸标签图(source='copy_paper_label')不做 OCR,不算 OCR 图,
+        # 2026-09-09: 免 AI 比对标签图(source='copy_paper_label')不做 OCR,不算 OCR 图,
         # 否则会被当成"最后一张 OCR 图"影响状态/详情链接
         ocr_imgs = [
             i for i in imgs

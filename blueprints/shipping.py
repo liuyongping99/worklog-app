@@ -25,10 +25,11 @@ from blueprints._helpers import (
     get_upload_dir as get_helpers_upload_dir,
     get_ypp, calc_hint, check_remark, summarize_remarks, find_ypp_mismatches,
     get_piece_conversion, calc_piece_quantity, check_piece_mismatch,
+    annotate_import_validation, summarize_import_validation,
     validate_image_content, check_uploaded_image,
     match_label_to_row, detect_bg_color,
     apply_user_rotation,
-    compute_placement_expected_zhi,
+    compute_placement_expected_zhi, parse_loose_yards,
 )
 from blueprints.ocr_engine import (
     PaddleOCREngine, get_ocr_engine, OCR_MATCH_PROMPT_VERSION,
@@ -40,19 +41,27 @@ from blueprints.ocr_pipeline import (
 from blueprints import _helpers
 from models._db import get_db
 
-# 2026-08-19:「散码」口径正则 — 用 (?<![\d.]) 负向后顾排除小数点后的 y,
-#   例如 "34.5y" 中的 "5" 不应被识别为独立散码期望,否则会把 160支*34.5y
-#   误判成"支=160、散码=5",导致 placement_match 永远为 False。
-#   两处使用保持一致:
-#     1) line ~202: placement_groups 渲染(每条 record 的备注汇总)
-#     2) line ~303: placement_match 判定(决定"点数"按钮是否加绿框)
-SANMA_RE = re.compile(r'(?<![\d.])(\d+)\s*[yY]')
+# 2026-10-09: 散码解析统一调 _helpers.parse_loose_yards(先抠掉「X支*Yy」乘法项)。
+#   旧 SANMA_RE = (?<![\d.])(\d+)\s*[yY] 已被删除 —— 它把 105支*32y+37y 里的
+#   32y(每支码数)误算进散码,导致 expected_sanma=69(应=37)。
+#   新函数同时支持小数 + 中英 y/Y/码,与 check_remark 的「先抠乘法项」口径一致。
 
 # 2026-09-09: 拷贝纸/日本纸 标签图在 shipping_images 里的 source 值。
 # 与 OCR 图('upload'/'ai')、摆放图('placement')并列,靠它区分:
 #   - 模板渲染:独立循环,不渲染 OCR/AI 按钮与 match-badge
 #   - has_image / ocr_images 统计:排除(不做 OCR,不算已核对图)
 COPY_PAPER_LABEL_SOURCE = 'copy_paper_label'
+# 2026-10-04: 跳过商品行 AI 比对的品类(拷贝纸/日本纸/快巴纸 + 腊光/蜡光)。
+# 2026-10-08: 这批品类的**唯一**图片入口是「🖼️ 标签图」按钮(source='copy_paper_label',不做 OCR),
+#   腊光纸(0108)也纳入 —— 它跟拷贝纸一样,贴纸与商品本体不一致,走 OCR 只会刷误导性红 ✗。
+# 四处消费都走同一个谓词 _is_no_ai_match_item:
+#   - 后端硬拦截 POST /records/<id>/images → 400(逼用户改走标签图按钮)
+#   - 整单 ai-match 过滤 records → OCR 循环 / rows / own_record_ids / verdicts 回写全跳过
+#   - 模板:普通 🖼️ 按钮守卫 not is_no_ai_match(隐藏);标签 🖼️ 按钮守卫 is_no_ai_match(显示)
+#   - 移动端:隐藏「📷 拍照识别」(否则点进去吃 400),徽章改为「标签图」
+# 与 COPY_PAPER_LABEL_SOURCE 不同:后者是落库的 source 字符串,这里是判定用的品类集合。
+NO_AI_MATCH_CATEGORY_CODES = ('0105', '0106', '0107', '0108')
+NO_AI_MATCH_KEYWORDS = ('拷贝', '日本纸', '快巴', '腊光', '蜡光')
 from blueprints.ocr_log import set_log_context
 
 
@@ -94,9 +103,7 @@ def compute_placement_match(record: dict, pimgs: list) -> bool:
     total = sum(_eff_zhi(p) for p in pimgs)
     loose = sum(p.get('loose_count', 0) for p in pimgs)
     exp_zhi, has_zhi = compute_placement_expected_zhi(remark, qty, unit)
-    san_m = list(SANMA_RE.finditer(remark))
-    exp_san = sum(int(x.group(1)) for x in san_m)
-    has_san = len(san_m) > 0
+    exp_san, has_san = parse_loose_yards(remark)
     matched_zhi = (not has_zhi) or (abs(total - exp_zhi) <= 0.01)
     matched_san = (not has_san) or (abs(loose - exp_san) <= 0.01)
     return (has_zhi or has_san) and matched_zhi and matched_san
@@ -248,7 +255,7 @@ def shipping_records():
             # 2026-09-09: 本行图缓存给 _enrich_copy_paper_for_item 复用(避免重复查库)
             rec['_record_imgs_cache'] = record_imgs
             # 摆放图不计入 OCR 图的 has_image(红框语义=已上传 OCR 图);
-            # 拷贝纸标签图(source='copy_paper_label')也不算 —— 它不做 OCR/AI
+            # 免 AI 比对标签图(source='copy_paper_label')也不算 —— 它不做 OCR/AI
             rec['has_image'] = any(
                 i.get('source') not in ('placement', 'copy_paper_label') for i in record_imgs)
             placement_by_record[rec['id']] = PlacementImage.get_by_record(rec['id'])
@@ -277,9 +284,7 @@ def shipping_records():
             expected_zhi, has_zhi = compute_placement_expected_zhi(
                 remark, rec.get('quantity') or '', rec.get('unit') or ''
             )
-            san_m = list(SANMA_RE.finditer(remark))
-            expected_sanma = sum(int(x.group(1)) for x in san_m)
-            has_sanma = len(san_m) > 0
+            expected_sanma, has_sanma = parse_loose_yards(remark)
             current['items'].append({
                 'record_id': rec['id'],
                 'specification': rec.get('specification') or '',
@@ -293,7 +298,9 @@ def shipping_records():
                 'images': pimgs,
                 # 2026-09-09: 计数单位参数化(支/令/张) + 拷贝纸无散码
                 'unit': rec.get('unit') or '',
-                'is_copy_paper': _is_copy_paper_item(rec),
+                # 2026-10-08: placement 区已按计量单位渲染(_item.unit),此字段当前不消费;
+                # 保留便于后续按品类过滤 placement 显示。
+                'is_no_ai_match': _is_no_ai_match_item(rec),
             })
         if group_list:
             placement_groups[grp['id']] = group_list
@@ -709,8 +716,22 @@ def api_v1_shipping_orders_add_records_batch(order_id):
 
     AuditLog.log('batch_add_records', 'shipping_order', order_id,
                  detail={'count': len(records), 'skipped': skipped})
-    return jsonify({'success': True, 'count': len(records),
-                    'skipped': skipped, 'records': records}), 201
+
+    # 2026-10-09 概述 §f:导入即校验 —— 原地打上 mismatch/piece_mismatch/qty_invalid
+    # 等标志回传前端，让红/粉标在导入那一刻就显示，不等刷新。
+    # 不落库(2026-10-09 拍板):这些标志完全由 备注+数量 两个字段决定,刷新时现算即可。
+    # 判定函数与列表页渲染时完全相同(check_remark/check_piece_mismatch),杜绝两套口径。
+    try:
+        annotate_import_validation(records)
+        validation = summarize_import_validation(records)
+    except Exception:
+        current_app.logger.exception('导入校验失败(不影响已插入的明细): order_id=%s', order_id)
+        validation = None
+
+    resp = {'success': True, 'count': len(records), 'skipped': skipped, 'records': records}
+    if validation:
+        resp['validation'] = validation
+    return jsonify(resp), 201
 
 
 @bp.route('/api/v1/shipping-orders/records/<int:record_id>', methods=['PUT'])
@@ -1143,12 +1164,13 @@ def api_v1_shipping_orders_record_upload_images(record_id):
     if order and order.get('is_locked'):
         return jsonify({'success': False, 'error': '该订单已锁定，无法上传图片'}), 403
     # 2026-09-12: 拷贝纸/日本纸行禁止走普通 /images 端点 → 必须用 /copy-paper-images
+    # 2026-10-04: 扩展到腊光纸(0108)—— 包装贴纸与商品本身不一致,OCR 误识刷红牌
     # 后端硬拦截,避免 UI 隐藏被绕过(DevTools / 粘贴 / 拖拽)误触发 OCR 流水线产生误导性红 ✗
     # 触发于出货订单 986 / record_id=2740(日本纸777/700)的 image_id=4370 误识别案例
-    if _is_copy_paper_item(record):
+    if _is_no_ai_match_item(record):
         return jsonify({
             'success': False,
-            'error': '该明细为拷贝纸/日本纸,请使用 🖼️ 标签按钮上传(不需 OCR)'
+            'error': '该明细为非 OCR 类(拷贝纸/日本纸/快巴纸/腊光纸),不需 OCR 比对'
         }), 400
 
     upload_dir, month_str = _get_upload_dir()
@@ -1578,11 +1600,11 @@ def shipping_records_ai_recognize():
         os.environ.get('OCR_BACKEND', 'moonshot')
     )
 
-    if engine_name not in ('moonshot', 'paddleocr', 'deepseek'):
+    if engine_name not in ('moonshot', 'paddleocr', 'deepseek', 'minimax', 'paddleocr_minimax'):
         return jsonify({
             'success': False,
             'error': f'不支持的识别引擎: {engine_name}',
-            'hint': '请使用 "moonshot"、"paddleocr" 或 "deepseek"'
+            'hint': '请使用 "moonshot"、"paddleocr"、"deepseek"、"minimax" 或 "paddleocr_minimax"'
         }), 400
 
     # 验证图片
@@ -1627,7 +1649,7 @@ def shipping_records_ai_recognize():
         return jsonify({
             'success': False,
             'error': str(e),
-            'hint': '请使用 "moonshot"、"paddleocr" 或 "deepseek"'
+            'hint': '请使用 "moonshot"、"paddleocr"、"deepseek"、"minimax" 或 "paddleocr_minimax"'
         }), 400
 
     # 委托识别
@@ -1718,6 +1740,13 @@ def api_v1_shipping_orders_ai_match(order_id):
     )
     records = [dict(r) for r in cur.fetchall()]
     conn.close()
+    # 2026-10-04: 拷贝纸/日本纸/快巴纸/腊光纸行直接跳过整轮 AI 比对
+    # 单点切片覆盖四路径:
+    #   - OCR 循环不遍历腊光纸图(省 PaddleOCR)
+    #   - rows 不含腊光纸 → DeepSeek 不知道存在
+    #   - own_record_ids 不含腊光纸 → 即便 LLM 幻觉出 id,foreign-id 兜底会跳过
+    #   - verdicts 循环不会调 set_match / set_human_verified(False) / OcrMatchEvent.create
+    records = [r for r in records if not _is_no_ai_match_item(r)]
 
     # 汇总该单所有行级图片的 OCR 文字（单例引擎，与 _run_label_match / 事件记录共用同一实例）
     paddle = get_ocr_engine('paddleocr')
@@ -2124,26 +2153,30 @@ def api_v1_shipping_orders_record_copy_paper_upload(rid):
 # Task 4 (2026-09-06): record 级别拷贝纸/日本纸 富化
 # ─────────────────────────────────────────────────────────
 
-def _is_copy_paper_item(item: dict) -> bool:
-    """判断 record 是否属于拷贝纸/日本纸/快巴纸类别(均统一走 placement 点数体系)。
+def _is_no_ai_match_item(item: dict) -> bool:
+    """判断 record 是否属于「只走标签图、不做 OCR/AI 比对」的品类。
+
+    覆盖 拷贝纸 / 日本纸 / 快巴纸 / 腊光纸(0105/0106/0107/0108)—— 这类的包装
+    贴纸与商品本体对不上,行级图走 OCR 只会刷误导性红 ✗。它们的图片入口只有
+    「🖼️ 标签图」按钮(source='copy_paper_label',落 shipping_images,不做 OCR)。
 
     双兜底:
-    1. 关键词匹配(product_name 含 '拷贝' / '日本纸' / '快巴')
+    1. 关键词匹配(product_name 含 NO_AI_MATCH_KEYWORDS 任意一个)
+       '蜡光' 是 '腊光' 的常见错别字,同义,防止错字漏判
     2. classify_record 查 product_categories 拿到 category_code,
-       是 '0105'(日本纸)/ '0106'(快巴纸)/ '0107'(拷贝纸)时返回 True
+       是 NO_AI_MATCH_CATEGORY_CODES 任一时返回 True
+
+    **2026-10-08**:原 `_is_copy_paper_item`(只覆盖 0105/0106/0107)已并入本函数,
+    二者关键词集/品类码集互相包含,合并后 classify_record 每行只查一次。
     """
     name = (item.get('product_name') or '').strip()
-    # 关键词兜底
-    # 2026-09-22: +'快巴' 一并纳入(0106 快巴纸 与 0105/0107 同属卷纸类,点数统一走 placement)
-    if '拷贝' in name or '日本纸' in name or '快巴' in name:
+    if any(k in name for k in NO_AI_MATCH_KEYWORDS):
         return True
-    # JOIN category_code(若 helper 已存在)
     try:
         from models.category_prompt import classify_record
         result = classify_record(name, item.get('specification') or '')
         code = result.get('category_code') if isinstance(result, dict) else None
-        # 2026-09-22: +'0106'(快巴纸) 一并纳入,与 0105 日本纸 / 0107 拷贝纸 统一走 placement-add-btn 点数体系
-        return code in ('0105', '0106', '0107')
+        return code in NO_AI_MATCH_CATEGORY_CODES
     except Exception:
         return False
 
@@ -2156,19 +2189,21 @@ def _enrich_copy_paper_for_item(item: dict) -> None:
     标签图也迁入 `shipping_images(source='copy_paper_label')`,**copy_paper_images 表已废弃**。
 
     写入字段:
-      is_copy_paper       → 是否拷贝纸/日本纸(模板据此给标签按钮 + 隐藏普通图按钮)
+      is_no_ai_match      → 是否 拷贝纸/日本纸/快巴纸/腊光纸(0105-0108)。
+                            模板据此:标签 🖼️ 按钮**显示**、普通 🖼️ 按钮**隐藏**
       label_images        → 该 record 的标签图列表(移动端缩略图用;
                             PC 端由 order-images-area 按 source 直接渲染,不读此字段)
       has_label_image     → 是否已上传标签图(标签按钮红框反馈)
 
     已废弃并移除(勿再引用):
+      is_copy_paper       → 2026-10-08 删除,谓词已合并进 _is_no_ai_match_item
       copy_paper_images / copy_paper_total / copy_paper_match / copy_paper_expected
       —— 原为「张数录入」(sheet_count)服务,该路径随点数走 placement 而废弃;
          sheet_count 恒为 NULL 导致 match 恒为 'yellow',会渲染误导性的
          "⚠ 张数不符 0≠300" 徽章,与新 placement 点数体系语义冲突。
     """
-    item['is_copy_paper'] = _is_copy_paper_item(item)
-    if not item['is_copy_paper']:
+    item['is_no_ai_match'] = _is_no_ai_match_item(item)
+    if not item['is_no_ai_match']:
         item['label_images'] = []
         item['has_label_image'] = False
         return

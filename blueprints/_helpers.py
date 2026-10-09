@@ -303,6 +303,209 @@ def check_remark(remark, quantity_str, ypp):
     return 'info' if pieces == 1 else 'warn'
 
 
+def parse_loose_yards(remark):
+    """从备注解析散码数(= `+Yy` / 裸 `Yy` 之和,排除 `X支*Yy` 乘法项里的 Yy)。
+
+    备注语义:
+      - ``X支*Yy`` 或 ``Yy*X支`` → 乘法项里的 Yy 不是散码,是「每支码数」,要抠掉
+      - ``X支+Yy`` → 加法项里的 Yy 才是散码
+      - ``裸 Yy``(无「支」配套)也按散码计入
+
+    Returns:
+        (loose_yards: float, has_loose: bool)
+        - 备注为空 / 无任何 Yy 命中 → (0.0, False)
+        - 否则返回累计的散码码数(整数也以 float 返回,如 37.0)
+        - 输入为 None 或空串 → (0.0, False)
+
+    Note:
+        - 此函数 2026-10-09 新增,作为出货/入库/装柜三页 + 移动端 placement 散码
+          期望值解析的**唯一真源**。先前每页各自定义 ``SANMA_RE``(粗匹配所有 ``\\d+y``),
+          误把 ``105支*32y+37y`` 里的 ``32y`` 也算进散码 → expected=69(应=37)。
+        - 算法与 ``check_remark`` 共享「先抠掉乘法项」的子步骤,但 ``check_remark`` 还要
+          校验 expected=pieces*ypp+loose 与 quantity 一致;``parse_loose_yards`` 只单独
+          返回散码,供 placement 比对用(placement 比对维度是「散码清点 vs 散码期望」,
+          与 quantity 无直接关联)。
+        - 支持小数:``3.5y``、``+0.5y`` 都能识别(``(\\d+(?:\\.\\d+)?)``)。
+        - 单位兼容:``y`` / ``Y`` / ``码``(中文)都接受。
+    """
+    if not remark:
+        return 0.0, False
+    # 抠掉两种乘法形式,剩下 [+Yy / 裸 Yy] 才算散码
+    no_mul = re.sub(
+        r'(\d+(?:\.\d+)?)\s*[yY码]\s*\*\s*(\d+)支', '', remark
+    )
+    no_mul = re.sub(
+        r'(\d+)支\s*\*\s*(\d+(?:\.\d+)?)\s*[yY码]', '', no_mul
+    )
+    matches = re.findall(r'(\d+(?:\.\d+)?)\s*[yY码]', no_mul)
+    if not matches:
+        return 0.0, False
+    loose = sum(float(m) for m in matches)
+    return loose, True
+
+
+def check_qty_invalid(quantity):
+    """数量本身是否非法（空 / 非数字 / 含「货-」等非数字字符）。
+
+    与 mismatch / piece_mismatch 独立：一条数量非法的行同时也可能命中 mismatch，
+    两个标志互不覆盖（前者是"数量读不出来"，后者是"数量与规则对不上"）。
+
+    Returns:
+        True 非法 / False 正常
+    """
+    raw = str(quantity or '').strip()
+    if not raw:
+        return True
+    try:
+        float(raw)
+        return False
+    except (TypeError, ValueError):
+        return True
+
+
+def annotate_import_validation(records, units_cache=None, piece_convs=None):
+    """给刚导入的明细行**原地**打上校验标志（不落库，仅响应体携带）。
+
+    概述 §f「导入即校验」的后端实现 —— 与列表页渲染时用的是**同一套判定函数**
+    （check_remark / check_piece_mismatch），保证「导入那一刻看到的红/粉标」
+    和「刷新后看到的红/粉标」结论完全一致，不出现两套口径。
+
+    为什么不落库（2026-10-09 拍板）：mismatch 是「备注与数量的算术关系」，
+    由备注和数量两个字段**完全决定**，不落库也不会丢信息；反倒是落库会带来
+    三页 × 迁移 × 备注一改就过期的维护成本。刷新时现算即可。
+
+    写入每条 record 的字段（与列表页 item 字段同名，前端可直接消费）：
+      - `mismatch`      : '' / 'info' / 'warn'   —— YPP 轨道（按码卖）
+      - `piece_mismatch`: '' / 'info' / 'warn'   —— 件数换算轨道（纸类按件收）
+      - `qty_invalid`   : bool                —— 数量本身非法
+      - `unit_hint`     : str                 —— 辅助单位提示（支数换算）
+      - `piece_hint`    : str                 —— 件数换算提示（如 "100张/件"）
+      - `mismatch_detail`: dict | None        —— 期望/实际/差额，供前端 tooltip
+
+    Args:
+        records: 明细 dict 列表（原地修改后返回同一列表）
+        units_cache: 预加载 product_units；None 时内部查一次 DB
+        piece_convs: 预加载 piece_conversions；None 时内部查一次 DB
+
+    Returns:
+        传入的 records（原地已富化）
+    """
+    from models import ProductUnit, PieceConversion  # 延迟导入避免循环依赖
+
+    if units_cache is None:
+        units_cache = ProductUnit.get_all() or []
+    if piece_convs is None:
+        piece_convs = PieceConversion.get_all() or []
+
+    for r in records:
+        pn = r.get('product_name') or ''
+        sp = r.get('specification') or ''
+        qt = r.get('quantity')
+        qt_raw = str(qt if qt is not None else '').strip()
+        rk = r.get('remark') or ''
+        unit = r.get('unit') or ''
+
+        # ── 轨道①:YPP（按 y/码卖）──
+        ypp = get_ypp(pn, sp, units_cache=units_cache)
+        r['mismatch'] = check_remark(rk, qt_raw, ypp)
+        r['unit_hint'] = calc_hint(qt_raw, ypp, unit=unit, remark=rk)
+
+        # ── 轨道②:件数换算（纸类按件收）──
+        conv = get_piece_conversion(pn, sp, cache=piece_convs)
+        if conv:
+            r['piece_hint'] = f"{conv['units_per_piece']}{conv['target_unit']}/件"
+            r['piece_mismatch'] = check_piece_mismatch(rk, qt_raw, conv)
+        else:
+            r['piece_hint'] = ''
+            r['piece_mismatch'] = ''
+
+        # ── 数量合法性（独立标志）──
+        r['qty_invalid'] = check_qty_invalid(qt_raw)
+
+        # ── 期望 vs 实际 明细，供前端 hover 显示差多少 ──
+        detail = None
+        try:
+            actual = float(qt_raw)
+        except (TypeError, ValueError):
+            actual = None
+
+        if r['mismatch'] and actual is not None:
+            m_pieces = re.search(r'(\d+)支', rk)
+            pieces = int(m_pieces.group(1)) if m_pieces else 0
+            per_piece = None
+            m1 = re.search(r'(\d+(?:\.\d+)?)\s*[yY码]\s*\*\s*(\d+)支', rk)
+            if m1:
+                per_piece = float(m1.group(1))
+            else:
+                m2 = re.search(r'(\d+)支\s*\*\s*(\d+(?:\.\d+)?)\s*[yY码]', rk)
+                if m2:
+                    per_piece = float(m2.group(2))
+            no_mul = re.sub(r'(\d+(?:\.\d+)?)\s*[yY码]\s*\*\s*(\d+)支', '', rk)
+            no_mul = re.sub(r'(\d+)支\s*\*\s*(\d+(?:\.\d+)?)\s*[yY码]', '', no_mul)
+            loose = sum(float(x) for x in re.findall(r'(\d+(?:\.\d+)?)[yY码]', no_mul))
+            ypp_eff = per_piece if per_piece is not None else ypp
+            expected = pieces * ypp_eff + loose
+            detail = {
+                'rule': 'ypp',
+                'label': 'YPP 规则（按码卖）',
+                'pieces': pieces,
+                'per_piece': per_piece,
+                'loose': loose,
+                'expected': round(expected, 2),
+                'actual': actual,
+                'diff': round(actual - expected, 2),
+                'severity': r['mismatch'],
+            }
+        elif r['piece_mismatch'] and actual is not None:
+            expected = calc_piece_quantity(rk, conv)
+            if expected is not None:
+                detail = {
+                    'rule': 'piece',
+                    'label': f"件数换算（{conv['units_per_piece']}{conv['target_unit']}/件）",
+                    'expected': round(expected, 2),
+                    'actual': actual,
+                    'diff': round(actual - expected, 2),
+                    'severity': r['piece_mismatch'],
+                }
+        elif r['qty_invalid']:
+            detail = {
+                'rule': 'qty_invalid',
+                'label': '数量格式异常',
+                'expected': None,
+                'actual': qt_raw,
+                'diff': None,
+                'severity': 'warn',
+            }
+
+        r['mismatch_detail'] = detail
+
+    return records
+
+
+def summarize_import_validation(records):
+    """汇总一批导入行的校验结果，供前端弹 toast 用。
+
+    Returns:
+        {'total': N, 'warn': N, 'info': N, 'qty_invalid': N, 'flagged': N}
+    """
+    total = warn = info = qty_invalid = 0
+    for r in records or []:
+        total += 1
+        if r.get('mismatch') == 'warn' or r.get('piece_mismatch') == 'warn':
+            warn += 1
+        elif r.get('mismatch') == 'info' or r.get('piece_mismatch') == 'info':
+            info += 1
+        if r.get('qty_invalid'):
+            qty_invalid += 1
+    return {
+        'total': total,
+        'warn': warn,
+        'info': info,
+        'qty_invalid': qty_invalid,
+        'flagged': warn + info + qty_invalid,
+    }
+
+
 def find_ypp_mismatches(records, units_cache=None):
     """扫一批明细,找出所有 YPP 规则冲突项(数量与备注支数+码数不匹配)。
 

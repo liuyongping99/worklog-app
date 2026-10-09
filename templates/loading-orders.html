@@ -512,9 +512,11 @@
                             <button type="button" class="edit-record-btn lock-hide" data-id="{{ record.id }}" onclick="editRecord({{ record.id }}, this)" style="background:none;border:none;color:#00b894;cursor:pointer;font-size:0.85rem;margin-right:0.4rem;" title="修改" data-page-node-id="fQHVgBHjLcxAZ5uCB6XQiQ">✏️</button>
                             <button type="button" class="del-record-btn lock-hide" data-id="{{ record.id }}" onclick="deleteRecord({{ record.id }}, this)" style="background:none;border:none;color:#ff7675;cursor:pointer;font-size:0.85rem;" title="删除" data-page-node-id="oaH34LVtHTfsHVAdWA3lRR">🗑️</button>
                             <button type="button" class="btn btn-sm record-image-btn lock-hide{% if record.has_image %} has-image{% endif %}" data-record-id="{{ record.id }}" title="上传图片到此商品{% if record.has_image %}（已上传）{% endif %}" style="background:#74b9ff;color:#fff;" data-page-node-id="2o3ypdCVCZCa35OEIjHXlU">🖼️</button>
-                            {% if record.unit == '桶' or '支' in (record.unit_hint or '') or '支' in (record.piece_hint or '') %}<button type="button" class="placement-add-btn lock-hide{% if record.placement_match %} placement-ok{% endif %}" data-record-id="{{ record.id }}" data-order-id="{{ group.order_pk }}" title="添加点数图(供清点{{ record.unit }}数)" onclick="openPlacementImageModal('{{ record.id }}','{{ group.order_pk }}')" data-page-node-id="5KfdPqnmDEdkBAuE6gZKR4">点数</button>{% endif %}
+                            {# 2026-09-30: 与出货对齐 — 加 unit=='张' 让成品纸(张装)也能走 placement 点数 #}
+                            {% if record.unit == '桶' or record.unit == '张' or '支' in (record.unit_hint or '') or '支' in (record.piece_hint or '') %}<button type="button" class="placement-add-btn lock-hide{% if record.placement_match %} placement-ok{% endif %}" data-record-id="{{ record.id }}" data-order-id="{{ group.order_pk }}" title="添加点数图(供清点{{ record.unit }}数)" onclick="openPlacementImageModal('{{ record.id }}','{{ group.order_pk }}')" data-page-node-id="5KfdPqnmDEdkBAuE6gZKR4">点数</button>{% endif %}
                             <input type="file" class="record-image-input" data-record-id="{{ record.id }}" accept="image/*" multiple style="display:none;" data-page-node-id="qdw753L0DRzPkeqIOnflJd">
-                            {% if record.placement_match %}<span class="status-badge placement-badge lock-show" title="该行已添加摆放图" data-page-node-id="wQRKwTJ6arCsdU1IUiFSRR">✓ 点数</span>{% endif %}
+                            {# 2026-09-30: 与出货对齐 — placement-badge 加单位限定(原本无条件,任何单位都已加 placement 的都会显示) #}
+                            {% if record.unit == '桶' or record.unit == '张' or '支' in (record.unit_hint or '') or '支' in (record.piece_hint or '') %}{% if record.placement_match %}<span class="status-badge placement-badge lock-show" title="该行已添加摆放图" data-page-node-id="wQRKwTJ6arCsdU1IUiFSRR">✓ 点数</span>{% endif %}{% endif %}
                         </td>
                     </tr>
                     {% endfor %}
@@ -634,6 +636,8 @@
                          data-total="{{ _item.total }}"
                          data-expected-zhi="{{ _item.expected_zhi }}"
                          data-has-zhi="{{ '1' if _item.has_zhi else '0' }}"
+                         data-expected-sanma="{{ _item.expected_sanma }}"
+                         data-has-sanma="{{ '1' if _item.has_sanma else '0' }}"
                          data-img-count="{{ _item.images | length }}"
                          data-loose-total="{{ _item.loose_total }}">
                         <div class="placement-record-head">
@@ -1313,21 +1317,30 @@ document.addEventListener('DOMContentLoaded', function() {
         var existingRows = tbody ? tbody.querySelectorAll('tr:not(.quick-add-row):not(.summary-row)').length : 0;
         var tr = document.createElement('tr');
         tr.setAttribute('data-record-id', rec.id);
-        var unitHint = getLoadingUnitHint(rec.product_name, rec.specification || '', rec.quantity, rec.unit, rec.remark) || '—';
-        var mismatch = checkLoadingMismatch(rec.remark || '', rec.quantity, rec.product_name, rec.specification || '');
-        var pieceHint = getPieceHint(rec.product_name, rec.specification || '');
-        var pieceMismatch = checkPieceMismatch(rec.remark || '', rec.quantity, rec.product_name, rec.specification || '');
-        var qtyInvalid = ProductRowUtils.isInvalidQty(rec.quantity);
+        // 2026-10-09(概述 §f):优先吃服务端算好的标志,没有才本地重算(兜底)
+        var flags = (typeof readImportFlags === 'function') ? readImportFlags(rec) : (function(){
+            var mm = checkLoadingMismatch(rec.remark||'', rec.quantity, rec.product_name, rec.specification||'');
+            var pm = checkPieceMismatch(rec.remark||'', rec.quantity, rec.product_name, rec.specification||'');
+            var cm = '';
+            if (mm==='warn'||pm==='warn') cm='warn'; else if (mm==='info'||pm==='info') cm='info';
+            return {mismatch:mm, pieceMismatch:pm, qtyInvalid:ProductRowUtils.isInvalidQty(rec.quantity), combined:cm, detail:null};
+        })();
+        var unitHint = (rec.unit_hint !== undefined && rec.unit_hint)
+            ? rec.unit_hint
+            : (getLoadingUnitHint(rec.product_name, rec.specification || '', rec.quantity, rec.unit, rec.remark) || '—');
+        var pieceHint = rec.piece_hint !== undefined ? rec.piece_hint
+                      : getPieceHint(rec.product_name, rec.specification || '');
         var isEco = (rec.product_name || '').indexOf('环保') !== -1;
         var isJiaMian = (rec.product_name || '').indexOf('杂胶') !== -1 && (rec.specification || '').indexOf('加面') !== -1;
-        var combinedMismatch = '';
-        if (mismatch === 'warn' || pieceMismatch === 'warn') combinedMismatch = 'warn';
-        else if (mismatch === 'info' || pieceMismatch === 'info') combinedMismatch = 'info';
-        var iconHtml = qtyInvalid ? ProductRowUtils.invalidQtyIcon() : loadingMismatchIcon(combinedMismatch);
+        // 图标优先级与后端模板一致:数量非法 > mismatch(warn) > mismatch(info)
+        var iconHtml = flags.qtyInvalid
+            ? ProductRowUtils.invalidQtyIcon()
+            : loadingMismatchIcon(flags.combined);
+        var flagTitle = (typeof importFlagTitle === 'function') ? importFlagTitle(flags) : '';
         var ecoHtml = isEco ? '<span class="eco-icon" title="环保产品">🌿</span>' : '';
         var jiaHtml = isJiaMian ? '<svg class="jia-mian-icon" viewBox="0 0 16 16" width="14" height="14" title="加面工艺"><defs><pattern id="jm-mesh-new-' + rec.id + '" width="3" height="3" patternUnits="userSpaceOnUse"><path d="M0,3 L3,0" stroke="currentColor" stroke-width="0.6"/><path d="M0,0 L3,3" stroke="currentColor" stroke-width="0.6"/></pattern></defs><rect width="16" height="16" fill="url(#jm-mesh-new-' + rec.id + ')"/></svg>' : '';
         tr.innerHTML =
-            '<td style="text-align:center;color:#868e96;font-size:0.85rem;">' + iconHtml + (existingRows + 1) + '</td>' +
+            '<td style="text-align:center;color:#868e96;font-size:0.85rem;"' + (flagTitle ? ' title="' + escAttr(flagTitle) + '"' : '') + '>' + iconHtml + (existingRows + 1) + '</td>' +
             '<td class="eco-col">' + ecoHtml + jiaHtml + '</td>' +
             '<td class="product-name-cell" style="font-size:0.9rem;">' + escHtml(rec.product_name) + '</td>' +
             '<td class="spec-cell" style="color:#636e72; font-size:0.9rem;">' + escHtml(rec.specification || '-') + '</td>' +
@@ -1341,9 +1354,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 '<button type="button" class="edit-record-btn lock-hide" data-id="' + rec.id + '" onclick="editRecord(' + rec.id + ', this)" style="background:none;border:none;color:#00b894;cursor:pointer;font-size:0.85rem;margin-right:0.4rem;" title="修改">✏️</button>' +
                 '<button type="button" class="del-record-btn lock-hide" data-id="' + rec.id + '" onclick="deleteRecord(' + rec.id + ', this)" style="background:none;border:none;color:#ff7675;cursor:pointer;font-size:0.85rem;" title="删除">🗑️</button>' +
             '</td>';
-        if (qtyInvalid) tr.classList.add('row-out-of-stock');
-        else if (combinedMismatch === 'warn') tr.classList.add('row-warn');
-        else if (combinedMismatch === 'info') tr.classList.add('row-info');
+        if (flags.qtyInvalid) tr.classList.add('row-out-of-stock');
+        else if (flags.combined === 'warn') tr.classList.add('row-warn');
+        else if (flags.combined === 'info') tr.classList.add('row-info');
         if (isEco) tr.classList.add('row-eco');
         return tr;
     }
@@ -1385,6 +1398,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             });
                             recalcLoadingSummary(dateGroup);
                             if (imgData && imgData.success && imgData.image) insertAiImage(imgData, dateGroup);
+                            if (typeof notifyImportValidation === 'function') notifyImportValidation(data.validation);
                         }
                     }
                 } else { alert('添加失败：' + (data.error || '未知错误')); }

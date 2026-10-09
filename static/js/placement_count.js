@@ -50,14 +50,21 @@
     function el(id) { return document.getElementById(id); }
     function clamp01(v) { return Math.max(0, Math.min(1, v)); }
     // 备注栏分别解析「支」(Σ N支)与「散码」(Σ Ny,可多个累加),与清点结果分开比较
+    // 2026-10-09: 散码解析改为先抠掉「X支*Yy」/「Yy*X支」乘法项再累加;
+    //   与 Python 后端 _helpers.parse_loose_yards 口径一致 — 避免把
+    //   「105支*32y+37y」里的 32y(每支码数)误算进散码。
     function parseRemark(remarkText) {
         var t = remarkText || '';
         var zhi = 0, hasZhi = false, m, re;
+        re = /(\d+(?:\.\d+)?)\s*[yY码]\s*\*\s*(\d+)\s*支/g;
+        t = t.replace(re, '');
+        re = /(\d+)\s*支\s*\*\s*(\d+(?:\.\d+)?)\s*[yY码]/g;
+        t = t.replace(re, '');
         re = /(\d+)\s*支/g;
-        while ((m = re.exec(t)) != null) { zhi += parseInt(m[1], 10); hasZhi = true; }
+        while ((m = re.exec(t)) != null) { zhi += parseFloat(m[1]); hasZhi = true; }
         var san = 0, hasSan = false;
-        re = /(\d+)\s*[yY]/g;
-        while ((m = re.exec(t)) != null) { san += parseInt(m[1], 10); hasSan = true; }
+        re = /(\d+(?:\.\d+)?)\s*[yY码]/g;
+        while ((m = re.exec(t)) != null) { san += parseFloat(m[1]); hasSan = true; }
         return { zhi: zhi, hasZhi: hasZhi, san: san, hasSan: hasSan };
     }
     // 单类对比角标:label 为单位名(支/令/张)或「散」
@@ -180,6 +187,8 @@
         block.setAttribute('data-total', total);
         block.setAttribute('data-expected-zhi', p.zhi);
         block.setAttribute('data-has-zhi', p.hasZhi ? '1' : '0');
+        block.setAttribute('data-expected-sanma', p.san);
+        block.setAttribute('data-has-sanma', p.hasSan ? '1' : '0');
         block.setAttribute('data-img-count', images.length);
         block.setAttribute('data-loose-total', looseTotal);
         block.innerHTML = html;
@@ -437,7 +446,7 @@
     //   出现不同步 —— 比如「按钮绿框消失但 ✓ 点数还在」或反向。
     //   这里补上前端 toggle:pm=True 时补建徽章(模板没渲染的场景),pm=False 时主动移除徽章
     //   (覆盖模板残留)。仅当 placement-add-btn 存在时补建,隐式尊重模板的「外层条件」
-    //   (is_copy_paper / 支 in unit_hint / 支 in piece_hint)—— 缺按钮的 record 不会有 placement 图。
+    //   (桶/张/令 / 支 in unit_hint / 支 in piece_hint)—— 缺按钮的 record 不会有 placement 图。
     function updatePlacementMatch(recordId, pm) {
         if (recordId == null) return;
         var tr = document.querySelector('tr[data-record-id="' + recordId + '"]');
@@ -449,7 +458,7 @@
         // 同步服务端模板渲染的「✓ 点数」徽章(.placement-badge / status-badge placement-badge lock-show)
         var serverBadge = tr ? tr.querySelector('.placement-badge') : null;
         if (pm) {
-            // btn 存在 = record 满足外层条件(is_copy_paper / 支 in unit_hint / piece_hint),
+            // btn 存在 = record 满足外层条件(桶/张/令 / 支 in unit_hint / piece_hint),
             // 此时补建徽章与模板语义一致
             if (!serverBadge && td && btn) {
                 serverBadge = document.createElement('span');

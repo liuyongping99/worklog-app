@@ -996,9 +996,11 @@ document.getElementById('voiceInputBtn').addEventListener('click', function () {
                 {% for item in group.records %}
                 <tr class="{% if item.qty_invalid %}row-out-of-stock{% elif item.mismatch == 'warn' or item.piece_mismatch == 'warn' %}row-warn{% elif item.mismatch == 'info' or item.piece_mismatch == 'info' %}row-info{% endif %}{% if '环保' in item.product_name %} row-eco{% endif %}"
                     data-record-id="{{ item.id }}"
-                    {# 2026-09-18: data-count-unit/data-has-loose 扩展到桶/令/张(桶装胶水、拷贝纸、日本纸) #}
-                    data-count-unit="{{ item.unit if item.is_copy_paper or item.unit in ('桶','令','张') else '支' }}"
-                    data-has-loose="{{ '0' if item.is_copy_paper or item.unit in ('桶','令','张') else '1' }}"
+                    {# 2026-10-08: 商品分类语义统一到 is_no_ai_match(拷贝纸/日本纸/快巴纸/腊光纸 0105-0108)。
+                        点数部分按计量单位规则(桶/令/张/件)判断,不再混商品分类判定;
+                        is_no_ai_match 同时守卫:标签 🖼️ 按钮显示(下) + 普通 🖼️ 按钮隐藏(下两行) #}
+                    data-count-unit="{{ item.unit if item.unit in ('桶','令','张') else '支' }}"
+                    data-has-loose="{{ '0' if item.unit in ('桶','令','张') else '1' }}"
                     data-verified="{{ '1' if item.verified else '0' }}"
                     data-verified-warnings="{{ item.verified_warnings or '{}' }}">
                     <td style="text-align:center; color:#868e96; font-size:0.85rem;">{% if item.qty_invalid %}<span class="stock-icon" title="数量异常">❌</span>{% elif item.mismatch == 'warn' or item.piece_mismatch == 'warn' %}❌ {% elif item.mismatch == 'info' or item.piece_mismatch == 'info' %}💡 {% endif %}{{ loop.index }}</td>
@@ -1014,20 +1016,21 @@ document.getElementById('voiceInputBtn').addEventListener('click', function () {
                         <button type="button" class="btn btn-sm move-down-btn lock-hide" data-id="{{ item.id }}" title="下移" style="background:#f0f0f0;color:#555;border:1px solid #ccc;padding:0.1rem 0.35rem;font-size:0.75rem;">▼</button>
                         <button type="button" class="btn btn-primary btn-sm edit-record-btn lock-hide" data-id="{{ item.id }}">✏️</button>
                         <button type="button" class="btn btn-danger btn-sm delete-record-btn lock-hide" data-id="{{ item.id }}">🗑️</button>
-                        {% if item.is_copy_paper %}
-                        <button type="button" class="btn btn-sm copy-paper-label-btn lock-hide{% if item.has_label_image %} has-label-image{% endif %}" data-record-id="{{ item.id }}" data-order-id="{{ group.id }}" data-source="label" title="上传标签图（拷贝纸/日本纸，无需 OCR）{% if item.has_label_image %}（已上传）{% endif %}" style="background:#74b9ff;color:#fff;" onclick="openCopyPaperUpload('{{ item.id }}','{{ group.id }}','label')">🖼️</button>
-                        <button type="button" class="placement-add-btn lock-hide{% if item.placement_match %} placement-ok{% endif %}" data-record-id="{{ item.id }}" data-order-id="{{ group.id }}" title="添加点数图(供清点{{ item.unit }}数)" onclick="openPlacementImageModal('{{ item.id }}','{{ group.id }}')">点数</button>
+                        {# 2026-10-08: 分支 A = 标签图按钮(拷贝纸/日本纸/快巴纸/腊光纸 0105-0108 唯一图片入口,
+                            落 source='copy_paper_label' 不做 OCR)。is_copy_paper 已并入 is_no_ai_match。
+                            placement-add-btn 完全交给分支 B 按单位规则渲染,避免重复 #}
+                        {% if item.is_no_ai_match %}
+                        <button type="button" class="btn btn-sm copy-paper-label-btn lock-hide{% if item.has_label_image %} has-label-image{% endif %}" data-record-id="{{ item.id }}" data-order-id="{{ group.id }}" data-source="label" title="上传标签图（拷贝纸/日本纸/快巴纸/腊光纸，无需 OCR）{% if item.has_label_image %}（已上传）{% endif %}" style="background:#74b9ff;color:#fff;" onclick="openCopyPaperUpload('{{ item.id }}','{{ group.id }}','label')">🖼️</button>
                         {% endif %}
-                        {% if not item.is_board and not item.is_copy_paper %}<button type="button" class="btn btn-sm record-image-btn lock-hide{% if item.has_image %} has-image{% endif %}" data-record-id="{{ item.id }}" title="上传图片到此商品{% if item.has_image %}（已上传）{% endif %}" style="background:#74b9ff;color:#fff;">🖼️</button>{% endif %}
-                        {# 2026-09-30: 桶 + 张(成品纸:A级正度/A级大度/正度白板/灰板/绿精灵特规/美牛 等) + 支 走 placement 点数;
-                            加 not item.is_copy_paper 避免与 1019 行的 copy_paper 路径重复渲染同一个按钮 #}
-                        {% if (item.unit == '桶' or item.unit == '张' or '支' in (item.unit_hint or '') or '支' in (item.piece_hint or '')) and not item.is_copy_paper %}<button type="button" class="placement-add-btn lock-hide{% if item.placement_match %} placement-ok{% endif %}" data-record-id="{{ item.id }}" data-order-id="{{ group.id }}" title="添加点数图(供清点{{ item.unit }}数)" onclick="openPlacementImageModal('{{ item.id }}','{{ group.id }}')">点数</button>{% endif %}
+                        {% if not item.is_board and not item.is_no_ai_match %}<button type="button" class="btn btn-sm record-image-btn lock-hide{% if item.has_image %} has-image{% endif %}" data-record-id="{{ item.id }}" title="上传图片到此商品{% if item.has_image %}（已上传）{% endif %}" style="background:#74b9ff;color:#fff;">🖼️</button>{% endif %}
+                        {# 2026-10-03: 桶 + 张 + 令(拷贝纸) + 支(及 hint 含支)走 placement 点数;
+                            「令」单位件数换算 target_unit 全是「张」,piece_hint='N张/件' 不含「支」,需直接按单位特判 #}
+                        {% if item.unit == '桶' or item.unit == '张' or item.unit == '令' or '支' in (item.unit_hint or '') or '支' in (item.piece_hint or '') %}<button type="button" class="placement-add-btn lock-hide{% if item.placement_match %} placement-ok{% endif %}" data-record-id="{{ item.id }}" data-order-id="{{ group.id }}" title="添加点数图(供清点{{ item.unit }}数)" onclick="openPlacementImageModal('{{ item.id }}','{{ group.id }}')">点数</button>{% endif %}
                         <input type="file" class="record-image-input" data-record-id="{{ item.id }}" accept="image/*" multiple style="display:none;">
                         {% if item.verified %}<span class="status-badge verified-badge lock-show" title="该行已核查">✓ 已核查</span>{% endif %}
                         {# 2026-09-09: 拷贝纸/日本纸 点数走 placement 体系(单位=令/张),同样可显示"✓ 点数"标记 #}
-                        {# 2026-09-30: 同步 unit=='张'(A级正度/A级大度 等)行也能显示 ✓ 点数 标记;
-                            copy_paper(令/件/支)仍由 is_copy_paper or 覆盖 #}
-                        {% if item.unit == '桶' or item.unit == '张' or item.is_copy_paper or '支' in (item.unit_hint or '') or '支' in (item.piece_hint or '') %}{% if item.placement_match %}<span class="status-badge placement-badge lock-show" title="该行已添加点数图">✓ 点数</span>{% endif %}{% endif %}
+                        {# 2026-10-03: 按单位规则显示徽章;桶/张/令 + hint 含支;拷贝纸分支独占标签图按钮,placement 按钮与徽章均由分支 B 按单位规则触发 #}
+                        {% if item.unit == '桶' or item.unit == '张' or item.unit == '令' or '支' in (item.unit_hint or '') or '支' in (item.piece_hint or '') %}{% if item.placement_match %}<span class="status-badge placement-badge lock-show" title="该行已添加点数图">✓ 点数</span>{% endif %}{% endif %}
                     </td>
                 </tr>
                 {% endfor %}
@@ -1144,13 +1147,16 @@ document.getElementById('voiceInputBtn').addEventListener('click', function () {
             {% set _groups = placement_groups.get(group.id, []) %}
             {% for _grp in _groups %}
                 {% for _item in _grp['items'] %}
-                {# 2026-09-09: 计数单位参数化 — 拷贝纸=令/日本纸=张/其他=支;散码拷贝纸隐藏 #}
-                {% set _punit = _item.unit if _item.is_copy_paper else '支' %}
+                {# 计数单位:桶/令/张 用实际单位,其他(支/y/码/件 等)按"支"显示 —
+                    缩略图里"24 y"实际意义是 24 支(每支 = 1 码 → 24 码),用户看到 y 容易混淆成"码数" #}
+                {% set _punit = _item.unit if _item.unit in ('桶','令','张') else '支' %}
                 <div class="placement-record-block"
                      data-record-id="{{ _item.record_id }}"
                      data-total="{{ _item.total }}"
                      data-expected-zhi="{{ _item.expected_zhi }}"
                      data-has-zhi="{{ '1' if _item.has_zhi else '0' }}"
+                     data-expected-sanma="{{ _item.expected_sanma }}"
+                     data-has-sanma="{{ '1' if _item.has_sanma else '0' }}"
                      data-img-count="{{ _item.images | length }}"
                      data-loose-total="{{ _item.loose_total }}">
                     <div class="placement-record-head">
@@ -1168,8 +1174,7 @@ document.getElementById('voiceInputBtn').addEventListener('click', function () {
                         {% else %}
                         <span class="placement-compare-badge none">备注无{{ _punit }}</span>
                         {% endif %}
-                        {# 散码:清点散码 与 备注 散码 分开比较(拷贝纸/日本纸无散码,整段隐藏) #}
-                        {% if not _item.is_copy_paper %}
+                        {# 散码:清点散码 与 备注 散码 分开比较(按 has_sanma 自带判断,不再按 is_copy_paper 整段隐藏) #}
                         {% if _item.has_sanma %}
                             {% if _item.loose_total == _item.expected_sanma %}
                         <span class="placement-compare-badge ok">✓ 散 {{ _item.loose_total }} = 备注 {{ _item.expected_sanma }}</span>
@@ -1181,7 +1186,6 @@ document.getElementById('voiceInputBtn').addEventListener('click', function () {
                         {% else %}
                         <span class="placement-compare-badge none">备注无散码</span>
                         {% endif %}
-                        {% endif %}
                     </div>
                     <div class="placement-images">
                         {% for pimg in _item.images %}
@@ -1192,7 +1196,7 @@ document.getElementById('voiceInputBtn').addEventListener('click', function () {
                             {% else %}
                             <span class="placement-thumb-count">{{ pimg.effective_zhi }} {{ _punit }}</span>
                             {% endif %}
-                            {% if not _item.is_copy_paper and pimg.loose_count %}<span class="placement-thumb-loose">散码 {{ pimg.loose_count }} y</span>{% endif %}
+                            {% if pimg.loose_count %}<span class="placement-thumb-loose">散码 {{ pimg.loose_count }} y</span>{% endif %}
                             <button type="button" class="placement-del-btn lock-hide" data-image-id="{{ pimg.id }}" title="删除此点数图">×</button>
                         </div>
                         {% endfor %}
