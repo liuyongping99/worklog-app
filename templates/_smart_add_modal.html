@@ -15,6 +15,65 @@ var _smartFillOrderPk = null, _smartFillOrderId = null;
 // 共享的批量添加 + 局部刷新:submitAiResults(AI 识别后)和 submitSmartFill(文本解析后)
 // 都调它,把 items 数组 POST 到 /records/batch,然后 appendChild 新 tr 到对应订单的 tbody。
 // 不再整页 location.reload(),避免闪烁 + 滚动位置丢失。
+// ── 导入校验标志读取(2026-10-09,概述 §f)────────────────────────────
+// batch 端点已在服务端算好 mismatch / piece_mismatch / qty_invalid 并回传
+// (判定函数与列表页渲染共用 _helpers.check_remark / check_piece_mismatch)。
+// 这里**优先消费服务端值**,本地重算只作兜底 —— 端点没带字段时(旧端点/异常
+// 降级)才退回页面自己的 JS 实现,保证「导入那一刻」和「刷新后」结论一致。
+//
+// 返回 {mismatch, pieceMismatch, qtyInvalid, combined, detail}
+//   combined: 'warn' > 'info' > '' 合并两轨后的最终级别(与后端行底色口径一致)
+//   detail  : mismatch_detail,供 hover 显示「期望 X / 实际 Y / 差 Z」
+function readImportFlags(rec) {
+    var hasServer = rec && (rec.mismatch !== undefined || rec.piece_mismatch !== undefined
+                            || rec.qty_invalid !== undefined);
+    var mismatch, pieceMismatch, qtyInvalid, detail;
+    if (hasServer) {
+        mismatch = rec.mismatch || '';
+        pieceMismatch = rec.piece_mismatch || '';
+        qtyInvalid = !!rec.qty_invalid;
+        detail = rec.mismatch_detail || null;
+    } else {
+        // 兜底:页面本地重算(口径可能与后端有细微差异,仅在服务端未给值时用)
+        mismatch = (typeof checkMismatch === 'function')
+            ? checkMismatch(rec.remark||'', rec.quantity, rec.product_name, rec.specification||'') : '';
+        pieceMismatch = (typeof checkPieceMismatch === 'function')
+            ? checkPieceMismatch(rec.remark||'', rec.quantity, rec.product_name, rec.specification||'') : '';
+        qtyInvalid = (typeof isInvalidQty === 'function') ? isInvalidQty(rec.quantity) : false;
+    }
+    var combined = '';
+    if (mismatch === 'warn' || pieceMismatch === 'warn') combined = 'warn';
+    else if (mismatch === 'info' || pieceMismatch === 'info') combined = 'info';
+    return {mismatch: mismatch, pieceMismatch: pieceMismatch, qtyInvalid: qtyInvalid,
+            combined: combined, detail: detail};
+}
+
+// 序号列前缀图标 + 行底色 class —— 三页统一入口,避免各写一份判定漂移
+// 优先级与后端模板一致(2026-10-08 三页模板都是 qty_invalid 优先于 mismatch):
+//   数量非法 > mismatch(warn) > mismatch(info) > 无标志
+function importFlagPrefix(flags, mismatchIconFn, invalidQtyIconFn) {
+    if (flags.qtyInvalid) return invalidQtyIconFn ? invalidQtyIconFn() : '⚠️';
+    return mismatchIconFn ? mismatchIconFn(flags.combined) : '';
+}
+
+function applyImportFlagClass(tr, flags) {
+    if (!tr || !tr.classList) return;
+    tr.classList.remove('row-warn', 'row-info');
+    if (flags.combined === 'warn') tr.classList.add('row-warn');
+    else if (flags.combined === 'info') tr.classList.add('row-info');
+    if (flags.qtyInvalid) tr.classList.add('row-out-of-stock');
+}
+
+// hover 提示:期望 vs 实际 差多少(有 detail 才加title,没数据不加噪声)
+function importFlagTitle(flags) {
+    var d = flags.detail;
+    if (!d) return '';
+    if (d.rule === 'qty_invalid') return '数量格式异常:' + (d.actual || '(空)');
+    if (d.expected === null || d.expected === undefined) return '';
+    var sign = d.diff > 0 ? '+' : '';
+    return d.label + ' → 期望 ' + d.expected + ',实际 ' + d.actual + '(差 ' + sign + d.diff + ')';
+}
+
 // ── 客户端构建出货明细行(tr)— 与 server 模板(templates/shipping-records.html:441-461)1:1 对齐 ──
 // 10 列固定:序号/重点/商品名称/规格/AI 比对/数量/单位/备注/辅助单位提示/操作
 // 「重点」是虚拟占位列,服务端用 .no-eco class 决定显示隐藏。
@@ -23,13 +82,13 @@ var _smartFillOrderPk = null, _smartFillOrderId = null;
 // 改 server 模板列结构时,这里必须同步改 —— 否则新旧行单元格数不一致会导致列错位。
 function buildShippingRecordRow(rec, tbody) {
     var tr = document.createElement('tr');
+    var flags = readImportFlags(rec);
     var hint = (typeof getUnitHint === 'function') ? getUnitHint(rec.product_name, rec.specification||'', rec.quantity, rec.unit, rec.remark) : '';
-    var mismatch = (typeof checkMismatch === 'function') ? checkMismatch(rec.remark||'', rec.quantity, rec.product_name, rec.specification||'') : '';
-    var pieceHint = (typeof getPieceHint === 'function') ? getPieceHint(rec.product_name, rec.specification||'') : '';
-    var pieceMismatch = (typeof checkPieceMismatch === 'function') ? checkPieceMismatch(rec.remark||'', rec.quantity, rec.product_name, rec.specification||'') : '';
-    var bad = typeof isInvalidQty === 'function' ? isInvalidQty(rec.quantity) : false;
-    var cm = ''; if (mismatch==='warn'||pieceMismatch==='warn') cm='warn'; else if (mismatch==='info'||pieceMismatch==='info') cm='info';
-    var prefix = bad ? (typeof invalidQtyIcon === 'function' ? invalidQtyIcon() : '❌') : (typeof mismatchIcon === 'function' ? mismatchIcon(cm) : '');
+    var pieceHint = rec.piece_hint !== undefined ? rec.piece_hint
+                  : ((typeof getPieceHint === 'function') ? getPieceHint(rec.product_name, rec.specification||'') : '');
+    var prefix = importFlagPrefix(flags,
+        (typeof mismatchIcon === 'function') ? mismatchIcon : null,
+        (typeof invalidQtyIcon === 'function') ? invalidQtyIcon : null);
     // 2026-08-30: 补齐批量添加后漏的点数按钮 — 按 unit_hint 或 piece_hint 含「支」判定,
     //   对齐 shipping-records.html 服务端模板 line 852 的条件。
     //   batch 返回的 rec 没有 placement_match 字段,新行必未匹配,不挂 placement-ok。
@@ -63,8 +122,11 @@ function buildShippingRecordRow(rec, tbody) {
             placementBtn +
             '<input type="file" class="record-image-input" data-record-id="'+rec.id+'" accept="image/*" multiple style="display:none;">' +
         '</td>';
-    if (typeof applyMismatchClass === 'function') applyMismatchClass(tr, cm);
-    if (bad) tr.classList.add('row-out-of-stock');
+    if (typeof applyMismatchClass === 'function') applyMismatchClass(tr, flags.combined);
+    else applyImportFlagClass(tr, flags);
+    // hover 提示:期望 vs 实际差多少(§f 导入即校验的可见部分)
+    var _flagTitle = importFlagTitle(flags);
+    if (_flagTitle) tr.setAttribute('title', _flagTitle);
     // 写 verified / record_id 数据属性,page-load 扫描和事件代理会用到
     tr.setAttribute('data-record-id', rec.id);
     tr.setAttribute('data-verified', rec.verified ? '1' : '0');
@@ -106,10 +168,47 @@ function doBatchAdd(items, imgData) {
                     if (typeof bindRecordImageButtons === 'function') bindRecordImageButtons();
                     if (typeof refreshRemarkSummary === 'function') refreshRemarkSummary(tbody.closest('.date-group'));
                     if (imgData && imgData.success && imgData.image) insertAiImage(imgData, tbody.closest('.date-group'));
+                    notifyImportValidation(data.validation);
                 }
             }
         } else { alert('添加失败：' + (data.error || '未知错误')); }
     }).catch(function(err){ alert('请求失败：'+err); });
+}
+
+// ── 导入校验汇总提示(2026-10-09,概述 §f)──────────────────────────
+// 让「导入即校验」不只是行底色,还要弹一次明确的汇总:用户刚导入完就能知道
+// 这批里有没有对不上的行,不用眼睛扫红/粉底色。
+// ⚠️ 不复用 showToast —— placement_count.js / loading_placement_count.js 里的
+//    showToast 都在 IIFE 内部,不挂 window,三页全局都取不到。这里自建轻量 toast。
+var _importToastTimer = null;
+function showImportToast(msg, ms) {
+    var el = document.getElementById('_importToast');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = '_importToast';
+        el.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:32px;'
+            + 'max-width:min(560px,90vw);padding:12px 18px;border-radius:8px;z-index:99999;'
+            + 'font-size:0.9rem;line-height:1.6;box-shadow:0 6px 24px rgba(0,0,0,0.22);'
+            + 'white-space:pre-line;display:none;';
+        document.body.appendChild(el);
+    }
+    el.textContent = msg;
+    el.style.display = 'block';
+    el.style.background = '#fff3f3';
+    el.style.border = '1px solid #ff6b6b';
+    el.style.color = '#c92a2a';
+    if (_importToastTimer) clearTimeout(_importToastTimer);
+    _importToastTimer = setTimeout(function() { el.style.display = 'none'; }, ms || 6000);
+}
+
+function notifyImportValidation(v) {
+    if (!v || !v.flagged) return;   // 全部对得上 → 不打扰
+    var parts = [];
+    if (v.warn) parts.push(v.warn + ' 行数量对不上（红底）');
+    if (v.info) parts.push(v.info + ' 行轻微偏差（粉底）');
+    if (v.qty_invalid) parts.push(v.qty_invalid + ' 行数量格式异常');
+    showImportToast('⚠️ 已导入 ' + v.total + ' 行，其中：' + parts.join('、')
+                    + '。\n鼠标悬停标色行可看期望值与差额。');
 }
 
 window.openSmartFill = function(orderPk, orderDate, orderCustomer) {
@@ -207,7 +306,10 @@ window.switchSmartFillTab = function(tab) {
 window.onAiEngineChange = function() {
     var e = document.getElementById('aiEngine').value;
     var h = document.getElementById('aiEngineHint');
-    h.textContent = e === 'paddleocr' ? '纯本地 3-8 秒' : e === 'deepseek' ? '本地 OCR + DeepSeek' : '快速，需联网';
+    h.textContent = e === 'paddleocr' ? '纯本地 3-8 秒'
+                  : e === 'paddleocr_minimax' ? '本地 OCR + MiniMax（DeepSeek 兜底）'
+                  : e === 'deepseek' ? '本地 OCR + DeepSeek'
+                  : '快速，需联网';
 };
 
 function resetAiState() {
@@ -1401,10 +1503,11 @@ window.copyPrompt = function() {
                 <span>识别引擎：</span>
                 <select id="aiEngine" onchange="onAiEngineChange()">
                     <option value="moonshot">☁️ Moonshot（云端视觉）</option>
-                    <option value="deepseek" selected>🤖 PaddleOCR + DeepSeek（推荐）</option>
+                    <option value="paddleocr_minimax" selected>🤖 PaddleOCR + MiniMax（推荐）</option>
+                    <option value="deepseek">🤖 PaddleOCR + DeepSeek</option>
                     <option value="paddleocr">💻 PaddleOCR（纯本地）</option>
                 </select>
-                <span class="ai-engine-hint" id="aiEngineHint">本地 OCR + DeepSeek</span>
+                <span class="ai-engine-hint" id="aiEngineHint">本地 OCR + MiniMax（DeepSeek 兜底）</span>
             </div>
             <div class="ai-upload-area" id="aiUploadArea" onclick="document.getElementById('aiImageFile').click()">
                 <div class="icon">🖼️</div>
