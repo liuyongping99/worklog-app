@@ -43,7 +43,7 @@
     };
 
     document.addEventListener('DOMContentLoaded', function () {
-        // 2026-09-09: 拷贝纸标签图删除 (渲染在普通商品图区, 独立 handler)
+        // 2026-09-09: 免 AI 比对标签图删除 (渲染在普通商品图区, 独立 handler)
         document.body.addEventListener('click', function (e) {
             var btn = e.target.closest('.copy-paper-label-del-btn');
             if (!btn) return;

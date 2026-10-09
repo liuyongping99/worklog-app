@@ -119,6 +119,35 @@ if (productCards.length >= 1) {
   check(confirmBtn !== null, '首张 .product-card 应含 [data-action="confirm"] 人工确认按钮');
 }
 
+// 5b) 标签图卡片(拷贝纸/日本纸/快巴纸/腊光纸 0105-0108)
+//     2026-10-08:后端 POST /records/<id>/images 已硬拦截 400(走 OCR 只会刷误导性红 ✗),
+//     所以这类卡片**不能**有「拍照识别 / 相册」,只能有「📷 标签」。
+//     回归意义:曾经渲染出拍照按钮 → 用户一点就吃 400,现由本组断言锁死。
+const labelOnlyCards = Array.from(document.querySelectorAll('.product-card[data-role="label-only"]'));
+if (labelOnlyCards.length) {
+  labelOnlyCards.forEach((card, i) => {
+    const tag = `标签图卡片 #${i + 1}`;
+    check(card.querySelector('[data-action="capture"]') === null,
+      `${tag} 不应含 [data-action="capture"] 拍照按钮(后端 /images 端点会 400)`);
+    check(card.querySelector('[data-action="album"]') === null,
+      `${tag} 不应含 [data-action="album"] 相册按钮`);
+    check(card.querySelector('[data-role="record-input"]') === null,
+      `${tag} 不应含 [data-role="record-input"] 隐藏 file input`);
+    const labelBtn = card.querySelector('.m-copy-paper-label-btn');
+    check(labelBtn !== null, `${tag} 应含 .m-copy-paper-label-btn「📷 标签」按钮`);
+    const badge = card.querySelector('[data-role="badge"]');
+    check(badge !== null && (badge.textContent || '').includes('标签图'),
+      `${tag} 徽章文案应为「标签图」(实际 "${badge ? badge.textContent : '(无)'}")`);
+    // 人工确认按钮 DOM 节点保留(与普通行一致),但必须 hidden
+    const confirm = card.querySelector('[data-action="confirm"]');
+    check(confirm !== null && confirm.hasAttribute('hidden'),
+      `${tag} 人工确认按钮应存在且 hidden`);
+    // 点数入口与 OCR 无关,应保留
+    check(card.querySelector('.point-entry') !== null,
+      `${tag} 应保留 🔢 点数入口(placement 点数不依赖 OCR)`);
+  });
+}
+
 // 6) JS 资源 — 详情页特有
 const scriptSrcs = Array.from(document.querySelectorAll('script[src]'))
   .map(s => s.getAttribute('src') || '');
@@ -138,4 +167,5 @@ if (errors.length) {
 }
 
 console.log('✅ render_mobile_shipping_order 通过 (product-card 数=' + productCards.length +
+  ', label-only=' + labelOnlyCards.length +
   ', viewport=' + window.innerWidth + 'x' + window.innerHeight + ')');

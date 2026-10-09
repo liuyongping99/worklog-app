@@ -104,15 +104,26 @@ def test_render_today_listing(client):
 
 @pytest.mark.skipif(_NODE is None, reason="node 不在 PATH 中,跳过 jsdom 渲染验证")
 def test_render_order_detail(client):
-    """/m/shipping-today/order/<oid>:整体图 3 按钮 + 商品卡片 + 拍照/相册按钮。"""
+    """/m/shipping-today/order/<oid>:整体图 3 按钮 + 商品卡片。
+
+    2026-10-08 起固定放两条明细,覆盖两类卡片契约:
+      - 普通商品(杂胶)→ 有「拍照识别 / 相册」按钮(走 OCR 流水线)
+      - 标签图商品(日本纸)→ **无**拍照/相册,只有「📷 标签」按钮
+        (后端 POST /records/<id>/images 对拷贝纸/日本纸/快巴纸/腊光纸 硬拦截 400)
+    """
     from models.orders import ShippingOrder, ShippingRecord
 
     today = _today_date.today().isoformat()
     oid = ShippingOrder.create(today, "宏昌贸易")
+    # 第 1 条 = 普通商品(jsdom 脚本的「首张卡片」断言作用在它身上)
+    ShippingRecord.create(today, "宏昌贸易", "环保杂胶", "0.6 白色", 100, "y", "45支", order_pk=oid)
+    # 第 2 条 = 标签图商品(label-only 卡片)
     ShippingRecord.create(today, "宏昌贸易", "日本纸", "A4 120g", 5, "件", "2支", order_pk=oid)
 
     resp = client.get(f"/m/shipping-today/order/{oid}")
     assert resp.status_code == 200
+    # 防回归:标签图卡片必须被打上 data-role="label-only"(jsdom 脚本据此断言)
+    assert 'data-role="label-only"' in resp.get_data(as_text=True)
 
     fd, html_path = tempfile.mkstemp(suffix=".html")
     try:
@@ -127,6 +138,8 @@ def test_render_order_detail(client):
                 f"STDOUT: {out}\nSTDERR: {proc.stderr.decode('utf-8', errors='replace')}"
             )
         assert "通过" in out, f"node 脚本未输出通过标记:\n{out}"
+        # 脚本实际跑到了 label-only 断言(而不是因为没匹配到卡片而跳过)
+        assert "label-only=1" in out, f"jsdom 未命中标签图卡片断言:\n{out}"
     finally:
         try:
             os.unlink(html_path)

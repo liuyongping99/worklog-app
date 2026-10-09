@@ -62,6 +62,15 @@
       {% set status_cls = '' %}
       {% set status_text = '皮革/木板类，无需拍照' %}
       {% set confirm_hidden = True %}
+    {% elif rec.is_no_ai_match %}
+      {# 2026-10-08: 拷贝纸/日本纸/快巴纸/腊光纸(0105-0108)贴纸与商品本体对不上,
+         走 OCR 只会刷误导性红 ✗。后端 POST /records/<id>/images 已硬拦截 400,
+         所以这里既不给「📷 拍照识别」入口,徽章也不再显示永远满足不了的「待拍」,
+         改走下方「📷 标签」按钮(source='copy_paper_label',留档不做 OCR)。 #}
+      {% set badge_cls, badge_text = 'done', '标签图' %}
+      {% set status_cls = '' %}
+      {% set status_text = '包装类商品，标签图留档，不做 OCR 比对' %}
+      {% set confirm_hidden = True %}
     {% else %}
       {% set badge_cls, badge_text = ('done', '✓ 已确认') if state.human_confirmed else ('done', '✓ 通过') if state.status == 'green' else ('warn', '⚠ 待确认') if state.status == 'yellow' else ('warn', '✕ 不符') if state.status == 'red' else ('todo', '待拍') %}
       {% if state.status == 'green' %}
@@ -84,7 +93,9 @@
       {% endif %}
       {% set confirm_hidden = state.status in (None, 'green') %}
     {% endif %}
-    <div class="product-card" data-record-id="{{ rec['id'] }}" {% if state.is_board %}data-role="board"{% endif %}>
+    {# data-role: board = 皮革/木板(无需拍照);label-only = 拷贝纸/日本纸/快巴纸/腊光纸(只走标签图,不做 OCR);
+       两者都不出现在 mobile_detail.js 的读取路径里,是给 jsdom 渲染测试用的结构契约标记 #}
+    <div class="product-card" data-record-id="{{ rec['id'] }}" {% if state.is_board %}data-role="board"{% elif rec.is_no_ai_match %}data-role="label-only"{% endif %}>
       <div class="pc-head">
         <span class="pc-idx">{{ loop.index }}</span>
         <div class="pc-main">
@@ -97,7 +108,7 @@
         <span class="badge {{ badge_cls }}" data-role="badge">{{ badge_text }}</span>
       </div>
       {% if rec['remark'] %}<div class="pc-remark">📝 {{ rec['remark'] }}</div>{% endif %}
-      {% if not state.is_board %}
+      {% if not state.is_board and not rec.is_no_ai_match %}
       <div class="photo-row">
         <button class="primary" data-action="capture">📷 拍照识别</button>
         <button class="secondary" data-action="album">🖼 相册</button>
@@ -105,11 +116,12 @@
       <input type="file" accept="image/*" capture="environment" data-role="record-input" hidden>
       {% endif %}
       {# 2026-09-09: 「📊 张数」按钮已删 —— 点数统一走下方独立点数页(point-entry,行 ~131),
-          与 PC 的 placement 体系同源;此处只保留标签图上传(不做 OCR/AI)。 #}
-      {% if rec.is_copy_paper %}
+          与 PC 的 placement 体系同源;此处只保留标签图上传(不做 OCR/AI)。
+          2026-10-08: 判定从 is_copy_paper(0105-0107)扩到 is_no_ai_match(加 0108 腊光纸)。 #}
+      {% if rec.is_no_ai_match %}
       <button type="button" class="m-copy-paper-label-btn" data-record-id="{{ rec.id }}" data-source="label">📷 标签</button>
       {% endif %}
-      {% if rec.is_copy_paper and rec.label_images %}
+      {% if rec.is_no_ai_match and rec.label_images %}
       <div class="m-copy-paper-area">
         {# 2026-09-09: 标签图已迁入 shipping_images(source='copy_paper_label'),
            用 relative_path 拼 URL(原来直接塞全路径 file_path 会是 /upload/C:\... 死链);
