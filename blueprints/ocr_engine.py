@@ -488,6 +488,21 @@ _REDSTAMP_VARIANTS = frozenset({
     # '鱼鳞布' 覆盖 7P环保LB鱼鳞布/环保LB鱼鳞布/环保HA鱼鳞布/LB鱼鳞布 等全名变体
     # 'LB特软' 覆盖订单里的短名写法(不含「鱼鳞布」字面)
     '鱼鳞布', 'LB特软',
+    # 【2026-10-07】环保路华里 + 短名「路华里」
+    # 背景:shipping-records 全表 4/10 的环保路华里行级图被红章污染成 yellow,
+    # 失败模式集中在厚度数字行(红章盖住「里」→ OCR 输出「环保路华赛」;
+    # 厚度 0.6 的小数点被红章吞掉 → OCR 输出「0.V」)。
+    # '环保路华里' 覆盖主名 + 7P环保路华里(子串命中)。
+    # '路华里' 覆盖未来短名写法,与 LB特软/鱼鳞布 双轨对齐。
+    '环保路华里', '路华里',
+    # 【2026-10-07】HA猪皮纹系列(类似环保路华里案例:横版表格标签常带红章)
+    # 背景:全表 yellow/red 统计 HA猪皮纹特软 ×19 / 环保HA猪皮纹 ×15 / 7P环保HA猪皮纹 ×8
+    # 未进白名单 → None 路径 OCR,失败率高。同构于环保路华里修复路径(走 redstamp+灰度)。
+    # 'HA猪皮纹' 覆盖主名 + 7P环保HA猪皮纹(子串命中)
+    # 'HA鱼鳞布' 覆盖 7P环保HA鱼鳞布(已在 _REDSTAMP_VARIANTS via '鱼鳞布' 子串;
+    # 加 'HA猪皮纹' 是补 HA 猪皮纹非鱼鳞布类)
+    # '环保HA猪皮纹' 显式加,确保子串「环保HA」打头也能命中(避免与 form_nolines 撞)
+    'HA猪皮纹', '环保HA猪皮纹',
 })
 
 # 【2026-08-27 修复】已知有表格线标签, 显式排除 — 不会被任何轨命中 form_nolines。
@@ -853,6 +868,24 @@ def _sharpen_strong_for_ocr(rgb: np.ndarray) -> np.ndarray:
         return np.array(sharp)
     except Exception as e:
         logger.warning('强锐化失败,用原图: %s', e)
+        return rgb
+
+
+def _to_grayscale(rgb: np.ndarray) -> np.ndarray:
+    """RGB → 灰度(去红色通道污染)。
+
+    2026-10-07:红章擦除后仍有「0.舌 → 0.6」类误识(红章字仍以非红色残留)。
+    灰度图把 RGB 全部通道按 0.299R+0.587G+0.114B 加权合并,红色像素会被弱化
+    (红章在 R 通道强但 G/B 通道弱,灰度后总亮度低于黑字),让 PaddleOCR
+    不被红章字染色。实测 order 1001 record 6029「0.舌」→ 「0.6」直接命中。
+
+    异常返回原图(任何 numpy/PIL 错误都不应阻塞 OCR 主流程)。
+    """
+    try:
+        gray = (0.299 * rgb[..., 0] + 0.587 * rgb[..., 1] + 0.114 * rgb[..., 2])
+        return np.stack([gray, gray, gray], axis=-1).astype(rgb.dtype)
+    except Exception as e:
+        logger.warning('灰度转换失败,用原图: %s', e)
         return rgb
 
 
@@ -2259,10 +2292,17 @@ class PaddleOCREngine(BaseOCREngine):
                     pre_lines, pre_confs = self._collect(ocr.ocr(pre, cls=True))
                     sharp = _sharpen_for_ocr(img_np)
                     sharp_lines, sharp_confs = self._collect(ocr.ocr(sharp, cls=True))
+                    # 【2026-10-07】灰度 pass:直接对原图 RGB 转灰度去掉红色
+                    # 通道污染,实测 order 1001 record 6029「0.舌」→ 「0.6」
+                    # 直接修复。**不要用红章擦除版做灰度**(红章擦除把小数点
+                    # 一起擦掉变成 06,见 record 5952 实测)。
+                    gray_lines, gray_confs = self._collect(
+                        ocr.ocr(_to_grayscale(img_np), cls=True))
                     lines, confs = self._pick_best_of_n([
                         (orig_lines, orig_confs),
                         (pre_lines, pre_confs),
                         (sharp_lines, sharp_confs),
+                        (gray_lines, gray_confs),
                     ])
                     # 行级修补:winner 含厚度但首行短于 orig → 从 orig 借首行
                     # 必须与 extract_text_with_conf 的 KIND_REDSTAMP 分支严格同构。
@@ -2367,10 +2407,17 @@ class PaddleOCREngine(BaseOCREngine):
                     pre_lines, pre_confs = self._collect(ocr.ocr(pre, cls=True))
                     sharp = _sharpen_for_ocr(img_np)
                     sharp_lines, sharp_confs = self._collect(ocr.ocr(sharp, cls=True))
+                    # 【2026-10-07】灰度 pass:直接对原图 RGB 转灰度去掉红色
+                    # 通道污染,实测 order 1001 record 6029「0.舌」→ 「0.6」
+                    # 直接修复。**不要用红章擦除版做灰度**(红章擦除把小数点
+                    # 一起擦掉变成 06,见 record 5952 实测)。
+                    gray_lines, gray_confs = self._collect(
+                        ocr.ocr(_to_grayscale(img_np), cls=True))
                     lines, confs = self._pick_best_of_n([
                         (orig_lines, orig_confs),
                         (pre_lines, pre_confs),
                         (sharp_lines, sharp_confs),
+                        (gray_lines, gray_confs),
                     ])
                     # 【2026-09-14】行级修补:擦除/锐化图常把品名前缀(LB 等)一并擦掉,
                     # 而原图保留了完整品名行;打分函数只择一 → winner 含厚度但缺品名。
