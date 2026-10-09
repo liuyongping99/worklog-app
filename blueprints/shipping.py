@@ -50,7 +50,10 @@ from models._db import get_db
 # 与 OCR 图('upload'/'ai')、摆放图('placement')并列,靠它区分:
 #   - 模板渲染:独立循环,不渲染 OCR/AI 按钮与 match-badge
 #   - has_image / ocr_images 统计:排除(不做 OCR,不算已核对图)
-COPY_PAPER_LABEL_SOURCE = 'copy_paper_label'
+# 2026-10-09 重命名:常量名 COPY_PAPER_LABEL_SOURCE → NO_AI_LABEL_SOURCE,
+#   语义对齐 CLAUDE.md §22 术语「免 AI 比对标签图」;字符串值 'copy_paper_label'
+#   **保持不变** —— DB 字段值 / 已有 28 行存量数据 / 任何将来的数据回查都依赖它。
+NO_AI_LABEL_SOURCE = 'copy_paper_label'
 # 2026-10-04: 跳过商品行 AI 比对的品类(拷贝纸/日本纸/快巴纸 + 腊光/蜡光)。
 # 2026-10-08: 这批品类的**唯一**图片入口是「🖼️ 标签图」按钮(source='copy_paper_label',不做 OCR),
 #   腊光纸(0108)也纳入 —— 它跟拷贝纸一样,贴纸与商品本体不一致,走 OCR 只会刷误导性红 ✗。
@@ -59,7 +62,7 @@ COPY_PAPER_LABEL_SOURCE = 'copy_paper_label'
 #   - 整单 ai-match 过滤 records → OCR 循环 / rows / own_record_ids / verdicts 回写全跳过
 #   - 模板:普通 🖼️ 按钮守卫 not is_no_ai_match(隐藏);标签 🖼️ 按钮守卫 is_no_ai_match(显示)
 #   - 移动端:隐藏「📷 拍照识别」(否则点进去吃 400),徽章改为「标签图」
-# 与 COPY_PAPER_LABEL_SOURCE 不同:后者是落库的 source 字符串,这里是判定用的品类集合。
+# 与 NO_AI_LABEL_SOURCE 不同:后者是落库的 source 字符串,这里是判定用的品类集合。
 NO_AI_MATCH_CATEGORY_CODES = ('0105', '0106', '0107', '0108')
 NO_AI_MATCH_KEYWORDS = ('拷贝', '日本纸', '快巴', '腊光', '蜡光')
 from blueprints.ocr_log import set_log_context
@@ -252,7 +255,7 @@ def shipping_records():
         all_record_imgs = []
         for rec in grp.get('records', []):
             record_imgs = ShippingImage.get_by_record(rec['id'])
-            # 2026-09-09: 本行图缓存给 _enrich_copy_paper_for_item 复用(避免重复查库)
+            # 2026-09-09: 本行图缓存给 _enrich_no_ai_label_for_item 复用(避免重复查库)
             rec['_record_imgs_cache'] = record_imgs
             # 摆放图不计入 OCR 图的 has_image(红框语义=已上传 OCR 图);
             # 免 AI 比对标签图(source='copy_paper_label')也不算 —— 它不做 OCR/AI
@@ -401,7 +404,7 @@ def shipping_records():
             item['placement_match'] = compute_placement_match(item, _pimgs)
 
             # 2026-09-06: 拷贝纸/日本纸 行级图片 + 张数比对
-            _enrich_copy_paper_for_item(item)
+            _enrich_no_ai_label_for_item(item)
         group.update(summarize_remarks(group['records']))
         group['has_eco'] = any('环保' in r.get('product_name', '') for r in group['records'])
         group['has_jia_mian'] = any(
@@ -2091,7 +2094,7 @@ def api_v1_category_prompts_delete(prompt_id):
 # ────────────────────────────────────────────────────────────
 
 @bp.route('/api/v1/shipping-orders/records/<int:rid>/copy-paper-images', methods=['POST'])
-def api_v1_shipping_orders_record_copy_paper_upload(rid):
+def api_v1_shipping_orders_record_no_ai_label_upload(rid):
     """上传拷贝纸/日本纸 标签照 → 写 shipping_images(source='copy_paper_label')。
 
     完全跳过 OCR pipeline(不做 OCR/AI 比对,仅供人工留档)。
@@ -2137,14 +2140,14 @@ def api_v1_shipping_orders_record_copy_paper_upload(rid):
     # 2026-09-09: 直接落 shipping_images,source='copy_paper_label'
     new_id = ShippingImage.create(
         record['order_pk'], filepath, original_name,
-        source=COPY_PAPER_LABEL_SOURCE, record_pk=rid)
+        source=NO_AI_LABEL_SOURCE, record_pk=rid)
     img = ShippingImage.get_by_id(new_id)
     rel_path = os.path.join(_month_str, os.path.basename(filepath)).replace('\\', '/')
     img['file_path'] = filepath  # 全路径(与 PlacementImage 一致)
     img['relative_path'] = rel_path
     AuditLog.log('upload_copy_paper_image', 'shipping_order', record['order_pk'],
                  detail={'filename': rel_path,
-                         'source': COPY_PAPER_LABEL_SOURCE, 'record_id': rid})
+                         'source': NO_AI_LABEL_SOURCE, 'record_id': rid})
     return jsonify({'success': True, 'image': img})
 
 
@@ -2181,7 +2184,7 @@ def _is_no_ai_match_item(item: dict) -> bool:
         return False
 
 
-def _enrich_copy_paper_for_item(item: dict) -> None:
+def _enrich_no_ai_label_for_item(item: dict) -> None:
     """对单条 record 原地写入 copy-paper 字段。
 
     **2026-09-09 重构**:点数已统一走 placement 体系
@@ -2211,7 +2214,7 @@ def _enrich_copy_paper_for_item(item: dict) -> None:
     # 优先复用调用方已查好的本行图缓存(PC 端图片分组循环注入),否则现查
     _cache = item.get('_record_imgs_cache')
     imgs = _cache if _cache is not None else ShippingImage.get_by_record(item['id'])
-    labels = [i for i in imgs if i.get('source') == COPY_PAPER_LABEL_SOURCE]
+    labels = [i for i in imgs if i.get('source') == NO_AI_LABEL_SOURCE]
     item['label_images'] = labels
     # 标签按钮已上传反馈(红框),与点数状态无关
     item['has_label_image'] = bool(labels)

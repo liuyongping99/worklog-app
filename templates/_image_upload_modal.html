@@ -317,9 +317,10 @@ window.confirmUpload = function() {
     // 按 target.type 拼 URL:
     //   'order'  → IMAGE_API + '/<order_pk>/images'
     //   'record' → IMAGE_API + '/records/<record_pk>/images'
-    // 2026-09-09: copy-paper 分流 (由 copy_paper.js 标记 _copyPaperUploadSource)
+    // 2026-09-09: 免 AI 比对标签图分流 (由 no_ai_label.js 标记 _noAiLabelUploadSource)
+    //   2026-10-09: copy_paper.js 重命名为 no_ai_label.js
     //   → IMAGE_API + '/records/<record_pk>/copy-paper-images'
-    //   (source='label'/'count' 携带在 formData 里)
+    //   (source='label'/'count' 携带在 formData 里,端点路径保持兼容未改)
     var url;
     if (window._copyPaperUploadSource) {
         url = IMAGE_API + '/records/' + savedTarget.pk + '/copy-paper-images';

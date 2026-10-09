@@ -96,9 +96,10 @@
     // ── 上传回调(由共享图片弹框 _image_upload_modal.html 的 confirmUpload 触发) ──
     // 与右侧 🖼️ 核对规格按钮走同一个 imageModal,这里只处理摆放图的后续(进展示区 + 计数)
     window.placementImageUploaded = function (data, recordPk) {
-        // 2026-09-06: copy-paper 上传分流(由 copy_paper.js 标记 _copyPaperUploadSource)
-        if (window._copyPaperUploadSource) {
-            window.copyPaperImageUploaded(data, recordPk);
+        // 2026-09-06: 免 AI 比对标签图上传分流(由 no_ai_label.js 标记 _noAiLabelUploadSource)
+        //   2026-10-09: copy_paper.js 重命名为 no_ai_label.js,语义对齐 §22 术语
+        if (window._noAiLabelUploadSource) {
+            window.noAiLabelImageUploaded(data, recordPk);
             return;
         }
         if (!data || !data.success) { alert('上传失败: ' + ((data && data.error) || '未知错误')); return; }

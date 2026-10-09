@@ -119,18 +119,18 @@
           与 PC 的 placement 体系同源;此处只保留标签图上传(不做 OCR/AI)。
           2026-10-08: 判定从 is_copy_paper(0105-0107)扩到 is_no_ai_match(加 0108 腊光纸)。 #}
       {% if rec.is_no_ai_match %}
-      <button type="button" class="m-copy-paper-label-btn" data-record-id="{{ rec.id }}" data-source="label">📷 标签</button>
+      <button type="button" class="m-no-ai-label-btn" data-record-id="{{ rec.id }}" data-source="label">📷 标签</button>
       {% endif %}
       {% if rec.is_no_ai_match and rec.label_images %}
-      <div class="m-copy-paper-area">
+      <div class="m-no-ai-label-area">
         {# 2026-09-09: 标签图已迁入 shipping_images(source='copy_paper_label'),
            用 relative_path 拼 URL(原来直接塞全路径 file_path 会是 /upload/C:\... 死链);
            已删 copy_paper_match 徽章(依赖废弃的 sheet_count,恒为 yellow 误导),
            点数结果改由下方 place-result 展示(与 placement 体系同源)。 #}
         {% for img in rec.label_images %}
-        <div class="m-copy-paper-thumb">
+        <div class="m-no-ai-label-thumb">
           <img src="/upload/{{ img.relative_path }}">
-          <span class="m-copy-paper-tag tag-label">标签</span>
+          <span class="m-no-ai-label-tag tag-label">标签</span>
         </div>
         {% endfor %}
       </div>

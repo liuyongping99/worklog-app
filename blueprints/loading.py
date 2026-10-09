@@ -35,7 +35,7 @@ from blueprints.ocr_log import set_log_context
 # 2026-09-09: 拷贝纸/日本纸 共享常量 + 判定函数(对齐出货,出货 9/9 已加)
 # 跨 blueprint import:shipping.py 不反向 import loading.py,无循环风险。
 from blueprints.shipping import (
-    COPY_PAPER_LABEL_SOURCE,
+    NO_AI_LABEL_SOURCE,
     _is_no_ai_match_item,  # 2026-10-04 新增(含 0108 腊光纸),2026-10-08 成为唯一谓词
 )
 
@@ -1467,7 +1467,7 @@ def api_v1_loading_orders_placement_mark_undo(image_id):
 # ─────────────────────────────────────────────────────────
 
 @bp.route('/api/v1/loading-orders/records/<int:rid>/copy-paper-images', methods=['POST'])
-def api_v1_loading_orders_record_copy_paper_upload(rid):
+def api_v1_loading_orders_record_no_ai_label_upload(rid):
     """上传装柜商品行的拷贝纸/日本纸 标签照 → 写 loading_order_images(source='copy_paper_label')。
 
     完全跳过 OCR pipeline(不做 OCR/AI 比对,仅供人工留档)。
@@ -1510,14 +1510,14 @@ def api_v1_loading_orders_record_copy_paper_upload(rid):
 
     new_id = LoadingOrderImage.create(
         record['order_pk'], filepath, original_name,
-        source=COPY_PAPER_LABEL_SOURCE, record_pk=rid)
+        source=NO_AI_LABEL_SOURCE, record_pk=rid)
     img = LoadingOrderImage.get_by_id(new_id)
     rel_path = os.path.join(month_str, os.path.basename(filepath)).replace('\\', '/')
     img['file_path'] = filepath
     img['relative_path'] = rel_path
     AuditLog.log('upload_copy_paper_image', 'loading_order', record['order_pk'],
                  detail={'filename': rel_path,
-                         'source': COPY_PAPER_LABEL_SOURCE, 'record_id': rid})
+                         'source': NO_AI_LABEL_SOURCE, 'record_id': rid})
     return jsonify({'success': True, 'image': img})
 
 

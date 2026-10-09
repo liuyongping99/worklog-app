@@ -1020,7 +1020,7 @@ document.getElementById('voiceInputBtn').addEventListener('click', function () {
                             落 source='copy_paper_label' 不做 OCR)。is_copy_paper 已并入 is_no_ai_match。
                             placement-add-btn 完全交给分支 B 按单位规则渲染,避免重复 #}
                         {% if item.is_no_ai_match %}
-                        <button type="button" class="btn btn-sm copy-paper-label-btn lock-hide{% if item.has_label_image %} has-label-image{% endif %}" data-record-id="{{ item.id }}" data-order-id="{{ group.id }}" data-source="label" title="上传标签图（拷贝纸/日本纸/快巴纸/腊光纸，无需 OCR）{% if item.has_label_image %}（已上传）{% endif %}" style="background:#74b9ff;color:#fff;" onclick="openCopyPaperUpload('{{ item.id }}','{{ group.id }}','label')">🖼️</button>
+                        <button type="button" class="btn btn-sm no-ai-label-btn lock-hide{% if item.has_label_image %} has-label-image{% endif %}" data-record-id="{{ item.id }}" data-order-id="{{ group.id }}" data-source="label" title="上传标签图（拷贝纸/日本纸/快巴纸/腊光纸，无需 OCR）{% if item.has_label_image %}（已上传）{% endif %}" style="background:#74b9ff;color:#fff;" onclick="openNoAiLabelUpload('{{ item.id }}','{{ group.id }}','label')">🖼️</button>
                         {% endif %}
                         {% if not item.is_board and not item.is_no_ai_match %}<button type="button" class="btn btn-sm record-image-btn lock-hide{% if item.has_image %} has-image{% endif %}" data-record-id="{{ item.id }}" title="上传图片到此商品{% if item.has_image %}（已上传）{% endif %}" style="background:#74b9ff;color:#fff;">🖼️</button>{% endif %}
                         {# 2026-10-03: 桶 + 张 + 令(拷贝纸) + 支(及 hint 含支)走 placement 点数;
@@ -2253,7 +2253,7 @@ if (typeof bindReOcrButtons === 'function') bindReOcrButtons();
 
 {# 2026-08-15: 摆放图计数功能(上传/展示/点击计数/撤销) #}
 <script src="/static/js/placement_count.js"></script>
-<script src="/static/js/copy_paper.js"></script>
+<script src="/static/js/no_ai_label.js"></script>
 
 </div><!-- /.shipping-page -->
 
