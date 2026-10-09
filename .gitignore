@@ -81,6 +81,14 @@ ehthumbs.db
 ehthumbs_vista.db
 Desktop.ini
 $RECYCLE.BIN/
+# Windows 保留设备名：Git Bash 里`> NUL` 会在仓库根**真实创建**名为 NUL 的文件
+# （内容是被重定向的 stdout），且该文件无法用常规方式删除（DeleteFileW/MoveFileW 均返回
+# err=5ACCESS_DENIED，genie-trash 报"指定的设备名无效"）→ 只能忽略 + 手工处理。
+# 正确写法：用`> /dev/null`或`> ./out.txt`，别用 `> NUL`。
+/NUL
+/AUX
+/CON
+/PRN
 
 # macOS
 .DS_Store
@@ -129,12 +137,19 @@ sql/new01.sql
 _safe-snapshot/
 *.db.bak*
 
-# ===== 开发过程截图（仅根目录零散 png，非产品资源；不影响 docs/ 下回归证据图） =====
-/board-*.png
-/inbound_*.png
-/shipping_*.png
+# ===== 开发过程截图（仅根目录零散 png/jpeg，非产品资源；不影响 docs/ 下回归证据图） =====
+# 注意用 ?* 匹配「inbound/shipping/board + 分隔符 + 任意内容」，同时兼容连字符 / 下划线 / 数字
+/board?*.png
+/board?*.jpeg
+/inbound?*.png
+/inbound?*.jpeg
+/shipping?*.png
+/shipping?*.jpeg
 /trend-panels-top.png
 tools/_shot_*.png
+# 兜底：根目录任何 *.shot-*.png / debug-*.png（防止以后再起新调试截图时再忘加规则）
+/*-shot-*.png
+/debug-*.png
 
 # ===== 调试 / 一次性残留 =====
 paddle_engine_dump.py
