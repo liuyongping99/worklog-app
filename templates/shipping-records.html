@@ -187,11 +187,13 @@
     font-size: 0.78rem; cursor: pointer;
 }
 .shipping-page .upload-btn-sm:hover { background: #5b4bc4; }
-/* 商品行右侧操作按钮:统一高度(✏️修改 / 🗑️删除 / 🖼️图片 / ✅已核查 toggle / 拷贝纸 🖼️标签) */
+/* 商品行右侧操作按钮:统一高度(✏️修改 / 🗑️删除 / 🖼️图片 / ✅已核查 toggle / 拷贝纸 🖼️标签)
+   2026-10-17: 选择器从 .copy-paper-label-btn 改成 .no-ai-label-btn
+   (2026-10-09 copy_paper → no_ai_label 重命名时漏改,导致免 AI 比对标签图按钮比普通图按钮大) */
 .shipping-page .record-table .edit-record-btn,
 .shipping-page .record-table .delete-record-btn,
 .shipping-page .record-table .record-image-btn,
-.shipping-page .record-table .copy-paper-label-btn,
+.shipping-page .record-table .no-ai-label-btn,
 /* 2026-09-09: .copy-paper-count-btn(📊张数)已删 —— 点数改走 placement 的 placement-add-btn */
 .shipping-page .record-table .placement-add-btn,
 .shipping-page .record-table .record-verified-toggle {
@@ -206,8 +208,10 @@
 .shipping-page .record-table .record-image-btn.has-image {
     border: 2px solid #dc2626;
 }
-/* 2026-09-09: 拷贝纸/日本纸行已上传标签图后,🖼️ 标签按钮加红框(视觉与 record-image-btn.has-image 一致) */
-.shipping-page .record-table .copy-paper-label-btn.has-label-image {
+/* 2026-09-09: 拷贝纸/日本纸行已上传标签图后,🖼️ 标签按钮加红框(视觉与 record-image-btn.has-image 一致)
+   2026-10-17: 与装柜页对齐 — 选择器从 .copy-paper-label-btn 改成 .no-ai-label-btn
+   (2026-10-09 copy_paper → no_ai_label 重命名时漏改,导致出货页标签图上传后没红框) */
+.shipping-page .record-table .no-ai-label-btn.has-label-image {
     border: 2px solid #dc2626;
 }
 
@@ -1126,13 +1130,20 @@ document.getElementById('voiceInputBtn').addEventListener('click', function () {
                     {% endif %}
                 </div>
                 {% endfor %}
-                {# 2026-09-09: 拷贝纸/日本纸 label 图混排到普通区 (source='copy_paper_label') #}
+                {# 2026-09-09: 拷贝纸/日本纸 label 图混排到普通区 (source='copy_paper_label')
+                   2026-10-17: 水印从固定"拷贝纸标签"改为显示该 record 的 商品名称 · 规格
+                   (CLAUDE.md §22:标签图存档的是实物照,page 上显示应与该行品名/规格一致) #}
                 {% for img in all_order_imgs if img.source == 'copy_paper_label' %}
+                {% set r = record_by_pk.get(img.record_pk) %}
+                {% set rname = (r.product_name if r else '') or '' %}
+                {% set rspec = (r.specification if r else '') or '' %}
                 <div class="img-item img-item-record img-item-copy-paper-label" data-record-pk="{{ img.record_pk }}" data-image-id="{{ img.id }}">
                     <div class="img-photo">
-                        <img src="/upload/{{ img.relative_path }}" alt="{{ img.original_name or '拷贝纸标签' }}" onclick="showImgPreview('/upload/{{ img.relative_path }}')">
+                        <img src="/upload/{{ img.relative_path }}" alt="{{ (rname + (' · ' + rspec if rspec else '')) or img.original_name or '标签图' }}" onclick="showImgPreview('/upload/{{ img.relative_path }}')">
                         <button class="copy-paper-label-del-btn lock-hide" data-image-id="{{ img.id }}">× 删除</button>
-                        <div class="img-overlay-name">📋 拷贝纸标签</div>
+                        {# 2026-10-17: 与普通图区一致 — 品名顶部 .img-overlay-name,规格底部 .img-overlay-spec #}
+                        {% if rname %}<div class="img-overlay-name">📋 {{ rname }}</div>{% endif %}
+                        {% if rspec %}<div class="img-overlay-spec">{{ rspec }}</div>{% endif %}
                     </div>
                 </div>
                 {% endfor %}
@@ -1999,7 +2010,17 @@ function bindEditDeleteButtons() {
                             });
                         }
                     } else {
-                        alert('保存失败：' + (result.error || ''));
+                        if (result.error_code === 'WEIGHT_UNIT_INVALID') {
+                            var au = (result.allowed_units || []).join(' / ');
+                            alert('⚖ 单位越界:' + (result.error || '')
+                                + '\n\n仅允许单位:' + au
+                                + '\n\n该商品绑定了重量类别,如需修改请到\n/manage/weight-categories');
+                            // 视觉反馈:给该行加红边
+                            tr.setAttribute('data-wc-invalid', '1');
+                            tr.style.backgroundColor = '#fef2f2';
+                        } else {
+                            alert('保存失败：' + (result.error || ''));
+                        }
                     }
                 }).catch(function(err) { hideBtnLoading(btn); alert('请求失败：' + err); });
             } else {

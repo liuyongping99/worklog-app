@@ -14,12 +14,14 @@
 
 - **工作日志**：工作经验、错误经验、待办事项、公司通知、车辆维护
 - **订单管理**：出货 / 入库 / 装柜三套平行订单（同一套架构三份实现，端点同构、主键隔离）。一条订单的完整生命周期：
-  - **a. 订单来源 —— 单据 OCR + LLM 结构化导入**：装车单 / 同价调拨单等**纸质或截图单据** → PaddleOCR 抽文本 → DeepSeek / MiniMax 等大模型结构化为 JSON → 落 `*_records` 明细行（品名 / 规格 / 单位 / 数量 / 备注）。明细**主要通过智能添加弹框的 OCR + LLM 路径导入**（5 引擎可选：`moonshot` / `paddleocr` / `deepseek` / `minimax` / `paddleocr_minimax`，详见 §3），手敲为辅助；OCR 原文与 AI 原始返回存 `ocr_match_event.ocr_text` / `ai_raw_response`，AI 比对相似度存 `ai_match_score`，供人工复核。
-  - **b. 每行两类图片 —— 行级图 + 摆放图**：每个商品明细行可挂 **行级图**（`source='upload'` / `'ai'` / `'copy_paper_label'`，OCR + AI 比对或纯存档用）和 **摆放图**（`source='placement'`，清点支数用）。两类图**同表不同 source**，可同时存在、互不干扰。`copy_paper_label` 是不跑 OCR 的「免 AI 比对标签图」（详见 §e + §22），与 upload/ai 共存但走不同端点。行级图见 §6 + 「图片匹配流水线」，摆放图见 §21。
-  - **c. 行级图 OCR → LLM 与数据库规格比对**：行级图上传后跑 PaddleOCR 取文本（部分商品还会抽取背景色 + 厚度等标签信息），再交 DeepSeek / MiniMax 等大模型与该明细行的**数据库规格**（`product_name` / `specification`）做语义比对，产出 `match_status` 与 ✓⚠✗ 徽标；比对**只给结论、不改写品名/规格列**（页面规格永远以数据库为准）。判定源头由 `_helpers.check_remark` / `check_piece_mismatch` 驱动（同一套函数被 §f「导入即校验」复用，**与 YPP 无关**——YPP 是 §d 摆放图的支数换算）。
-  - **d. 摆放图点数 → 与备注拆出的期望比对**：摆放图用于点击计数、清点散码、卸货取负，得出 `effective_zhi`（口径：`manual_count` 优先 → 回落 `n_marks` → `is_unload=1` 取负），再与**备注拆出的期望值**做比对：① 期望支数 `compute_placement_expected_zhi(remark, qty, unit)`（从备注拆 `X支*Yy` / `X支+Yy`；当 unit ∈ 支/令/张/桶 且备注无支数时**用 quantity 兜底**）；② 期望散码 `parse_loose_yards(remark)`（先抠掉乘法项再加散码）。任一不一致即 `placement_match=False`，前端按绿/红/黄徽章提示。
-  - **e. 免 AI 比对标签图（手写/不规则标签的逃生口）**：部分商品的标签是**不规则手写信息**（`product_categories` 0105=日本纸 / 0106=快巴纸 / 0107=拷贝纸 / 0108=**腊光纸**——注：DB 源品类标准叫「腊光纸」，但实际 `shipping_records` 4 行都用「**蜡**光纸」，代码关键字含两个字），既跑不了可靠 OCR，AI 比对必然误判 ✗。这类行改用**「免 AI 比对标签图」按钮**上传：图片正常存档（`source='copy_paper_label'`），但**跳过 OCR 抽取、跳过 LLM 比对**，页面上品名规格仍取自数据库（详见 §22）。
-  - **f. 明细导入即校验（数量 ↔ 换算规则当场对账）**：明细一落库就按该行匹配到的换算规则做**数量校验**，当场算出期望值与 `quantity` 的偏差，不把问题留到事后：① **按 y（码）卖的商品** → 走 **YPP 规则**（`get_ypp` 取 `product_units.yards_per_piece`／100.0），备注里的 `X支*Yy` / `X支+Yy` 反解出期望码数与 `quantity` 比对；② **纸类按「件」收的商品** → 走**件数换算规则**（`get_piece_conversion` 取 `piece_conversions.units_per_piece`），备注里的 `X件` / `X件+Zs张` 反解出期望张数与 `quantity` 比对；备注用 `*` 显式写了单支/单件码数时以备注为准（`extract_pieces_from_remark` 的 `per_piece_override` 字段）。**不匹配的行立即打错误提示标志**（`mismatch` / `piece_mismatch`），偏差 ≤0.01 视为一致；单件/单支偏差 `info`（粉），多件/多支偏差 `warn`（红）。判定走 `_helpers.annotate_import_validation()`，标志**只在响应体里、不落库**，前端导入后立即显示（详见 §12）。
+  - **a. 订单来源 —— 单据 OCR + LLM 结构化导入**：装车单 / 同价调拨单等**纸质或截图单据** → PaddleOCR 抽文本 → DeepSeek / MiniMax 等大模型结构化为 JSON → 落 `*_records` 明细行（品名 / 规格 / 单位 / 数量 / 备注）。明细**主要通过智能添加弹框的 OCR + LLM 路径导入**（4 引擎可选：`moonshot` / `paddleocr+minimax组合` / `paddleocr+deepseek组合` / `paddleocr纯本地`，详见 §3），手敲为辅助；OCR 原文与 AI 原始返回存 `ocr_match_event.ocr_text` / `ai_raw_response`，AI 比对相似度存 `ai_match_score`，供人工复核。
+  - **b. 商品行每行两类图片 —— 行级图 + 摆放图**：每个商品明细行可挂 **行级图**（`source='upload'` / `'ai'` / `'copy_paper_label'`，OCR + AI 比对或纯存档用）和 **摆放图**（`source='placement'`，清点支数用）。两类图**同表不同 source**，可同时存在、互不干扰。`copy_paper_label` 是不跑 OCR 的「免 AI 比对标签图」（详见 §e + §22），与 upload/ai 共存但走不同端点。行级图见 §6 + 「图片匹配流水线」，摆放图见 §21。
+  - **c. 商品行级图 OCR → LLM 与数据库规格比对**：行级图上传后跑 PaddleOCR 取文本（部分商品标签不含颜色信息时还会抽取背景色），再交 DeepSeek / MiniMax 等大模型与该明细行的**数据库规格**（`product_name` / `specification`）做语义比对，产出 `match_status` 与 ✓⚠✗ 徽标；比对**只给结论、不改写品名/规格列**（页面规格永远以数据库为准）。判定源头由 `_helpers.check_remark` / `check_piece_mismatch` 驱动（同一套函数被 §f「导入即校验」复用，**与 YPP 无关**——YPP 是 §d 摆放图的支数换算）。
+  - **d. 商品摆放图点数 → 与备注拆出的期望比对**：摆放图用于点击计数、清点散码、卸货取负，得出 `effective_zhi`（口径：`manual_count` 优先 → 回落 `n_marks` → `is_unload=1` 取负），再与**备注拆出的期望值**做比对：① 期望支数 `compute_placement_expected_zhi(remark, qty, unit)`（从备注拆 `X支*Yy` / `X支+Yy`；当 unit ∈ 支/令/张/桶 且备注无支数时**用 quantity 兜底**）；② 期望散码 `parse_loose_yards(remark)`（先抠掉乘法项再加散码）。任一不一致即 `placement_match=False`，前端按绿/红/黄徽章提示。
+  - **e. 商品行免 AI 比对标签图（手写/不规则标签的逃生口）**：部分商品的标签是**不规则手写信息**（`product_categories` 0105=日本纸 / 0106=快巴纸 / 0107=拷贝纸 / 0108=**腊光纸**——注：DB 源品类标准叫「腊光纸」，但实际 `shipping_records` 4 行都用「**蜡**光纸」，代码关键字含两个字），既跑不了可靠 OCR，AI 比对必然误判 ✗。这类行改&#x7528;**「免 AI 比对标签图」按钮**上传：图片正常存档（`source='copy_paper_label'`），但**跳过 OCR 抽取、跳过 LLM 比对**，页面上品名规格仍取自数据库（详见 §22）。
+  - **f. 商品明细导入即校验（数量 ↔ 换算规则当场对账）**：明细一落库就按该行匹配到的换算规则做**数量校验**，当场算出期望值与 `quantity` 的偏差，不把问题留到事后：① **按 y（码）卖的商品** → 走 **YPP 规则**（`get_ypp` 取 `product_units.yards_per_piece`／100.0），备注里的 `X支*Yy` / `X支+Yy` 反解出期望码数与 `quantity` 比对；② **纸类按「件」收的商品** → 走**件数换算规则**（`get_piece_conversion` 取 `piece_conversions.units_per_piece`），备注里的 `X件` / `X件+Zs张` 反解出期望张数与 `quantity` 比对；备注用 `*` 显式写了单支/单件码数时以备注为准（`extract_pieces_from_remark` 的 `per_piece_override` 字段）。**不匹配的行立即打错误提示标志**（`mismatch` / `piece_mismatch`），偏差 ≤0.01 视为一致；单件/单支偏差 `info`（粉），多件/多支偏差 `warn`（红）。判定走 `_helpers.annotate_import_validation()`，标志**只在响应体里、不落库**，前端导入后立即显示（详见 §12）。
+  - **f. 商品的分类提示词：由于商品标签上的名称和规格与系统中的规格和名称存在差异，所以做了一套商品的分类提示词系统，用于将原厂家的商品标签映射到本系统中的商品名称和规格上。在实际标签与系统规格映射不上时，可以随时调整提示词，让他们经由LLM判别后直接匹配上。
+  
 - **商品资料**：商品单位、商品分类（3 级树）、产品库（1000+ SKU）、件数换算规则
 - **任务流**：状态机驱动的送货任务管理（准备中 → 已装货 → 已点数 → 已到达 → 已卸货 → 已完成）+ 退单/退货/作废
 - **人员/车辆**：人员档案（6 种角色）、车辆档案、身份选择登录
@@ -307,7 +309,7 @@ worklog-app/
 - **REST API（`/api/v1/loading-orders/*`）**: 订单 CRUD（含 `img_cols` 列数持久化）、明细 CRUD、move、图片 CRUD
 - **行级图片**: 行级上传/合并查询 + manual-verify/fuzzy-match/ai-judge/ocr-detail/gen-prompt（同出货，**无 `re-ocr`**）
 - **摆放图（点数）**: 11 个端点（含 **`/unload`**），模型 `LoadingPlacementImage` + 表 `loading_placement_marks`
-- **拷贝纸 / 日本纸**: `POST /api/v1/loading-orders/records/<rid>/copy-paper-images` 上传标签照（复用 shipping 的 `COPY_PAPER_LABEL_SOURCE` / `_is_no_ai_match_item`）—— ⚠️ **后端端点已就绪，但前端无入口**：`loading-orders.html` 对 `copy_paper` 全库 0 命中，`copy_paper.js` 只被 `shipping-records.html` 引入，`loading_order_images` 里 `source='copy_paper_label'` 为 0 行。属于「后端做完了但 UI 从未接」的功能缺口（见「待办 / 待清理」）
+- **拷贝纸 / 日本纸 / 蜡光纸**: `POST /api/v1/loading-orders/records/<rid>/copy-paper-images` 上传标签照（复用 shipping 的 `NO_AI_LABEL_SOURCE` / `_is_no_ai_match_item` / `_enrich_no_ai_label_for_item`，2026-10-15 PC + 移动端已对齐出货页）—— 普通 🖼️ 守卫 `not is_no_ai_match`（隐藏）+ 标签 🖼️ 按钮守卫 `is_no_ai_match`（显示，`source='copy_paper_label'` 不做 OCR）；后端 `loading.py:924` 对 `records/<rid>/images` 端点 0105-0108 仍硬拦截 400
 - **共享模板**: `_record_image_script.html`（与出货/入库共用）+ `static/js/loading_placement_count.js`（装柜专用点数 JS）
 
 ### `blueprints/products.py` — 商品管理（18 条 rule）
@@ -475,7 +477,7 @@ PC 端的 `/m/inbound` + `/m/inbound/order/<oid>` / `/m/loading` + `/m/loading/o
 - **图片表统一带 `source` 字段**（三页口径一致）：`upload`（手动）/ `ai`（AI 识别）/ `placement`（摆放图）/ `copy_paper_label`（拷贝纸标签，**仅出货**，不做 OCR）
   - 出货实测分布：upload 3,691 / placement 1,354 / ai 532 / copy_paper_label 28
   - 入库实测分布：upload 656 / ai 174 / placement 11（**placement 已投入使用**）
-  - 装柜实测分布：upload 235 / ai 9 / placement 26（**无 copy_paper_label**：后端端点在，前端从未接 UI）
+  - 装柜实测分布：upload 237 / ai 10 / placement 26 / copy_paper_label 0（**2026-10-15 PC + 移动端 UI 已就绪**,待真机首次上传后回填非零值）
 - **摆放图相关列直接挂在图片表上**（不是 marks 表）：`circles`(JSON) / `mark_scale` / `loose_count` / `manual_count` / `is_unload` / `source_tag`
 
 ### 摆放图标记表（2026-09 三页齐备）
@@ -749,14 +751,14 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
 **响应体字段**（字段名与列表页 `item` 同名，前端直接消费）：
 
-| 字段                | 值                          | 说明                                                        |
-| ----------------- | -------------------------- | --------------------------------------------------------- |
-| `mismatch`        | `''` / `'info'` / `'warn'` | YPP 轨道                                                    |
-| `piece_mismatch`  | `''` / `'info'` / `'warn'` | 件数换算轨道                                                    |
-| `qty_invalid`     | bool                       | 数量本身非法                                                    |
-| `unit_hint`       | str                        | 辅助单位提示（如 `3支+4.5码`）                                       |
-| `piece_hint`      | str                        | 件数换算提示（如 `1500.0张/件`）                                     |
-| `mismatch_detail` | dict | None                | `{rule,label,expected,actual,diff,severity}`，供 hover 显示差额 |
+| 字段                | 值                          | 说明                    |                                                           |
+| ----------------- | -------------------------- | --------------------- | --------------------------------------------------------- |
+| `mismatch`        | `''` / `'info'` / `'warn'` | YPP 轨道                |                                                           |
+| `piece_mismatch`  | `''` / `'info'` / `'warn'` | 件数换算轨道                |                                                           |
+| `qty_invalid`     | bool                       | 数量本身非法                |                                                           |
+| `unit_hint`       | str                        | 辅助单位提示（如 `3支+4.5码`）   |                                                           |
+| `piece_hint`      | str                        | 件数换算提示（如 `1500.0张/件`） |                                                           |
+| `mismatch_detail` | dict                       | None                  | `{rule,label,expected,actual,diff,severity}`，供 hover 显示差额 |
 
 顶层另有 `validation = {total, warn, info, qty_invalid, flagged}`。
 
@@ -1250,7 +1252,9 @@ DELETE /api/v1/<page>-orders/placement-images/<id>/marks/last
 - [ ] **整单 `ai-match` 全单被过滤时返回误导性 400**：`records` 过滤后为空 → `ocr_text` 空 → 返回「没有可识别的行级图片」，实际语义是「本单全部明细都跳过 AI 比对」。建议在过滤后加早退分支给明确文案
 - [ ] **`staff` 表 49 行里绝大部分是测试残留**（`test` / `verify` / `verify2` / `smoke-tester` ×5 / `portal-tester` ×2 / `veh-tester` / `portal-*`，id 段 6220+，全部 `is_active=1`）→ 建议精确 id 删除，**先备份 `D:\BAK\`**
 - [ ] **入库 placement 已投入使用但覆盖面很小**（`inbound_images(source='placement')` 11 张图 / `inbound_placement_marks` 仅 15 行、覆盖 2 张图）→ 建议真机再走一遍上传+点数验收
-- [ ] **装柜拷贝纸/腊光纸前端无入口**：`loading.py` 的 `POST /api/v1/loading-orders/records/<rid>/copy-paper-images` 后端已就绪（且**无** `is_copy_paper` 守卫，任何明细都能传），但 `loading-orders.html` 对 `copy_paper` 0 命中、`copy_paper.js` 只被出货页引入、装柜侧 `copy_paper_label` 0 行 → 装柜的拷贝纸/日本纸/快巴纸/**腊光纸**行至今没有任何行级图片入口（0108 后端又硬拦截 `/images`，等于零入口）。要么补 UI（照出货页 `copy_paper.js` 挂上去 + 标签 🖼️ 按钮），要么把端点标注为预留。**改动前先 `git log -p -- templates/loading-orders.html` 确认是"漏做"还是"曾做过又删"**
+- [x] ~~**装柜拷贝纸/腊光纸前端无入口**~~ — 已完成（2026-10-15）：`loading_orders()` + `mobile_loading_order()` 调 `_enrich_no_ai_label_for_item` 富化 `is_no_ai_match` / `has_label_image` / `label_images`（预注入 `record_imgs_cache` 绕开 helper 内部 fallback 到 `ShippingImage` 的坑）；`templates/loading-orders.html` 操作列加普通 �️ 守卫 `not is_no_ai_match` + 新增 🖼️ 标签按钮（图区追加 `source='copy_paper_label'` 二级循环渲染）；`templates/mobile/loading-order.html` 加 `is_no_ai_match` 分支（徽章「标签图」/ 隐藏拍照识别 / 新增「📷 标签」按钮 + 缩略图 + fetch 脚本）；引入 `static/js/no_ai_label.js`，并修 `_image_upload_modal.html` `_copyPaperUploadSource` → `_noAiLabelUploadSource` 变量名错位(2026-10-09 rename 漏改,导致出货页此前也是半通)
+- [ ] **2026-10-09 `copy_paper` → `no_ai_label` rename 残留二次扫尾**（2026-10-17）：上一条修过一波（变量名/后端逻辑），但 CSS 选择器 + 模板水印文案没扫干净，直到 2026-10-17 用户报出货页「日本纸标签图上传后没红框」才暴露：① `templates/shipping-records.html:210` 红框 CSS 选择器仍写 `.copy-paper-label-btn` → 改成 `.no-ai-label-btn`（漏改导致出货页上传标签图后红框不生效）② 两页「统一按钮尺寸」CSS 选择器列表漏 `.no-ai-label-btn`（漏改导致免 AI 比对标签图按钮比普通图按钮大）③ 两页「标签图水印」硬编码 "拷贝纸标签" / "标签图"，而不是显示该 record 的 `品名 · 规格`（漏改导致 0105-0108 行上传后看不出是哪条明细）。三处都已修，但**入库页**没接免 AI 比对入口（`copy-paper-images` 端点都缺，见上一条），意味着上述三类残留一旦入库页接入口，还会再出现一次；扫尾时一并核对入库页 CSS 选择器 / 水印文案是否同步改对
+- [ ] **入库页对齐出货/装柜免 AI 比对标签图**：`inbound.py` 缺 `POST /api/v1/inbound-orders/records/<rid>/copy-paper-images` 端点 + `inbound-records.html` 普通 �️ 无 `is_no_ai_match` 守卫 + `mobile/inbound-order.html` 缺标签按钮/缩略图/fetch 脚本;工作量可沿用本次装柜改完归纳的标准模式(后端 copy-paper-images 端点 + 前端双按钮 + mobile handler + enrich helper,单页对齐)
 - [ ] **`product_row_utils.js` 只被装柜页引用**（出货/入库内联复制了同名函数）→ 要么给三页都挂上，要么明确放弃共享
 - [ ] 推送本地 commits 到 GitHub（需先开梯子，见 [[GitHub 需要梯子]]）
 - [x] ~~D 盘数据库备份~~ — 常态执行，脚本 `D:\BAK\_backup_now.py` + `D:\BAK\_verify_backup.py`（最近一份 `worklog_20260927_1927.db`，校验 MATCH）
