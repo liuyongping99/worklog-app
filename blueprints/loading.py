@@ -26,6 +26,7 @@ from blueprints._helpers import (
     validate_image_content, check_uploaded_image,
     match_label_to_row, detect_bg_color,
     compute_placement_expected_zhi, apply_user_rotation, parse_loose_yards,
+    validate_weight_unit,
 )
 from blueprints.ocr_engine import PaddleOCREngine, get_ocr_engine, OCR_MATCH_PROMPT_VERSION, ocr_preprocess_kind
 from blueprints.ocr_pipeline import RecordImageProcessor, _OCR_LOCK, _ASYNC_JOBS
@@ -36,6 +37,7 @@ from blueprints.ocr_log import set_log_context
 # 跨 blueprint import:shipping.py 不反向 import loading.py,无循环风险。
 from blueprints.shipping import (
     NO_AI_LABEL_SOURCE,
+    _enrich_no_ai_label_for_item,  # 2026-10-15 装柜对齐:给 list/mobile 端点写 is_no_ai_match/label_images/has_label_image
     _is_no_ai_match_item,  # 2026-10-04 新增(含 0108 腊光纸),2026-10-08 成为唯一谓词
 )
 
@@ -209,6 +211,13 @@ def loading_orders():
         for rec in grp.get('records', []):
             placement_by_record[rec['id']] = LoadingPlacementImage.get_by_record(rec['id'])
 
+    # 2026-10-15: 装柜对齐出货 — 预查 record 级普通图 cache(含 upload/ai/copy_paper_label),
+    # 供 _enrich_no_ai_label_for_item 复用(helper 内部 fallback 会查 ShippingImage 表,装柜侧必须预注入避免拿错图)
+    record_imgs_cache = {}
+    for grp in groups:
+        for rec in grp.get('records', []):
+            record_imgs_cache[rec['id']] = LoadingOrderImage.get_by_record(rec['id'])
+
     units = ProductUnit.get_all()
     unit_list = [{
         'product_name': u['product_name'],
@@ -277,6 +286,11 @@ def loading_orders():
                 if (_has_zhi or _has_san) and _matched_zhi and _matched_san:
                     _pm = True
             item['placement_match'] = _pm
+
+            # 2026-10-15: 装柜对齐出货 — 富化 is_no_ai_match / label_images / has_label_image,
+            # 模板据此显示标签 🖼️ 按钮 + 隐藏普通 🖼️ 按钮 + 渲染标签图二级循环
+            item['_record_imgs_cache'] = record_imgs_cache.get(item['id'], [])
+            _enrich_no_ai_label_for_item(item)
         group.update(summarize_remarks(group['records']))
 
     order_images = LoadingOrderImage.get_all_by_orders(
@@ -349,12 +363,15 @@ def loading_orders():
             placement_groups[grp['order_pk']] = group_list
 
     # 不再用 cookie:img_cols 由 Task 1 加的 loading_orders.img_cols 列提供,渲染走 group.img_cols
+    # 2026-10-17: 标签图水印显示对应明细的品名·规格(与出货页对齐),模板需按 record_pk 反查 record
+    record_by_pk = {r['id']: r for g in groups for r in g.get('records', [])}
     return render_template(
         'loading-orders.html',
         groups=groups,
         order_images=order_non_ai,
         ai_images=ai_images,
         placement_groups=placement_groups,  # 2026-09-18: 摆放图 server-side 渲染
+        record_by_pk=record_by_pk,
         today=date.today().strftime('%Y-%m-%d'),
         start_date=start_date,
         end_date=end_date,
@@ -486,6 +503,25 @@ def api_v1_loading_orders_add_record(order_id):
     if not product_name or not quantity:
         return jsonify({'success': False, 'error': '品名和数量不能为空'}), 400
 
+    # 2026-10-14:按重量硬校验 —— 与出货同款五层消费
+    unit_in = data.get('unit', '支')
+    spec_in = data.get('specification', '')
+    wc = validate_weight_unit({
+        'product_name': product_name, 'specification': spec_in, 'unit': unit_in,
+    })
+    if wc['weight_unit_invalid'] and wc.get('weight_source'):
+        AuditLog.log('weight_unit_reject', 'loading_order', order_id, detail={
+            'product': product_name, 'spec': spec_in, 'unit': unit_in,
+            'allowed': wc['allowed_units'],
+        })
+        return jsonify({
+            'success': False,
+            'error': (f"商品《{product_name}》按重量计价只允许单位 {'/'.join(wc['allowed_units'])},"
+                      f"您提交的是 {unit_in!r}"),
+            'error_code': 'WEIGHT_UNIT_INVALID',
+            'allowed_units': wc['allowed_units'],
+        }), 400
+
     record_id = LoadingOrderRecord.create(
         date='', customer='',
         product_name=product_name,
@@ -514,11 +550,39 @@ def api_v1_loading_orders_add_records_batch(order_id):
     if not records:
         return jsonify({'success': False, 'error': '无数据'}), 400
 
+    # 2026-10-14:按重量校验 pre-filter — 与出货/入库同款 partial-reject 语义
+    filtered_records = []
+    rejected_records = []
+    for rec in records:
+        wc = validate_weight_unit(rec)
+        if wc['weight_unit_invalid'] and wc.get('weight_source'):
+            rejected_records.append({
+                'product_name': (rec.get('product_name') or '').strip(),
+                'specification': (rec.get('specification') or '').strip(),
+                'unit': (rec.get('unit') or '').strip(),
+                'quantity': rec.get('quantity'),
+                'remark': rec.get('remark', ''),
+                'allowed_units': wc['allowed_units'],
+                'error_code': 'WEIGHT_UNIT_INVALID',
+            })
+        else:
+            filtered_records.append(rec)
+    if not filtered_records:
+        AuditLog.log('batch_weight_unit_reject', 'loading_order', order_id,
+                     detail={'count': len(rejected_records), 'kind': 'loading'})
+        return jsonify({
+            'success': False,
+            'error': '全部明细因单位超出重量白名单被拒',
+            'error_code': 'WEIGHT_UNIT_INVALID',
+            'count': 0,
+            'rejected': rejected_records,
+        }), 400
+
     conn = get_db()
     cursor = conn.cursor()
     try:
         result_records = []
-        for rec in records:
+        for rec in filtered_records:
             unit = rec.get('unit', '支')
             if unit == '码':
                 unit = 'y'  # 三层防御：批加端也归一化（与单条 add、PUT 端点保持一致）
@@ -552,6 +616,8 @@ def api_v1_loading_orders_add_records_batch(order_id):
         resp = {'success': True, 'count': len(result_records), 'records': result_records}
         if validation:
             resp['validation'] = validation
+        if rejected_records:
+            resp['rejected'] = rejected_records
         return jsonify(resp), 201
     except Exception as e:
         conn.rollback()
@@ -578,6 +644,30 @@ def api_v1_loading_orders_update_record(record_id):
 
     if data.get('unit') == '码':
         data['unit'] = 'y'
+
+    # 2026-10-13:按重量类别硬校验 —— 仅在 user 改 unit 时拦截
+    if 'unit' in data:
+        wc = validate_weight_unit({
+            'product_name': record.get('product_name', ''),
+            'specification': record.get('specification', ''),
+            'unit': data.get('unit', ''),
+        })
+        if wc['weight_unit_invalid'] and wc.get('weight_source'):
+            AuditLog.log('weight_unit_reject_update', 'loading_order',
+                         record.get('order_pk'),
+                         detail={'record_id': record_id,
+                                 'product': record.get('product_name', ''),
+                                 'unit': data.get('unit'),
+                                 'allowed': wc['allowed_units']})
+            return jsonify({
+                'success': False,
+                'error': (f"商品《{record.get('product_name', '')}》按重量计价"
+                          f"只允许单位 {'/'.join(wc['allowed_units'])},"
+                          f"不允许改为 {data.get('unit')!r}"),
+                'error_code': 'WEIGHT_UNIT_INVALID',
+                'allowed_units': wc['allowed_units'],
+            }), 400
+
     LoadingOrderRecord.update(record_id, data)
     updated = LoadingOrderRecord.get_by_id(record_id)
     AuditLog.log('update_record', 'loading_order', updated['order_pk'], detail={'record_id': record_id})
@@ -1554,6 +1644,8 @@ def mobile_loading_order(oid: int):
     records = LoadingOrderRecord.get_by_order(oid)
     record_states = {}
     for r in records:
+        # 2026-10-15: 装柜对齐出货移动端 — 富化 is_no_ai_match / label_images / has_label_image
+        _enrich_no_ai_label_for_item(r)
         imgs = LoadingOrderImage.get_by_record(r["id"])
         st = _latest_loading_status(imgs) if imgs else None
         record_states[r["id"]] = {

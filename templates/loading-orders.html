@@ -111,11 +111,17 @@
 .loading-page .record-table tr.row-out-of-stock .stock-icon { color: #ff7675; font-size: 1rem; margin-right: 2px; vertical-align: middle; }
 .loading-page .record-table tr.row-out-of-stock .qty-badge { background: #fab1a0; color: #ff7675; }
 
+/* 2026-10-15: 抵消 .container 的左右 padding 各 0.5rem(8px),让装柜表格更贴视口左右,
+   「整体往左边来一点」(用户反馈 2026-10-15);只改装柜页,不动 base.html 全局 */
+.loading-page { margin: 0 -0.5rem; }
+
 /* 2026-08-15: 装柜页 摆放图(点数)功能 — 与出货页对齐 */
 .loading-page .record-table .actions-cell { white-space: nowrap; }
 .loading-page .record-table .edit-record-btn,
 .loading-page .record-table .del-record-btn,
-.loading-page .record-table .record-image-btn {
+.loading-page .record-table .record-image-btn,
+/* 2026-10-17: 补 .no-ai-label-btn — 2026-10-09 rename 时漏改,免 AI 比对标签图按钮没继承统一尺寸,比普通图按钮大 */
+.loading-page .record-table .no-ai-label-btn {
     padding: 0.25rem 0.5rem;
     font-size: 0.8rem;
     line-height: 1.2;
@@ -125,6 +131,30 @@
 }
 .loading-page .record-table .record-image-btn.has-image {
     border: 2px solid #dc2626;
+}
+/* 2026-10-15: 免 AI 比对标签图按钮(0105-0108 行) — 与出货页 .no-ai-label-btn.has-label-image 一致红框反馈 */
+.loading-page .record-table .no-ai-label-btn.has-label-image {
+    border: 2px solid #dc2626;
+}
+/* 2026-10-15: 标签图二级循环的图项样式(缩略图 + 标签水印 + 删除按钮) */
+.loading-page .img-area .img-item-copy-paper-label .img-overlay-name {
+    background: rgba(116, 185, 255, 0.85);
+    color: #fff;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 0.7rem;
+}
+.loading-page .img-area .img-item-copy-paper-label .copy-paper-label-del-btn {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    background: rgba(220, 38, 38, 0.85);
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 0.75rem;
+    cursor: pointer;
 }
 .loading-page .record-table .actions-cell .status-badge {
     display: inline-block;
@@ -475,16 +505,19 @@
                     <col style="width:230px;" data-page-node-id="2A4ztXhniyEuZEz5sQDVdj">
                 </colgroup>
                 <thead data-page-node-id="1LHN8KfiwHRQgmGrd9Sjc2">
+                    {# 2026-10-15: 给所有 thead <th> 加显式 width — table-layout:fixed 下没有 width 的列
+                        会被浏览器按内容自动等分,内容少的「重点」「操作」列会被压成 0px(用户反馈修改/图片按钮看不见)。
+                        对照出货页 shipping-records.html:984-992 #}
                     <tr data-page-node-id="HuzwdykJL4KCkng0ErBZ4b">
-                        <th style="text-align:center;" data-page-node-id="s0AXJ9FAIB2JNu5MKJVv7U">序号</th>
-                        <th class="eco-col" data-page-node-id="VJUQ3d4DqpdgDEjsVAe1aE">重点</th>
-                        <th data-page-node-id="c3l6zWAfSQ6UV1PXUuVvwS">品名</th>
-                        <th data-page-node-id="WdojPEcxOxoDEYgTgcMbS0">规格</th>
-                        <th data-page-node-id="oZOhYfM5LJKZqZsw9ccEn2">数量</th>
-                        <th data-page-node-id="jBzCDHeJlKLtyVkQk0AuNH">单位</th>
-                        <th data-page-node-id="EQFuXXZqkRtXTKnEh1KJXZ">备注</th>
-                        <th data-page-node-id="Kuwp02XbsXIsHVv8xXhVeh">辅助单位提示</th>
-                        <th data-page-node-id="tgFAfYivnnnpPj48wpTatg">操作</th>
+                        <th style="text-align:center;width:40px;" data-page-node-id="s0AXJ9FAIB2JNu5MKJVv7U">序号</th>
+                        <th class="eco-col" style="width:48px;" data-page-node-id="VJUQ3d4DqpdgDEjsVAe1aE">重点</th>
+                        <th style="width:18%;" data-page-node-id="c3l6zWAfSQ6UV1PXUuVvwS">品名</th>
+                        <th style="width:18%;" data-page-node-id="WdojPEcxOxoDEYgTgcMbS0">规格</th>
+                        <th style="width:12%;" data-page-node-id="oZOhYfM5LJKZqZsw9ccEn2">数量</th>
+                        <th style="width:8%;" data-page-node-id="jBzCDHeJlKLtyVkQk0AuNH">单位</th>
+                        <th style="width:14%;" data-page-node-id="EQFuXXZqkRtXTKnEh1KJXZ">备注</th>
+                        <th style="width:12%;" data-page-node-id="Kuwp02XbsXIsHVv8xXhVeh">辅助单位提示</th>
+                        <th style="width:240px;" data-page-node-id="tgFAfYivnnnpPj48wpTatg">操作</th>
                     </tr>
                 </thead>
                 <tbody data-page-node-id="FIdNZijR1dM82ZhcsxKJGV">
@@ -511,7 +544,12 @@
                             <button type="button" class="move-down-btn lock-hide" data-id="{{ record.id }}" onclick="moveRecord({{ record.id }}, 'down', this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.75rem;padding:0.1rem 0.35rem;border-radius:4px;margin-right:0.3rem;" title="下移" data-page-node-id="tmlfJVyomVjHelJeOAk2fQ">▼</button>
                             <button type="button" class="edit-record-btn lock-hide" data-id="{{ record.id }}" onclick="editRecord({{ record.id }}, this)" style="background:none;border:none;color:#00b894;cursor:pointer;font-size:0.85rem;margin-right:0.4rem;" title="修改" data-page-node-id="fQHVgBHjLcxAZ5uCB6XQiQ">✏️</button>
                             <button type="button" class="del-record-btn lock-hide" data-id="{{ record.id }}" onclick="deleteRecord({{ record.id }}, this)" style="background:none;border:none;color:#ff7675;cursor:pointer;font-size:0.85rem;" title="删除" data-page-node-id="oaH34LVtHTfsHVAdWA3lRR">🗑️</button>
-                            <button type="button" class="btn btn-sm record-image-btn lock-hide{% if record.has_image %} has-image{% endif %}" data-record-id="{{ record.id }}" title="上传图片到此商品{% if record.has_image %}（已上传）{% endif %}" style="background:#74b9ff;color:#fff;" data-page-node-id="2o3ypdCVCZCa35OEIjHXlU">🖼️</button>
+                            {# 2026-10-15: 装柜对齐出货 — 拷贝纸/日本纸/快巴纸/蜡光纸(0105-0108)行唯一图片入口,
+                                落 source='copy_paper_label' 不做 OCR。普通 🖼️ 走 /images 端点对这类行已被 loading.py:924 硬拦截 400 #}
+                            {% if record.is_no_ai_match %}
+                            <button type="button" class="btn btn-sm no-ai-label-btn lock-hide{% if record.has_label_image %} has-label-image{% endif %}" data-record-id="{{ record.id }}" data-order-id="{{ group.order_pk }}" data-source="label" title="上传标签图(拷贝纸/日本纸/快巴纸/蜡光纸,无需 OCR){% if record.has_label_image %}(已上传){% endif %}" style="background:#74b9ff;color:#fff;" onclick="openNoAiLabelUpload('{{ record.id }}','{{ group.order_pk }}','label')" data-page-node-id="5R9pMv3nLk2tQ7vHxY1bZc">🖼️</button>
+                            {% endif %}
+                            {% if not record.is_no_ai_match %}<button type="button" class="btn btn-sm record-image-btn lock-hide{% if record.has_image %} has-image{% endif %}" data-record-id="{{ record.id }}" title="上传图片到此商品{% if record.has_image %}（已上传）{% endif %}" style="background:#74b9ff;color:#fff;" data-page-node-id="2o3ypdCVCZCa35OEIjHXlU">🖼️</button>{% endif %}
                             {# 2026-09-30: 与出货对齐 — 加 unit=='张' 让成品纸(张装)也能走 placement 点数 #}
                             {% if record.unit == '桶' or record.unit == '张' or '支' in (record.unit_hint or '') or '支' in (record.piece_hint or '') %}<button type="button" class="placement-add-btn lock-hide{% if record.placement_match %} placement-ok{% endif %}" data-record-id="{{ record.id }}" data-order-id="{{ group.order_pk }}" title="添加点数图(供清点{{ record.unit }}数)" onclick="openPlacementImageModal('{{ record.id }}','{{ group.order_pk }}')" data-page-node-id="5KfdPqnmDEdkBAuE6gZKR4">点数</button>{% endif %}
                             <input type="file" class="record-image-input" data-record-id="{{ record.id }}" accept="image/*" multiple style="display:none;" data-page-node-id="qdw753L0DRzPkeqIOnflJd">
@@ -574,7 +612,7 @@
                     <button class="img-col-btn {% if group.img_cols == 4 %}active{% endif %}" onclick="setImgCols(this, 4)" data-page-node-id="7eJw8slNgkYwSAQzrjztHW">4</button>
                     <button class="img-col-btn {% if group.img_cols == 5 %}active{% endif %}" onclick="setImgCols(this, 5)" data-page-node-id="rlyKwrDue1m4gGY5Iqdi0f">5</button>
                 </div>
-                {% for img in imgs %}
+                {% for img in imgs if img.source != 'copy_paper_label' %}
                 <div class="img-item{% if img.record_pk %} img-item-record{% else %} img-item-order{% endif %}"{% if img.record_pk %} data-record-pk="{{ img.record_pk }}"{% endif %} data-image-id="{{ img.id }}" data-page-node-id="5ktNUMrKx9Akfg1Jm61k2u">
                     <div class="img-photo" data-page-node-id="OQs5YwKPUNO8KR9yW6lFEW">
                         <img src="/upload/{{ img.relative_path }}" alt="{{ img.original_name or '图片' }}" onclick="showImgPreview('/upload/{{ img.relative_path }}')" data-page-node-id="kp9VntYE1IoPm9E92OtGa1">
@@ -618,6 +656,24 @@
                         </div>
                     </div>
                     {% endif %}
+                </div>
+                {% endfor %}
+                {# 2026-10-15: 装柜对齐出货 — 拷贝纸/日本纸/快巴纸/蜡光纸标签图(source='copy_paper_label')独立渲染块,
+                    不参与 OCR 徽章 / AI 判别等流水线。删除按钮 class .copy-paper-label-del-btn 由 no_ai_label.js 监听
+                   2026-10-17: 水印从固定"标签图"改为显示该 record 的 商品名称 · 规格(与出货页对齐) #}
+                {% for img in imgs if img.source == 'copy_paper_label' %}
+                {% set r = record_by_pk.get(img.record_pk) %}
+                {% set rname = (r.product_name if r else '') or '' %}
+                {% set rspec = (r.specification if r else '') or '' %}
+                <div class="img-item img-item-record img-item-copy-paper-label" data-record-pk="{{ img.record_pk }}" data-image-id="{{ img.id }}" data-page-node-id="7Cpy4rXmKp9bHt2sQ1vWxN">
+                    <div class="img-photo" data-page-node-id="8Dz5fYnLq3mJv6cN1pXrTw">
+                        <img src="/upload/{{ img.relative_path }}" alt="{{ (rname + (' · ' + rspec if rspec else '')) or img.original_name or '标签图' }}" onclick="showImgPreview('/upload/{{ img.relative_path }}')" data-page-node-id="9Eb6gZoMr4nKw7dO2qYsUx">
+                        <button class="copy-paper-label-del-btn lock-hide" data-image-id="{{ img.id }}" data-page-node-id="0Fc7hApNs5oLx8eP3rZtVy">× 删除</button>
+                        {# 2026-10-17: 与普通图一致 — 品名 .img-overlay-name (bottom:1.4rem) / 规格 .img-overlay-spec (bottom:.2rem)
+                           装柜页两行都在底部(line 91-92),与出货页顶部+底部布局不同 #}
+                        {% if rname %}<div class="img-overlay-name" data-page-node-id="1Gd8iBqOt6pMy9fQ4sAuWz">📋 {{ rname }}</div>{% endif %}
+                        {% if rspec %}<div class="img-overlay-spec" data-page-node-id="2He9jCrPu7qNz0gR5tBvXy">{{ rspec }}</div>{% endif %}
+                    </div>
                 </div>
                 {% endfor %}
             </div>
@@ -726,6 +782,8 @@
 </script>
 <script src="{{ url_for('static', filename='js/product_row_utils.js') }}"></script>
 <script src="/static/js/loading_placement_count.js"></script>
+{# 2026-10-15: 装柜对齐出货 — 免 AI 比对标签图(0105-0108)按钮逻辑(openNoAiLabelUpload / 删除按钮监听) #}
+<script src="{{ url_for('static', filename='js/no_ai_label.js') }}"></script>
 <script>
 var LOADING_UNIT_LIST = {{ unit_list | default([]) | tojson }};
 
@@ -1143,7 +1201,14 @@ document.addEventListener('DOMContentLoaded', function() {
                     });
                 }
             } else {
-                alert('保存失败：' + (res.error || '未知错误'));
+                if (res.error_code === 'WEIGHT_UNIT_INVALID') {
+                    var au = (res.allowed_units || []).join(' / ');
+                    alert('⚖ 单位越界:' + (res.error || '')
+                        + '\n\n仅允许单位:' + au
+                        + '\n\n该商品绑定了重量类别,如需修改请到\n/manage/weight-categories');
+                } else {
+                    alert('保存失败：' + (res.error || '未知错误'));
+                }
             }
         }).catch(function(err) { handleApiError(err, '保存记录'); });
     };
@@ -1529,11 +1594,14 @@ function appendOrderImageArea(orderPk, images, recordInfo) {
 
 // ── Initialization calls ──
 bindRecordImageButtons();
+bindDeleteImageButtons();  // 2026-10-15: 修 .del-img-btn 无反应 bug — 装柜侧 init 段漏调,出货页 line 2158 有
 bindManualConfirmButtons();
 bindFuzzyMatchButtons();
 bindAiJudgeButtons();
+bindReOcrButtons();  // 2026-10-15: 补 — 与出货页 line 2163 对齐(装柜侧漏调)
 applyAllRecordImageOverlays();
 if (typeof bindOcrDetailButtons === 'function') bindOcrDetailButtons();
+if (typeof initAllMatchColumns === 'function') initAllMatchColumns();  // 2026-10-15: 补 — 出货页 line 2182 有
 
 
 // === 订单备注功能 ===
