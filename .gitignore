@@ -116,8 +116,12 @@ nohup.out
 # ===== 其他 =====
 # Windows 启动脚本的临时输出
 *.bak
+# 带日期戳的备份(2026-10-16 装柜修改 ocr_engine 留的 .bak20261016)
+*.bak[0-9]*
 *.tmp
 *.swp
+# 装柜页面调试截图(before/after/final/v3 四张)
+loading-orders-*.png
 # sql/ 下的临时调试脚本（product1/2/3 系列都是调试中间产物；new.sql + new_sqlite.sql 是正式文件）
 sql/_*.py
 sql/_*.json
