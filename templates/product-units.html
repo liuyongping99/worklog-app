@@ -47,11 +47,19 @@
             <input type="checkbox" id="puUseYard">
             <label for="puUseYard">按码数卖</label>
         </div>
+        <div class="pu-checkbox" style="margin-bottom:4px;">
+            <input type="checkbox" id="puUseWeight" onchange="toggleWeightUnits()">
+            <label for="puUseWeight">按重量卖</label>
+        </div>
+        <div class="form-group" id="puWeightUnitsGroup" style="flex:1;min-width:140px;margin-bottom:0;display:none;">
+            <label for="puAllowedUnits">允许单位</label>
+            <input type="text" id="puAllowedUnits" placeholder="kg,斤" style="width:100%;">
+        </div>
         <div style="padding-bottom:2px;">
             <button class="btn btn-primary" onclick="addUnit()">➕ 添加</button>
         </div>
     </div>
-    <p class="pu-hint">码数支持小数，如 48.5 码/支；规格关键词留空表示默认规则</p>
+    <p class="pu-hint">码数支持小数，如 48.5 码/支；规格关键词留空表示默认规则。勾「按重量卖」后填写允许单位(逗号分隔,如 kg,斤)</p>
 </div>
 
 <div class="card">
@@ -68,13 +76,15 @@
                 <th>规格匹配</th>
                 <th>每支码数</th>
                 <th>按码数卖</th>
+                <th>按重量卖</th>
+                <th>允许单位</th>
                 <th>操作</th>
             </tr>
         </thead>
         <tbody>
             {% if units %}
             {% for u in units %}
-            <tr data-useyard="{{ u.is_usingyardforcounting }}">
+            <tr data-useyard="{{ u.is_usingyardforcounting }}" data-useweight="{{ u.is_usingweightforcounting }}">
                 <td><strong>{{ u.product_name }}</strong></td>
                 <td>
                     {% if u.spec_keyword %}
@@ -92,12 +102,22 @@
                     {% endif %}
                 </td>
                 <td>
+                    {% if u.is_usingweightforcounting %}
+                    <span class="badge-yard">是</span>
+                    {% else %}
+                    <span class="badge-no">否</span>
+                    {% endif %}
+                </td>
+                <td style="font-size:0.85rem; color:#555;">{{ u.allowed_units or '—' }}</td>
+                <td>
                     <div class="pu-actions">
                         <button class="btn-edit-pu"
                             data-name="{{ u.product_name|e }}"
                             data-speckw="{{ u.spec_keyword or ''|e }}"
                             data-yards="{{ u.yards_per_piece }}"
-                            data-useyard="{{ u.is_usingyardforcounting }}">✏️ 编辑</button>
+                            data-useyard="{{ u.is_usingyardforcounting }}"
+                            data-useweight="{{ u.is_usingweightforcounting }}"
+                            data-allowedunits="{{ u.allowed_units or ''|e }}">✏️ 编辑</button>
                         <form action="/product-units/delete" method="POST" onsubmit="return confirm('确定要删除 ' + this.querySelector('button').getAttribute('data-name') + ' 的单位配置吗？');">
                             <input type="hidden" name="product_name" value="{{ u.product_name|e }}">
                             <input type="hidden" name="spec_keyword" value="{{ u.spec_keyword or ''|e }}">
@@ -108,7 +128,7 @@
             </tr>
             {% endfor %}
             {% else %}
-            <tr class="empty-row"><td colspan="5">暂无配置，请在上方添加商品单位</td></tr>
+            <tr class="empty-row"><td colspan="7">暂无配置，请在上方添加商品单位</td></tr>
             {% endif %}
         </tbody>
     </table>
@@ -135,6 +155,14 @@
             <div class="pu-checkbox">
                 <input type="checkbox" id="editUseYard" name="is_usingyardforcounting" value="1">
                 <label for="editUseYard">按码数卖</label>
+            </div>
+            <div class="pu-checkbox">
+                <input type="checkbox" id="editUseWeight" name="is_usingweightforcounting" value="1" onchange="toggleEditWeightUnits()">
+                <label for="editUseWeight">按重量卖</label>
+            </div>
+            <div class="form-group" id="editWeightUnitsGroup" style="display:none;">
+                <label for="editAllowedUnits">允许单位 <span style="color:#888;font-size:0.75rem;">(逗号分隔,如 kg,斤)</span></label>
+                <input type="text" id="editAllowedUnits" name="allowed_units" placeholder="kg,斤" style="width:100%;">
             </div>
             <div style="display:flex;gap:0.75rem;justify-content:flex-end;margin-top:1.5rem;">
                 <button type="button" class="btn btn-sm" onclick="closeEdit()" style="padding:0.5rem 1rem;background:#e0e0e0;color:#333;">取消</button>
@@ -169,14 +197,33 @@ document.querySelectorAll('.btn-edit-pu').forEach(function(btn) {
         var specKw = this.getAttribute('data-speckw');
         var yards = parseInt(this.getAttribute('data-yards'));
         var useYard = this.getAttribute('data-useyard');
+        var useWeight = this.getAttribute('data-useweight');
+        var allowedUnits = this.getAttribute('data-allowedunits');
         document.getElementById('editName').value = name;
         document.getElementById('editOldSpecKw').value = specKw;
         document.getElementById('editSpecKw').value = specKw || '(默认)';
         document.getElementById('editYards').value = (yards / 100).toFixed(2);
         document.getElementById('editUseYard').checked = useYard == '1';
+        document.getElementById('editUseWeight').checked = useWeight == '1';
+        // 把 JSON '["kg","斤"]' 还原成 'kg,斤'
+        var unitsDisplay = allowedUnits || '';
+        if (unitsDisplay.startsWith('[')) {
+            try { unitsDisplay = JSON.parse(unitsDisplay).join(','); } catch(e) {}
+        }
+        document.getElementById('editAllowedUnits').value = unitsDisplay;
+        toggleEditWeightUnits();
         document.getElementById('editModal').classList.add('active');
     });
 });
+
+function toggleWeightUnits() {
+    var on = document.getElementById('puUseWeight').checked;
+    document.getElementById('puWeightUnitsGroup').style.display = on ? '' : 'none';
+}
+function toggleEditWeightUnits() {
+    var on = document.getElementById('editUseWeight').checked;
+    document.getElementById('editWeightUnitsGroup').style.display = on ? '' : 'none';
+}
 
 // 删除确认
 document.querySelectorAll('.btn-del-pu').forEach(function(btn) {
@@ -193,8 +240,11 @@ function addUnit() {
     var specKw = document.getElementById('puSpecKw').value.trim();
     var yards = document.getElementById('puYards').value.trim();
     var useYard = document.getElementById('puUseYard').checked ? '1' : '0';
+    var useWeight = document.getElementById('puUseWeight').checked ? '1' : '0';
+    var allowedUnits = document.getElementById('puAllowedUnits').value.trim();
     if (!name) { alert('请输入商品名称'); return; }
     if (!yards || parseFloat(yards) <= 0) { alert('请输入有效的每支码数'); return; }
+    if (useWeight === '1' && !allowedUnits) { alert('勾选了「按重量卖」就必须填写允许单位,如 kg,斤'); return; }
     var form = document.createElement('form');
     form.method = 'POST';
     form.action = '/product-units/add';
@@ -202,7 +252,9 @@ function addUnit() {
     form.innerHTML = '<input name="product_name" value="' + name.replace(/"/g, '&quot;') + '">'
         + (specKw ? '<input name="spec_keyword" value="' + specKw.replace(/"/g, '&quot;') + '">' : '')
         + '<input name="yards_per_piece" value="' + yards + '">'
-        + '<input name="is_usingyardforcounting" value="' + useYard + '">';
+        + '<input name="is_usingyardforcounting" value="' + useYard + '">'
+        + '<input name="is_usingweightforcounting" value="' + useWeight + '">'
+        + (useWeight === '1' ? '<input name="allowed_units" value="' + allowedUnits.replace(/"/g, '&quot;') + '">' : '');
     document.body.appendChild(form);
     form.submit();
 }

@@ -5,6 +5,27 @@
    ⚠️ 本文件里所有 fetch 都必须走 _smartAddApi 拼路径,不许硬编码某一套订单的 URL ——
       否则装柜/入库页会拿自己的 record_id 去写出货表(串表脏写)。
 #}
+<style>
+/* 2026-10-13:按重量类别单位越界 — 红色左边框 + ⚖ 角标 */
+tr.record-row[data-wc-invalid="1"],
+tr[data-wc-invalid="1"] {
+    box-shadow: inset 5px 0 0 0 #dc2626 !important;
+    background-color: #fef2f2 !important;
+}
+tr[data-wc-invalid="1"]::after {
+    content: '⚖ 单位越界';
+    display: inline-block;
+    background: #fecaca;
+    color: #991b1b;
+    border: 1px solid #fca5a5;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 1px 6px;
+    margin-left: 6px;
+    vertical-align: middle;
+}
+</style>
 <script>
 // ── 智能添加弹框 ──
 var SMART_ADD_API = '{{ smart_add_api }}';
@@ -21,17 +42,21 @@ var _smartFillOrderPk = null, _smartFillOrderId = null;
 // 这里**优先消费服务端值**,本地重算只作兜底 —— 端点没带字段时(旧端点/异常
 // 降级)才退回页面自己的 JS 实现,保证「导入那一刻」和「刷新后」结论一致。
 //
-// 返回 {mismatch, pieceMismatch, qtyInvalid, combined, detail}
+// 返回 {mismatch, pieceMismatch, qtyInvalid, weightInvalid, combined, detail}
 //   combined: 'warn' > 'info' > '' 合并两轨后的最终级别(与后端行底色口径一致)
 //   detail  : mismatch_detail,供 hover 显示「期望 X / 实际 Y / 差 Z」
+// 2026-10-13:新增 weightInvalid 轨道(按重量类别硬校验),由后端回传 weight_unit_invalid;
+//   不参与 computed combined(独立走红框 + ⚖ 单位越界 徽章,避免与 YPP/件数 红冲突)
 function readImportFlags(rec) {
     var hasServer = rec && (rec.mismatch !== undefined || rec.piece_mismatch !== undefined
-                            || rec.qty_invalid !== undefined);
-    var mismatch, pieceMismatch, qtyInvalid, detail;
+                            || rec.qty_invalid !== undefined
+                            || rec.weight_unit_invalid !== undefined);
+    var mismatch, pieceMismatch, qtyInvalid, weightInvalid, detail;
     if (hasServer) {
         mismatch = rec.mismatch || '';
         pieceMismatch = rec.piece_mismatch || '';
         qtyInvalid = !!rec.qty_invalid;
+        weightInvalid = !!rec.weight_unit_invalid;
         detail = rec.mismatch_detail || null;
     } else {
         // 兜底:页面本地重算(口径可能与后端有细微差异,仅在服务端未给值时用)
@@ -40,11 +65,14 @@ function readImportFlags(rec) {
         pieceMismatch = (typeof checkPieceMismatch === 'function')
             ? checkPieceMismatch(rec.remark||'', rec.quantity, rec.product_name, rec.specification||'') : '';
         qtyInvalid = (typeof isInvalidQty === 'function') ? isInvalidQty(rec.quantity) : false;
+        // 本地没有查重商品类的接口 → 保持 False;前端认服务端值
+        weightInvalid = false;
     }
     var combined = '';
     if (mismatch === 'warn' || pieceMismatch === 'warn') combined = 'warn';
     else if (mismatch === 'info' || pieceMismatch === 'info') combined = 'info';
     return {mismatch: mismatch, pieceMismatch: pieceMismatch, qtyInvalid: qtyInvalid,
+            weightInvalid: weightInvalid,
             combined: combined, detail: detail};
 }
 
@@ -124,6 +152,15 @@ function buildShippingRecordRow(rec, tbody) {
         '</td>';
     if (typeof applyMismatchClass === 'function') applyMismatchClass(tr, flags.combined);
     else applyImportFlagClass(tr, flags);
+    // 2026-10-13:按重量类别单位越界 — 加红边 + ⚖ 单位越界 角标
+    //   与 mismatch 红冲突时不覆盖(因为服务端会把 weight_unit 当 warn,合并到 combined 已含红)
+    //   此处只额外加 data-wc-invalid, CSS 用 .record-row[data-wc-invalid] 给左侧红色粗条
+    if (flags.weightInvalid) {
+        tr.setAttribute('data-wc-invalid', '1');
+        tr.setAttribute('title', '⚖ ' + ((rec.weight_category_name || '该商品')
+            + '要求单位 ∈ ' + (rec.allowed_units || []).join('/')
+            + ', 您填的是 ' + (rec.unit || '(空)')));
+    }
     // hover 提示:期望 vs 实际差多少(§f 导入即校验的可见部分)
     var _flagTitle = importFlagTitle(flags);
     if (_flagTitle) tr.setAttribute('title', _flagTitle);
@@ -192,7 +229,9 @@ function showImportToast(msg, ms) {
             + 'white-space:pre-line;display:none;';
         document.body.appendChild(el);
     }
-    el.textContent = msg;
+    // 用 innerHTML 渲染,支持内嵌链接(点到 /manage/weight-categories);
+    // 调用方负责不要传入不可信内容 —— 这里只用于模板拼接。
+    el.innerHTML = (msg || '').replace(/\n/g, '<br>');
     el.style.display = 'block';
     el.style.background = '#fff3f3';
     el.style.border = '1px solid #ff6b6b';
@@ -207,8 +246,13 @@ function notifyImportValidation(v) {
     if (v.warn) parts.push(v.warn + ' 行数量对不上（红底）');
     if (v.info) parts.push(v.info + ' 行轻微偏差（粉底）');
     if (v.qty_invalid) parts.push(v.qty_invalid + ' 行数量格式异常');
+    // 2026-10-13:按重量类别单位越界 — 顶部红条 toast + 提示去管理页
+    if (v.weight_invalid) {
+        parts.push(v.weight_invalid + ' 行重量单位超出白名单（红边 + ⚖ 角标）');
+    }
     showImportToast('⚠️ 已导入 ' + v.total + ' 行，其中：' + parts.join('、')
-                    + '。\n鼠标悬停标色行可看期望值与差额。');
+                    + '。\n鼠标悬停标色行可看期望值与差额。'
+                    + (v.weight_invalid ? '\n到 <a href="/manage/weight-categories">/manage/weight-categories</a> 管理商品的重量类别。' : ''));
 }
 
 window.openSmartFill = function(orderPk, orderDate, orderCustomer) {

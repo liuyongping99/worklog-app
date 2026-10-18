@@ -24,12 +24,20 @@ def product_units_add():
     name = request.form.get('product_name', '').strip()
     yards_str = request.form.get('yards_per_piece', '').strip()
     use_yard = request.form.get('is_usingyardforcounting') == '1'
+    use_weight = request.form.get('is_usingweightforcounting') == '1'
+    allowed_units_raw = request.form.get('allowed_units', '').strip()
     spec_kw = request.form.get('spec_keyword', '').strip() or None
+    # 归一化 allowed_units:把「kg,斤」/「kg、斤」/「kg 斤」统一成 ['kg','斤']
+    allowed_units_str = _normalize_allowed_units_str(allowed_units_raw) if use_weight else ''
     if name and yards_str:
         try:
             yards_val = int(round(float(yards_str) * 100))
-            ProductUnit.create(name, yards_val, use_yard, spec_kw)
+            ProductUnit.create(name, yards_val, use_yard, spec_kw,
+                               is_usingweightforcounting=use_weight,
+                               allowed_units=allowed_units_str)
             label = f'{name}' + (f'（{spec_kw}）' if spec_kw else '')
+            if use_weight:
+                label += f' [按重量:{allowed_units_str or "(空)"}]'
             flash(f'已添加商品单位: {label}', 'success')
         except (ValueError, TypeError):
             flash('请输入有效的码数值', 'error')
@@ -43,14 +51,30 @@ def product_units_edit():
     old_spec_kw = old_spec_kw.strip() if old_spec_kw else None
     yards_str = request.form.get('yards_per_piece', '').strip()
     use_yard = request.form.get('is_usingyardforcounting') == '1'
+    use_weight = request.form.get('is_usingweightforcounting') == '1'
+    allowed_units_raw = request.form.get('allowed_units', '').strip()
+    allowed_units_str = _normalize_allowed_units_str(allowed_units_raw) if use_weight else ''
     if product_name and yards_str:
         try:
             yards_val = int(round(float(yards_str) * 100))
-            ProductUnit.update(product_name, yards_val, use_yard, old_spec_kw)
+            ProductUnit.update(product_name, yards_val, use_yard, old_spec_kw,
+                               is_usingweightforcounting=use_weight,
+                               allowed_units=allowed_units_str)
             flash(f'已更新 {product_name}', 'success')
         except (ValueError, TypeError):
             flash('请输入有效的码数值', 'error')
     return redirect(url_for('products.product_units'))
+
+
+def _normalize_allowed_units_str(raw):
+    """把 'kg,斤' / 'kg、斤' / 'kg 斤' 统一成 JSON '["kg","斤"]';空返回 ''"""
+    if not raw:
+        return ''
+    import json as _json
+    parts = [p.strip() for p in raw.replace('、', ',').replace(' ', ',').split(',') if p.strip()]
+    if not parts:
+        return ''
+    return _json.dumps(parts, ensure_ascii=False)
 
 
 @bp.route('/product-units/delete', methods=['POST'])

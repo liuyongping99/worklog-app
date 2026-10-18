@@ -973,6 +973,31 @@ def init_db():
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_voice_phrase ON voice_phrase_mapping(phrase)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_voice_status ON voice_phrase_mapping(status)')
 
+    # 2026-10-14:按重量计价的简化方案 — 在 product_units 表加 2 列,
+    # 不再单独建重量类别表。同表两轨道(与 is_usingyardforcounting 并列)互不干扰:
+    #   - is_usingyardforcounting=1 → 启用 YPP(按码卖)校验
+    #   - is_usingweightforcounting=1 → 启用「按重量」单位白名单校验
+    # 配置在 /product-unit 页加;校验走 ProductUnit.get_match 双轮匹配。
+    try:
+        cursor.execute(
+            "ALTER TABLE product_units ADD COLUMN "
+            "is_usingweightforcounting INTEGER NOT NULL DEFAULT 0"
+        )
+    except sqlite3.OperationalError:
+        pass  # 列已存在
+    try:
+        cursor.execute(
+            "ALTER TABLE product_units ADD COLUMN allowed_units TEXT NOT NULL DEFAULT ''"
+        )
+    except sqlite3.OperationalError:
+        pass  # 列已存在
+
+    # 2026-10-13 老方案遗留:product_weight_categories 表 + product.weight_category_id 列。
+    # 2026-10-14 简化方案上线:删表 + 清索引。product.weight_category_id 列 SQLite 12 之前
+    # 不支持 DROP COLUMN,保留无副作用(全员 NULL,UI 也不再读它)。
+    cursor.execute('DROP TABLE IF EXISTS product_weight_categories')
+    cursor.execute('DROP INDEX IF EXISTS idx_pwc_status')
+
     # 2026-09-09: copy_paper_images 表已废弃(标签图迁入 shipping_images,
     # source='copy_paper_label';点数走 shipping_images(source='placement')),
     # 不再建表;本机迁移时旧表已 DROP,不影响运行。

@@ -1677,7 +1677,16 @@ setTimeout(() => {
                             });
                         }
                     } else {
-                        alert('保存失败：' + (result.error || ''));
+                        if (result.error_code === 'WEIGHT_UNIT_INVALID') {
+                            var au = (result.allowed_units || []).join(' / ');
+                            alert('⚖ 单位越界:' + (result.error || '')
+                                + '\n\n仅允许单位:' + au
+                                + '\n\n该商品绑定了重量类别,如需修改请到\n/manage/weight-categories');
+                            var _wcTr = btn.closest('tr');
+                            if (_wcTr) { _wcTr.setAttribute('data-wc-invalid', '1'); _wcTr.style.backgroundColor = '#fef2f2'; }
+                        } else {
+                            alert('保存失败：' + (result.error || ''));
+                        }
                     }
                 }).catch(function(err) {
                     hideBtnLoading(btn);
@@ -2004,7 +2013,16 @@ setTimeout(() => {
                                 verified_warnings: (typeof readRowVerifiedWarnings === 'function') ? readRowVerifiedWarnings(tr) : {}
                             });
                         }
-                    } else { alert('保存失败：' + (result.error || '')); }
+                    } else {
+                            if (result.error_code === 'WEIGHT_UNIT_INVALID') {
+                                var au = (result.allowed_units || []).join(' / ');
+                                alert('⚖ 单位越界:' + (result.error || '')
+                                    + '\n\n仅允许单位:' + au
+                                    + '\n\n该商品绑定了重量类别,如需修改请到\n/manage/weight-categories');
+                            } else {
+                                alert('保存失败：' + (result.error || ''));
+                            }
+                        }
                 });
             } else {
                 // 进入编辑模式

@@ -4,18 +4,33 @@ from ._db import get_db
 
 
 class ProductUnit:
-    """商品辅助单位：每支多少码。yards_per_piece 存储为实际值×100的整数
-       复合唯一键 (product_name, spec_keyword)，同名商品可有多条规格规则
+    """商品辅助单位:每支多少码 + (可选)按重量计价的单位白名单。
+       复合唯一键 (product_name, spec_keyword),同名商品可有多条规格规则。
+       两条独立轨道(2026-10-14):
+         - is_usingyardforcounting=1 → 启用 YPP(按码卖)校验,行数=yards_per_piece/100
+         - is_usingweightforcounting=1 → 启用「按重量」单位白名单校验,allowed_units
+           存 JSON 数组如 '["kg","斤"]' 或逗号分隔 'kg,斤'
     """
 
     @staticmethod
-    def create(product_name: str, yards_per_piece: int, is_usingyardforcounting: bool = False, spec_keyword: str = None):
-        """yards_per_piece: 实际值×100，如 7.5码 → 750。spec_keyword 为 NULL 时表示默认"""
+    def create(product_name: str, yards_per_piece: int,
+               is_usingyardforcounting: bool = False, spec_keyword: str = None,
+               is_usingweightforcounting: bool = False, allowed_units: str = ''):
+        """yards_per_piece: 实际值×100,如 7.5码 → 750。
+        spec_keyword 为 NULL 时表示默认行。
+        allowed_units: 形如 '["kg","斤"]' 或 'kg,斤',留空表示不启用按重量校验。
+        """
         conn = get_db()
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT OR REPLACE INTO product_units (product_name, spec_keyword, yards_per_piece, is_usingyardforcounting) VALUES (?, ?, ?, ?)",
-            (product_name, spec_keyword, yards_per_piece, 1 if is_usingyardforcounting else 0)
+            "INSERT OR REPLACE INTO product_units "
+            "(product_name, spec_keyword, yards_per_piece, is_usingyardforcounting, "
+            " is_usingweightforcounting, allowed_units) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (product_name, spec_keyword, yards_per_piece,
+             1 if is_usingyardforcounting else 0,
+             1 if is_usingweightforcounting else 0,
+             allowed_units or '')
         )
         conn.commit()
         conn.close()
@@ -78,19 +93,29 @@ class ProductUnit:
         conn.close()
 
     @staticmethod
-    def update(product_name: str, yards_per_piece: int, is_usingyardforcounting: bool = None, spec_keyword: str = None):
+    def update(product_name: str, yards_per_piece: int,
+               is_usingyardforcounting: bool = None, spec_keyword: str = None,
+               is_usingweightforcounting: bool = None, allowed_units: str = None):
         conn = get_db()
         cursor = conn.cursor()
+        # 拼接 SET 子句(只更新传入的字段,允许只调 partial update)
+        sets = ['yards_per_piece = ?']
+        vals = [yards_per_piece]
         if is_usingyardforcounting is not None:
-            cursor.execute(
-                "UPDATE product_units SET yards_per_piece = ?, is_usingyardforcounting = ? WHERE product_name = ? AND spec_keyword IS ?",
-                (yards_per_piece, 1 if is_usingyardforcounting else 0, product_name, spec_keyword)
-            )
-        else:
-            cursor.execute(
-                "UPDATE product_units SET yards_per_piece = ? WHERE product_name = ? AND spec_keyword IS ?",
-                (yards_per_piece, product_name, spec_keyword)
-            )
+            sets.append('is_usingyardforcounting = ?')
+            vals.append(1 if is_usingyardforcounting else 0)
+        if is_usingweightforcounting is not None:
+            sets.append('is_usingweightforcounting = ?')
+            vals.append(1 if is_usingweightforcounting else 0)
+        if allowed_units is not None:
+            sets.append('allowed_units = ?')
+            vals.append(allowed_units)
+        vals.extend([product_name, spec_keyword])
+        cursor.execute(
+            f"UPDATE product_units SET {', '.join(sets)} "
+            "WHERE product_name = ? AND spec_keyword IS ?",
+            vals
+        )
         conn.commit()
         conn.close()
 
@@ -254,6 +279,98 @@ class Product:
         return [dict(r) for r in rows]
 
     @staticmethod
+    def find_by_name_and_spec(product_name, specification=''):
+        """按 (产品名, 规格) 找商品。
+
+        匹配顺序(与 product_units / piece_conversions 双轮匹配口径一致):
+          1. product_name = ? AND specification = ? 精确命中
+          2. product_name = ? AND specification IS NULL/''  默认行兜底
+          3. 名称「去空格」匹配 — 应对历史数据 product 表「无纺布 A白」vs 订单「无纺布A白」漂移
+        任一命中即返回;无命中返回 None。
+
+        用于按重量品类校验(record.product_name + record.specification
+        → product.weight_category_id → product_weight_categories 行)。
+        """
+        if not product_name:
+            return None
+        conn = get_db()
+        cursor = conn.cursor()
+        spec = (specification or '').strip()
+        # 精确:同名 + 同规格
+        cursor.execute(
+            'SELECT * FROM product WHERE product_name = ? AND specification = ?',
+            (product_name, spec)
+        )
+        row = cursor.fetchone()
+        if row:
+            conn.close()
+            return dict(row)
+        # 默认行:同名 + 空规格
+        if spec:
+            cursor.execute(
+                'SELECT * FROM product WHERE product_name = ? '
+                "AND (specification IS NULL OR specification = '') LIMIT 1",
+                (product_name,)
+            )
+            row = cursor.fetchone()
+        if row:
+            conn.close()
+            return dict(row)
+        # 去空格兜底(同义不同形)
+        # 注意:无论 pn 是否含空格都跑 ——
+        # 应对 (pn='无纺布A白' vs DB='无纺布 A白') 这种 pn 没空格但 DB 有空格的漂移
+        norm_pn = product_name.replace(' ', '').replace('　', '')
+        cursor.execute(
+            "SELECT * FROM product WHERE REPLACE(REPLACE(product_name, ' ', ''), '　', '') = ? "
+            "AND specification = ? LIMIT 1",
+            (norm_pn, spec)
+        )
+        row = cursor.fetchone()
+        if not row and spec:
+            cursor.execute(
+                "SELECT * FROM product WHERE REPLACE(REPLACE(product_name, ' ', ''), '　', '') = ? "
+                "AND (specification IS NULL OR specification = '') LIMIT 1",
+                (norm_pn,)
+            )
+            row = cursor.fetchone()
+        if row:
+            conn.close()
+            return dict(row)
+        # 最后兜底:取同名任一行
+        cursor.execute(
+            'SELECT * FROM product WHERE product_name = ? ORDER BY product_id LIMIT 1',
+            (product_name,)
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    @staticmethod
+    def search_unbound(q='', limit=20):
+        """模糊搜未绑定重量类别的商品候选;空 q 时返回 weight_category_id IS NULL 的前 limit 行。"""
+        conn = get_db()
+        cursor = conn.cursor()
+        q = (q or '').strip()
+        if q:
+            cursor.execute(
+                "SELECT product_id, product_code, product_name, specification, base_unit "
+                "FROM product WHERE weight_category_id IS NULL "
+                "AND (product_name LIKE ? OR specification LIKE ?) "
+                "ORDER BY product_name LIMIT ?",
+                (f'%{q}%', f'%{q}%', limit)
+            )
+        else:
+            cursor.execute(
+                "SELECT product_id, product_code, product_name, specification, base_unit "
+                "FROM product WHERE weight_category_id IS NULL "
+                "ORDER BY product_name LIMIT ?",
+                (limit,)
+            )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+
+    @staticmethod
     def create(product_code, product_name, category_id, specification='', model='', barcode='',
                cost_price=None, base_unit='', aux_unit='', conversion_rate='',
                stock_quantity=None, aux_quantity='', preset_price=None, status=1):
@@ -262,8 +379,10 @@ class Product:
         cursor.execute('''
             INSERT INTO product (product_code, product_name, category_id, specification, model, barcode,
                                  cost_price, base_unit, aux_unit, conversion_rate,
-                                 stock_quantity, aux_quantity, preset_price, status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now','localtime'), datetime('now','localtime'))
+                                 stock_quantity, aux_quantity, preset_price, status,
+                                 created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    datetime('now','localtime'), datetime('now','localtime'))
         ''', (product_code, product_name, category_id, specification, model, barcode,
               cost_price, base_unit, aux_unit, conversion_rate,
               stock_quantity, aux_quantity, preset_price, status))

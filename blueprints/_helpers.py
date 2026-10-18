@@ -6,6 +6,7 @@ import os
 import re
 import uuid
 import base64
+import sqlite3
 from datetime import datetime
 from flask import request
 from rapidfuzz import fuzz
@@ -422,6 +423,28 @@ def annotate_import_validation(records, units_cache=None, piece_convs=None):
         # ── 数量合法性（独立标志）──
         r['qty_invalid'] = check_qty_invalid(qt_raw)
 
+        # ── 轨道③:按重量计价（2026-10-14 简化方案）──
+        # 复用 product_units 表的 is_usingweightforcounting + allowed_units 字段;
+        # 配置在 /product-unit 页加,与 YPP(按码卖)同表两轨道。
+        wc = _validate_weight_unit_for_record(r)
+        r['weight_unit_invalid'] = wc['weight_unit_invalid']
+        r['allowed_units'] = wc['allowed_units']
+        r['weight_source'] = wc.get('weight_source')  # 'product_units' | None
+        r['weight_spec_keyword'] = wc.get('weight_spec_keyword')  # 命中的 spec_keyword
+        if wc['weight_unit_invalid'] and wc.get('weight_source'):
+            detail_weight = {
+                'rule': 'weight_unit',
+                'label': f"按重量计价要求单位 ∈ {wc['allowed_units']}",
+                'expected': '/'.join(wc['allowed_units']),
+                'actual': wc['actual_unit'],
+                'diff': None,
+                'severity': 'warn',
+            }
+            if r.get('mismatch_detail'):
+                r['mismatch_detail'].setdefault('sub_rules', []).append(detail_weight)
+            else:
+                r['mismatch_detail'] = detail_weight
+
         # ── 期望 vs 实际 明细，供前端 hover 显示差多少 ──
         detail = None
         try:
@@ -486,23 +509,31 @@ def summarize_import_validation(records):
     """汇总一批导入行的校验结果，供前端弹 toast 用。
 
     Returns:
-        {'total': N, 'warn': N, 'info': N, 'qty_invalid': N, 'flagged': N}
+        {'total': N, 'warn': N, 'info': N, 'qty_invalid': N,
+         'weight_invalid': N, 'flagged': N}
     """
-    total = warn = info = qty_invalid = 0
+    total = warn = info = qty_invalid = weight_invalid = 0
     for r in records or []:
         total += 1
-        if r.get('mismatch') == 'warn' or r.get('piece_mismatch') == 'warn':
+        # weight_unit_invalid 是 *额外* 维度,与 mismatch/piece_mismatch 可同时为 warn
+        # 计入顶部 warn(权重最高)使前端能高亮。
+        if (r.get('weight_unit_invalid')
+                or r.get('mismatch') == 'warn'
+                or r.get('piece_mismatch') == 'warn'):
             warn += 1
         elif r.get('mismatch') == 'info' or r.get('piece_mismatch') == 'info':
             info += 1
         if r.get('qty_invalid'):
             qty_invalid += 1
+        if r.get('weight_unit_invalid'):
+            weight_invalid += 1
     return {
         'total': total,
         'warn': warn,
         'info': info,
         'qty_invalid': qty_invalid,
-        'flagged': warn + info + qty_invalid,
+        'weight_invalid': weight_invalid,
+        'flagged': warn + info + qty_invalid + weight_invalid,
     }
 
 
@@ -1099,3 +1130,93 @@ def apply_user_rotation(filepath: str, rotate_deg) -> str:
     rotated = img.rotate(-deg, expand=True)
     rotated.save(filepath)
     return filepath
+
+
+# =====================================================================
+#  按重量计价的单位校验（2026-10-14 简化方案）
+# =====================================================================
+#
+# 复用 product_units 表的两列,与 YPP(按码卖)同表两轨道:
+#   - is_usingyardforcounting=1 → YPP 校验
+#   - is_usingweightforcounting=1 → 「按重量」单位白名单校验
+# 配置在 /product-unit 页面加;校验走 ProductUnit.get_match 双轮匹配。
+#
+# 行为契约:
+#   - 命中 is_usingweightforcounting=1 的行 → 比对 allowed_units 白名单
+#   - 未命中 或 is_usingweightforcounting=0 → 跳过本轨道,不影响其他校验
+#   - 空 unit / 不在白名单 → weight_unit_invalid=True
+# ────────────────────────────────────────────────────────────────────
+import json as _json_for_weight
+
+
+def _parse_allowed_units(raw):
+    """解析 allowed_units 字段:支持 JSON 数组 '["kg","斤"]' 或逗号分隔 'kg,斤'。"""
+    if not raw:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    # JSON 优先
+    if s.startswith('['):
+        try:
+            arr = _json_for_weight.loads(s)
+            if isinstance(arr, list) and arr:
+                return [str(x).strip() for x in arr if str(x).strip()]
+        except Exception:
+            pass
+    # 兜底:逗号 / 顿号 / 全半角空格分隔
+    parts = [p.strip() for p in s.replace('、', ',').replace(' ', ',').replace('　', ',').split(',') if p.strip()]
+    return parts or None
+
+
+def get_weight_allowed_units(product_name, spec, units_cache=None):
+    """返回 frozenset({'kg','斤'}) 或 None。
+
+    复用 _match_unit_in_cache 的两轮匹配(先 spec_keyword 命中 → 兜底默认行),
+    只在匹配行 is_usingweightforcounting=1 时返回 allowed_units 解析结果。
+    """
+    if units_cache is None:
+        from models import ProductUnit  # 延迟导入
+        units_cache = ProductUnit.get_all() or []
+    matched = _match_unit_in_cache(product_name or '', spec or '', units_cache)
+    if not matched or not matched.get('is_usingweightforcounting'):
+        return None
+    units = _parse_allowed_units(matched.get('allowed_units'))
+    if not units:
+        return None
+    return frozenset(units)
+
+
+def _validate_weight_unit_for_record(record, units_cache=None):
+    """校验一条明细的 unit 是否在 product_units 允许集内。
+
+    Returns:
+        {weight_unit_invalid: bool, allowed_units: list[str], actual_unit: str,
+         weight_source: 'product_units' | None,
+         weight_spec_keyword: str | None}
+    """
+    pn = (record.get('product_name') or '').strip()
+    sp = (record.get('specification') or '').strip()
+    actual = (record.get('unit') or '').strip()
+    allowed = get_weight_allowed_units(pn, sp, units_cache=units_cache)
+    empty = {
+        'weight_unit_invalid': False,
+        'allowed_units': [],
+        'actual_unit': actual,
+        'weight_source': None,
+        'weight_spec_keyword': None,
+    }
+    if allowed is None:
+        return empty
+    invalid = (actual not in allowed) or (not actual)
+    return {
+        'weight_unit_invalid': invalid,
+        'allowed_units': sorted(allowed),
+        'actual_unit': actual,
+        'weight_source': 'product_units',
+        'weight_spec_keyword': None,
+    }
+
+
+# 公开别名(去掉下划线,供订单蓝图外部导入)
+validate_weight_unit = _validate_weight_unit_for_record

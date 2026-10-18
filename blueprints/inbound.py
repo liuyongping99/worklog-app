@@ -24,6 +24,7 @@ from blueprints._helpers import (
     match_label_to_row, detect_bg_color,
     apply_user_rotation,
     compute_placement_expected_zhi, parse_loose_yards,
+    validate_weight_unit,
 )
 from blueprints.ocr_engine import PaddleOCREngine, get_ocr_engine, OCR_MATCH_PROMPT_VERSION, ocr_preprocess_kind
 from blueprints.ocr_pipeline import RecordImageProcessor
@@ -418,6 +419,25 @@ def api_v1_inbound_orders_add_record(order_id):
     if not product_name or not quantity:
         return jsonify({'success': False, 'error': '品名和数量不能为空'}), 400
 
+    # 2026-10-14:按重量硬校验 —— 与出货同款五层消费
+    unit_in = data.get('unit', '支')
+    spec_in = data.get('specification', '')
+    wc = validate_weight_unit({
+        'product_name': product_name, 'specification': spec_in, 'unit': unit_in,
+    })
+    if wc['weight_unit_invalid'] and wc.get('weight_source'):
+        AuditLog.log('weight_unit_reject', 'inbound_order', order_id, detail={
+            'product': product_name, 'spec': spec_in, 'unit': unit_in,
+            'allowed': wc['allowed_units'],
+        })
+        return jsonify({
+            'success': False,
+            'error': (f"商品《{product_name}》按重量计价只允许单位 {'/'.join(wc['allowed_units'])},"
+                      f"您提交的是 {unit_in!r}"),
+            'error_code': 'WEIGHT_UNIT_INVALID',
+            'allowed_units': wc['allowed_units'],
+        }), 400
+
     record_id = InboundRecord.create(
         int(order_id),
         product_name=product_name,
@@ -445,13 +465,41 @@ def api_v1_inbound_orders_add_records_batch(order_id):
     if not records:
         return jsonify({'success': False, 'error': '无数据'}), 400
 
+    # 2026-10-14:按重量校验 pre-filter — 与出货同款 partial-reject 语义
+    filtered_records = []
+    rejected_records = []
+    for rec in records:
+        wc = validate_weight_unit(rec)
+        if wc['weight_unit_invalid'] and wc.get('weight_source'):
+            rejected_records.append({
+                'product_name': (rec.get('product_name') or '').strip(),
+                'specification': (rec.get('specification') or '').strip(),
+                'unit': (rec.get('unit') or '').strip(),
+                'quantity': rec.get('quantity'),
+                'remark': rec.get('remark', ''),
+                'allowed_units': wc['allowed_units'],
+                'error_code': 'WEIGHT_UNIT_INVALID',
+            })
+        else:
+            filtered_records.append(rec)
+    if not filtered_records:
+        AuditLog.log('batch_weight_unit_reject', 'inbound_order', order_id,
+                     detail={'count': len(rejected_records), 'kind': 'inbound'})
+        return jsonify({
+            'success': False,
+            'error': '全部明细因单位超出重量白名单被拒',
+            'error_code': 'WEIGHT_UNIT_INVALID',
+            'count': 0,
+            'rejected': rejected_records,
+        }), 400
+
     conn = get_db()
     cursor = conn.cursor()
     try:
         cursor.execute('SELECT COALESCE(MAX(sort_order), 0) FROM inbound_records WHERE order_pk = ?', (order_id,))
         sort_order = cursor.fetchone()[0]
         result_records = []
-        for rec in records:
+        for rec in filtered_records:
             sort_order += 1
             unit = rec.get('unit', '支')
             if unit == '码':
@@ -473,7 +521,9 @@ def api_v1_inbound_orders_add_records_batch(order_id):
             })
         conn.commit()
         if result_records:
-            AuditLog.log('batch_add_records', 'inbound_order', order_id, detail={'count': len(result_records)})
+            AuditLog.log('batch_add_records', 'inbound_order', order_id,
+                         detail={'count': len(result_records),
+                                 'rejected_by_weight': len(rejected_records)})
         # 2026-10-09 概述 §f:导入即校验 —— 原地打 mismatch/piece_mismatch/qty_invalid 回传前端。
         # 判定函数与列表页渲染共用同一套(check_remark/check_piece_mismatch);不落库,刷新现算。
         validation = None
@@ -486,6 +536,8 @@ def api_v1_inbound_orders_add_records_batch(order_id):
         resp = {'success': True, 'count': len(result_records), 'records': result_records}
         if validation:
             resp['validation'] = validation
+        if rejected_records:
+            resp['rejected'] = rejected_records
         return jsonify(resp), 201
     except Exception as e:
         conn.rollback()
@@ -511,6 +563,30 @@ def api_v1_inbound_orders_update_record(record_id):
         return jsonify({'success': False, 'error': '请求体不能为空'}), 400
     if data.get('unit') == '码':
         data['unit'] = 'y'
+
+    # 2026-10-13:按重量类别硬校验 —— 仅在 user 改 unit 时拦截
+    if 'unit' in data:
+        wc = validate_weight_unit({
+            'product_name': record.get('product_name', ''),
+            'specification': record.get('specification', ''),
+            'unit': data.get('unit', ''),
+        })
+        if wc['weight_unit_invalid'] and wc.get('weight_source'):
+            AuditLog.log('weight_unit_reject_update', 'inbound_order',
+                         record.get('order_pk'),
+                         detail={'record_id': record_id,
+                                 'product': record.get('product_name', ''),
+                                 'unit': data.get('unit'),
+                                 'allowed': wc['allowed_units']})
+            return jsonify({
+                'success': False,
+                'error': (f"商品《{record.get('product_name', '')}》按重量计价"
+                          f"只允许单位 {'/'.join(wc['allowed_units'])},"
+                          f"不允许改为 {data.get('unit')!r}"),
+                'error_code': 'WEIGHT_UNIT_INVALID',
+                'allowed_units': wc['allowed_units'],
+            }), 400
+
     InboundRecord.update(record_id, data)
     updated = InboundRecord.get_by_id(record_id)
     AuditLog.log('update_record', 'inbound_order', updated['order_pk'], detail={'record_id': record_id})
