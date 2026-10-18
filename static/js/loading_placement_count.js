@@ -111,6 +111,12 @@
     // ── 上传回调(由共享图片弹框 _image_upload_modal.html 的 confirmUpload 触发) ──
     // 与右侧 🖼️ 核对规格按钮走同一个 imageModal,这里只处理摆放图的后续(进展示区 + 计数)
     window.placementImageUploaded = function (data, recordPk) {
+        // 2026-10-15: 免 AI 比对标签图上传分流(由 no_ai_label.js 标记 _noAiLabelUploadSource;
+        // modal URL 已切到 /records/<pk>/copy-paper-images,这里只接管回调刷新即可)
+        if (window._noAiLabelUploadSource) {
+            window.noAiLabelImageUploaded(data, recordPk);
+            return;
+        }
         if (!data || !data.success) { alert('上传失败: ' + ((data && data.error) || '未知错误')); return; }
         refreshRecordBlock(recordPk);
         // 自动打开第一张新图的计数弹框,便于立即清点

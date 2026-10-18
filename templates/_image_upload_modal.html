@@ -322,7 +322,7 @@ window.confirmUpload = function() {
     //   → IMAGE_API + '/records/<record_pk>/copy-paper-images'
     //   (source='label'/'count' 携带在 formData 里,端点路径保持兼容未改)
     var url;
-    if (window._copyPaperUploadSource) {
+    if (window._noAiLabelUploadSource) {
         url = IMAGE_API + '/records/' + savedTarget.pk + '/copy-paper-images';
     } else if (savedTarget.type === 'record') {
         url = IMAGE_API + '/records/' + savedTarget.pk + '/images';
@@ -342,8 +342,9 @@ window.confirmUpload = function() {
         var formData = new FormData();
         formData.append('image', fileToUpload);
         // 2026-09-09: copy-paper 上传携带 source 字段('label' or 'count')
-        if (window._copyPaperUploadSource) {
-            formData.append('source', window._copyPaperUploadSource);
+        // 2026-10-15: 修正变量名错位(原 _copyPaperUploadSource,与 no_ai_label.js:23 设置的旗标名不一致)
+        if (window._noAiLabelUploadSource) {
+            formData.append('source', window._noAiLabelUploadSource);
         }
         return fetch(url, { method: 'POST', body: formData });
     }).then(function(res) { return res.json(); })

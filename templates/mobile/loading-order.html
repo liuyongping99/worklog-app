@@ -20,6 +20,14 @@
       {% set status_cls = '' %}
       {% set status_text = '皮革/木板类，无需拍照' %}
       {% set confirm_hidden = True %}
+    {% elif rec.is_no_ai_match %}
+      {# 2026-10-15: 装柜对齐出货移动端 — 拷贝纸/日本纸/快巴纸/蜡光纸(0105-0108)走标签图留档,
+         后端 POST /records/<id>/images 已硬拦截 400(loading.py:924),所以这里既不给「📷 拍照识别」入口,
+         徽章也不再显示永远满足不了的「待拍」,改走下方「📷 标签」按钮(source='copy_paper_label',不做 OCR) #}
+      {% set badge_cls, badge_text = 'done', '标签图' %}
+      {% set status_cls = '' %}
+      {% set status_text = '包装类商品，标签图留档，不做 OCR 比对' %}
+      {% set confirm_hidden = True %}
     {% else %}
       {% set badge_cls, badge_text = ('done', '✓ 通过') if state.status == 'green' else ('warn', '⚠ 待确认') if state.status == 'yellow' else ('warn', '✕ 不符') if state.status == 'red' else ('todo', '待拍') %}
       {% if state.status == 'green' %}
@@ -37,7 +45,7 @@
       {% endif %}
       {% set confirm_hidden = state.status in (None, 'green') %}
     {% endif %}
-    <div class="product-card" data-record-id="{{ rec['id'] }}" {% if state.is_board %}data-role="board"{% endif %}>
+    <div class="product-card" data-record-id="{{ rec['id'] }}" {% if state.is_board %}data-role="board"{% elif rec.is_no_ai_match %}data-role="label-only"{% endif %}>
       <div class="row">
         <div>
           <div class="product-name">{{ loop.index }}. {{ rec['product_name'] }}</div>
@@ -45,15 +53,29 @@
         </div>
         <span class="badge {{ badge_cls }}" data-role="badge">{{ badge_text }}</span>
       </div>
-      {% if not state.is_board %}
+      {% if not state.is_board and not rec.is_no_ai_match %}
       <div class="photo-row">
         <button class="primary" data-action="capture">📷 拍照识别</button>
         <button class="secondary" data-action="album">🖼 相册</button>
       </div>
       <input type="file" accept="image/*" capture="environment" data-role="record-input" hidden>
       {% endif %}
+      {# 2026-10-15: 装柜对齐出货移动端 — 标签图上传按钮(0105-0108 唯一图片入口,落 source='copy_paper_label') #}
+      {% if rec.is_no_ai_match %}
+      <button type="button" class="m-no-ai-label-btn" data-record-id="{{ rec.id }}" data-source="label">📷 标签</button>
+      {% endif %}
+      {% if rec.is_no_ai_match and rec.label_images %}
+      <div class="m-no-ai-label-area">
+        {% for img in rec.label_images %}
+        <div class="m-no-ai-label-thumb">
+          <img src="/upload/{{ img.relative_path }}">
+          <span class="m-no-ai-label-tag tag-label">标签</span>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
       <div class="status-line {{ status_cls }}" data-role="status" data-initial-status="{{ state.status or '' }}">
-        {{ status_text }}{% if state.color_note %} <span class="color-note" data-role="color-note">· 标签背景:{{ state.color_note }}</span>{% endif %}{% if not state.is_board and state.status in ('green','yellow','red') and state.images %} <a href="#" data-role="detail" data-image-id="{{ state.images[-1]['id'] }}">详情</a>{% endif %}
+        {{ status_text }}{% if state.color_note %} <span class="color-note" data-role="color-note">· 标签背景:{{ state.color_note }}</span>{% endif %}{% if not state.is_board and not rec.is_no_ai_match and state.status in ('green','yellow','red') and state.images %} <a href="#" data-role="detail" data-image-id="{{ state.images[-1]['id'] }}">详情</a>{% endif %}
       </div>
       <div class="upload-progress" data-role="upload-progress" hidden></div>
       <button class="confirm" data-action="confirm" {% if confirm_hidden %}hidden{% endif %}>✓ 人工确认通过</button>
@@ -114,4 +136,32 @@
 
 <script src="{{ url_for('static', filename='js/mobile_blur.js') }}"></script>
 <script src="{{ url_for('static', filename='js/mobile_loading_detail.js') }}"></script>
+<script>
+// 2026-10-15: 装柜对齐出货移动端 — 拷贝纸/日本纸/快巴纸/蜡光纸(0105-0108)标签图上传
+// 走 POST /api/v1/loading-orders/records/<rid>/copy-paper-images(source='copy_paper_label',不做 OCR)
+document.body.addEventListener('click', function (e) {
+    var btn = e.target.closest('.m-no-ai-label-btn');
+    if (!btn) return;
+    var rid = btn.getAttribute('data-record-id');
+    var source = btn.getAttribute('data-source');
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.capture = 'environment';
+    input.onchange = function () {
+        var file = input.files[0];
+        if (!file) return;
+        var fd = new FormData();
+        fd.append('source', source);
+        fd.append('image', file);
+        fetch('/api/v1/loading-orders/records/' + rid + '/copy-paper-images', {
+            method: 'POST', body: fd
+        }).then(function (r) { return r.json(); }).then(function (j) {
+            if (!j.success) { alert('上传失败: ' + (j.error || '')); return; }
+            location.reload();
+        });
+    };
+    input.click();
+});
+</script>
 {% endblock %}
