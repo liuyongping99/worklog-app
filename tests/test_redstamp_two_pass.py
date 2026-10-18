@@ -94,6 +94,7 @@ class RedstampTwoPassTests(unittest.TestCase):
                 _ocr_return('品名：高弹纯胶', '规格：0.6白色软性'),  # orig
                 _ocr_return('品名：高弹纯胶', '规格：0.6白色'),      # pre(擦除)
                 _ocr_return('品名：高弹纯胶', '规格：0.6白色软性'),  # sharp(等同 orig)
+                _ocr_return('品名：高弹纯胶', '规格：0.6白色软性'),  # gray(等同 orig, 2026-10-07 加)
             ]
             text, conf = engine.extract_text_with_conf(b'fake', preprocess_kind='redstamp')
 
@@ -126,6 +127,7 @@ class RedstampTwoPassTests(unittest.TestCase):
                 _ocr_return('品名：环保杂胶', '规格：', '白色', '手感', '中性'),  # orig(漏 1.2)
                 _ocr_return('品名：环保杂胶', '规格：', '1.2白色', '手感', '中性'),  # pre(有 1.2)
                 _ocr_return('品名：环保杂胶', '规格：', '1.2白色', '手感', '中性'),  # sharp(等同 pre)
+                _ocr_return('品名：环保杂胶', '规格：', '白色', '手感', '中性'),    # gray(等同 orig, 2026-10-07 加)
             ]
             text, conf = engine.extract_text_with_conf(b'fake', preprocess_kind='redstamp')
 

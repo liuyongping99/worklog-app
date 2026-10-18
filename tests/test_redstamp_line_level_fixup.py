@@ -110,6 +110,7 @@ class RedstampLineLevelFixupTests(unittest.TestCase):
                 _ocr_return('LB鱼鳞布特软', '928-黑色'),       # orig
                 _ocr_return('鳞布特软', '0.8-黑色'),            # pre (winner 期望)
                 _ocr_return('LB鱼鳞布特软', '928-黑色'),       # sharp (等同 orig)
+                _ocr_return('LB鱼鳞布特软', '928-黑色'),       # gray (等同 orig, 2026-10-07 加)
             ]
             text, _conf = engine.extract_text_with_conf(
                 b'fake', preprocess_kind='redstamp')
@@ -133,6 +134,7 @@ class RedstampLineLevelFixupTests(unittest.TestCase):
                 _ocr_return('LB鱼鳞布特软', '928-黑色'),       # orig
                 _ocr_return('LB鱼鳞布特软', '0.8-黑色'),       # pre (winner)
                 _ocr_return('LB鱼鳞布特软', '928-黑色'),       # sharp
+                _ocr_return('LB鱼鳞布特软', '928-黑色'),       # gray (等同 orig, 2026-10-07 加)
             ]
             text, _conf = engine.extract_text_with_conf(
                 b'fake', preprocess_kind='redstamp')
@@ -156,6 +158,7 @@ class RedstampLineLevelFixupTests(unittest.TestCase):
                 _ocr_return('LB鱼鳞布特软', '928-黑色'),
                 _ocr_return('LB鱼鳞布特软', '928-黑色'),  # 同 orig,orig 胜
                 _ocr_return('LB鱼鳞布特软', '928-黑色'),
+                _ocr_return('LB鱼鳞布特软', '928-黑色'),  # gray (2026-10-07 加)
             ]
             text, _conf = engine.extract_text_with_conf(
                 b'fake', preprocess_kind='redstamp')

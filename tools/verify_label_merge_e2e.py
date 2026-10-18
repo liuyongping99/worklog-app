@@ -1,4 +1,4 @@
-"""端到端验证:拷贝纸标签图走 shipping_images(source='copy_paper_label')。
+"""端到端验证:免 AI 比对标签图走 shipping_images(source='copy_paper_label')。
 
 步骤:
   1. 登录(设置 staff_id session)

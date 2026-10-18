@@ -51,15 +51,19 @@ class LbFishScaleRedstampRoutingTests(unittest.TestCase):
             ocr_preprocess_kind('鱼鳞布纯胶'), KIND_REDSTAMP)
 
     def test_unrelated_te_ruan_products_not_redstamp(self):
-        """不同品的「特软」(HA猪皮纹特软 / LD-特软三文治)不能误中 redstamp。"""
-        # HA猪皮纹:无红章问题,不应进 redstamp
-        # LD-特软三文治:含「三文治」会先命中 _FORM_NOLINES_VARIANTS('磅布三文治'...但需确认)
+        """不同品的「特软」(如 XX特软 / LD-特软三文治)不能误中 redstamp。
+
+        2026-10-07 注:HA猪皮纹特软 已被加入 _REDSTAMP_VARIANTS(同构环保路华里 +
+        LB特软 案例,见 tests/test_ha_zhupiwen_redstamp_routing.py),本测试不再覆盖
+        HA 系列(它现在正是 redstamp)。只验证不含 HA/LB/路华里/磅布 等关键字的
+        「特软」品不应误进 redstamp。
+        """
         # 这里只验证关键不在 _REDSTAMP_VARIANTS substring 命中的品
-        for name in ('HA猪皮纹特软',):
+        for name in ('XX加面特软', 'A级特软'):  # 业务上不存在的虚构品,确认不进 redstamp
             with self.subTest(name=name):
                 self.assertNotEqual(
                     ocr_preprocess_kind(name), KIND_REDSTAMP,
-                    f'{name} 不是 LB鱼鳞布 系列,不应进 redstamp')
+                    f'{name} 不含 HA/LB/路华里/磅布 关键字,不应进 redstamp')
 
     def test_glare_categories_unchanged(self):
         """无纺布 仍走 KIND_GLARE,不变。"""

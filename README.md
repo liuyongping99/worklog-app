@@ -8,14 +8,14 @@ Flask 单用户本地工作台,围绕"事后记账 → 任务流实时管控 + �
 
 丰源工作台是一个**给单人/小团队自己用的工作台**,不是 SaaS。从「记一笔出库单」演进到「美团骑手式实时管控 + 证据链」,现已形成四条业务线 + 一条 AI/OCR 流水线。
 
-| 业务线 | 核心实体 | 一句话描述 |
-|--------|----------|------------|
-| 基础记录 | 工作日志 / 错误经验 / 待办 / 车辆维护 / 公司通知 | 经验沉淀 + 团队通知 |
-| 订单三套 | 出货单 / 入库单 / 装柜单 | 订单 + 明细 + 行级图片 + AI 比对 |
-| 任务流 | 任务 / 任务明细 / 证据照 / 事件历史 | 7 状态机:准备中→已装货→已点数→已到达→已卸货→已完成 |
-| 商品资料 | 商品单位 / 分类(3 级树) / 产品 / 件数换算 | 1000+ SKU,码/支换算 + 自适应提示词 |
-| 独立点数 | 会话 / 图片 / 标记点 | 临时开会话拍照点数,不挂订单 |
-| AI/OCR 流水线 | 标签匹配 + 证据链 | Moonshot/PaddleOCR/DeepSeek 三引擎 + 退化类型分桶 |
+| 业务线        | 核心实体                           | 一句话描述                                    |
+| ---------- | ------------------------------ | ---------------------------------------- |
+| 基础记录       | 工作日志 / 错误经验 / 待办 / 车辆维护 / 公司通知 | 经验沉淀 + 团队通知                              |
+| 订单三套       | 出货单 / 入库单 / 装柜单                | 订单 + 明细 + 行级图片 + AI 比对                   |
+| 任务流        | 任务 / 任务明细 / 证据照 / 事件历史         | 7 状态机:准备中→已装货→已点数→已到达→已卸货→已完成            |
+| 商品资料       | 商品单位 / 分类(3 级树) / 产品 / 件数换算    | 1000+ SKU,码/支换算 + 自适应提示词                 |
+| 独立点数       | 会话 / 图片 / 标记点                  | 临时开会话拍照点数,不挂订单                           |
+| AI/OCR 流水线 | 标签匹配 + 证据链                     | Moonshot/PaddleOCR/DeepSeek 三引擎 + 退化类型分桶 |
 
 **用户视角关键事实**:
 
@@ -28,18 +28,18 @@ Flask 单用户本地工作台,围绕"事后记账 → 任务流实时管控 + �
 
 ## 2. 技术栈
 
-| 组件 | 技术 | 备注 |
-|------|------|------|
-| 后端 | Python 3.12 + Flask 3.1.3 | 工厂模式 + 17 蓝图 |
-| 数据库 | SQLite 3.45.3 (WAL) | 文件 `worklog.db`,35 张业务表 |
-| 前端 | 原生 JS + Tailwind(内联)+ 共享 `app.css` | 共享 JS 仅 `static/js/common.js`(149 行) |
-| AI 视觉(云) | Moonshot Kimi k2.6 | 端点 `https://api.moonshot.cn/v1`,图片直识 |
-| AI 结构化(云) | DeepSeek v4 Flash | OpenAI 兼容协议,基址可配 |
-| OCR(本地 CPU) | PaddleOCR 3.x | 双实例:`_ocr`(默认阈值)+ `_wrinkle_ocr`(低阈值,专攻褶皱) |
-| 模糊匹配 | RapidFuzz 3.x | 标签行匹配 + 语音短语匹配 |
-| 图片预处理 | Pillow 10.x | 旋转、背景色检测、文件魔数校验 |
-| 语音转码 | ffmpeg(外部依赖) | webm → pcm_s16le 16k 单声道 |
-| 依赖(直) | 5 个 | Flask / openai / python-dotenv / rapidfuzz / Pillow |
+| 组件          | 技术                                 | 备注                                                  |
+| ----------- | ---------------------------------- | --------------------------------------------------- |
+| 后端          | Python 3.12 + Flask 3.1.3          | 工厂模式 + 17 蓝图                                        |
+| 数据库         | SQLite 3.45.3 (WAL)                | 文件 `worklog.db`,35 张业务表                             |
+| 前端          | 原生 JS + Tailwind(内联)+ 共享 `app.css` | 共享 JS 仅 `static/js/common.js`(149 行)                |
+| AI 视觉(云)    | Moonshot Kimi k2.6                 | 端点 `https://api.moonshot.cn/v1`,图片直识                |
+| AI 结构化(云)   | DeepSeek v4 Flash                  | OpenAI 兼容协议,基址可配                                    |
+| OCR(本地 CPU) | PaddleOCR 3.x                      | 双实例:`_ocr`(默认阈值)+ `_wrinkle_ocr`(低阈值,专攻褶皱)          |
+| 模糊匹配        | RapidFuzz 3.x                      | 标签行匹配 + 语音短语匹配                                      |
+| 图片预处理       | Pillow 10.x                        | 旋转、背景色检测、文件魔数校验                                     |
+| 语音转码        | ffmpeg(外部依赖)                       | webm → pcm_s16le 16k 单声道                            |
+| 依赖(直)       | 5 个                                | Flask / openai / python-dotenv / rapidfuzz / Pillow |
 
 **Windows DLL 修复**:`ocr_engine.py` 在 `import torch`(PaddleOCR 间接拉入)前把 `torch/lib` 加到 `os.add_dll_directory()`,避免 `shm.dll` 缺失。
 
@@ -105,28 +105,28 @@ worklog-app/
 
 > 数字由 `grep -E '^\s*@bp\.(route|api)\(' blueprints/*.py` 实际数得(2026-08-23)。`point_count` 拆 `bp` + `bp_api` 两个 Blueprint 共用同一文件。
 
-| Blueprint | URL 前缀 | 端点数 | 用途 |
-|-----------|----------|--------|------|
-| `auth` | `/login` `/logout` | 3 | 选身份登录(无密码) |
-| `upload` | `/upload/<path>` | 1 | upload 目录静态文件 |
-| `basic_records` | `/experience` `/errorlog` `/todolist` `/vehicle-maintenance` | 13 | 4 类基础记录 CRUD |
-| `info_pages` | `/` `/priceboard` `/notice-color` `/workflow` `/warehouse` `/count-tips` `/huandan-guide` `/billing-tips` `/stockout` | 11 | 信息展示 + 当前缺货 |
-| `notice` | `/notice` + `/api/v1/notices` | 15 | 公司通知 CRUD + 图片管理 |
-| `products` | `/product-units` `/product-categories` `/products` `/piece-conversions` `/api/v1/products` | 18 | 商品资料 4 套 + REST |
-| `shipping` | `/shipping-records` + `/shipping-ypp-review` + `/api/v1/shipping-orders` | 40 | 出货订单全套(含 placement-images 11 端点) |
-| `inbound` | `/inbound-records` + `/api/v1/inbound-orders` + `/m/inbound-*` | 23 | 入库订单 + 行级图 + 移动端 |
-| `loading` | `/loading-orders` + `/api/v1/loading-orders` + `/m/loading-*` | 34 | 装柜订单 + 行级图 + 移动端 |
-| `search` | `/unified-search` + `/api/v1/unified-search` | 2 | 综合查找(跨三套订单) |
-| `task_flow` | `/tasks` `/tasks/new` `/tasks/<id>` `/coding-pool` + `/api/v1/tasks` | 17 | 任务流 M1(7 状态 + 退单/退货/作废) |
-| `staff` | `/staff` | 5 | 人员档案(6 角色 + 软删 + 启用) |
-| `vehicles` | `/vehicles` | 5 | 车辆档案 + 软删 + 启用 |
-| `audit` | `/audit/ocr-events` + `/api/v1/audit/ocr-events` | 4 | OCR 事件审计(聚合/钻取/CSV) |
-| `voice` | `/api/v1/voice` | 6 | 语音识别/确认/口语映射 CRUD |
-| `category_prompts_manage` | `/manage/category-prompts` | 4 | 自适应提示词管理页 |
-| `mobile_shipping` | `/m/` `/m/shipping-today` + `/order/<id>` + `/placement` | 4 | 移动端当天出货 |
-| `point_count`(bp) | `/tools/point-count` | 3 | 独立点数会话列表 + 详情 |
-| `point_count`(bp_api) | `/api/v1/point-count` | 16 | 独立点数 REST |
-| **合计** | | **224** | |
+| Blueprint                 | URL 前缀                                                                                                                | 端点数     | 用途                               |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------- | -------------------------------- |
+| `auth`                    | `/login` `/logout`                                                                                                    | 3       | 选身份登录(无密码)                       |
+| `upload`                  | `/upload/<path>`                                                                                                      | 1       | upload 目录静态文件                    |
+| `basic_records`           | `/experience` `/errorlog` `/todolist` `/vehicle-maintenance`                                                          | 13      | 4 类基础记录 CRUD                     |
+| `info_pages`              | `/` `/priceboard` `/notice-color` `/workflow` `/warehouse` `/count-tips` `/huandan-guide` `/billing-tips` `/stockout` | 11      | 信息展示 + 当前缺货                      |
+| `notice`                  | `/notice` + `/api/v1/notices`                                                                                         | 15      | 公司通知 CRUD + 图片管理                 |
+| `products`                | `/product-units` `/product-categories` `/products` `/piece-conversions` `/api/v1/products`                            | 18      | 商品资料 4 套 + REST                  |
+| `shipping`                | `/shipping-records` + `/shipping-ypp-review` + `/api/v1/shipping-orders`                                              | 40      | 出货订单全套(含 placement-images 11 端点) |
+| `inbound`                 | `/inbound-records` + `/api/v1/inbound-orders` + `/m/inbound-*`                                                        | 23      | 入库订单 + 行级图 + 移动端                 |
+| `loading`                 | `/loading-orders` + `/api/v1/loading-orders` + `/m/loading-*`                                                         | 34      | 装柜订单 + 行级图 + 移动端                 |
+| `search`                  | `/unified-search` + `/api/v1/unified-search`                                                                          | 2       | 综合查找(跨三套订单)                      |
+| `task_flow`               | `/tasks` `/tasks/new` `/tasks/<id>` `/coding-pool` + `/api/v1/tasks`                                                  | 17      | 任务流 M1(7 状态 + 退单/退货/作废)          |
+| `staff`                   | `/staff`                                                                                                              | 5       | 人员档案(6 角色 + 软删 + 启用)             |
+| `vehicles`                | `/vehicles`                                                                                                           | 5       | 车辆档案 + 软删 + 启用                   |
+| `audit`                   | `/audit/ocr-events` + `/api/v1/audit/ocr-events`                                                                      | 4       | OCR 事件审计(聚合/钻取/CSV)              |
+| `voice`                   | `/api/v1/voice`                                                                                                       | 6       | 语音识别/确认/口语映射 CRUD                |
+| `category_prompts_manage` | `/manage/category-prompts`                                                                                            | 4       | 自适应提示词管理页                        |
+| `mobile_shipping`         | `/m/` `/m/shipping-today` + `/order/<id>` + `/placement`                                                              | 4       | 移动端当天出货                          |
+| `point_count`(bp)         | `/tools/point-count`                                                                                                  | 3       | 独立点数会话列表 + 详情                    |
+| `point_count`(bp_api)     | `/api/v1/point-count`                                                                                                 | 16      | 独立点数 REST                        |
+| **合计**                    |                                                                                                                       | **224** |                                  |
 
 **辅助模块(无 Blueprint,只被蓝图 import)**:`ocr_engine.py`、`ocr_pipeline.py`、`ocr_log.py`、`_helpers.py`、`voice_pipeline.py`、`voice_baidu.py`、`voice_fuzzy.py`、`voice_llm.py`。
 
@@ -142,14 +142,14 @@ worklog-app/
 
 ### 5.1 基础记录(6 张)
 
-| 表 | 用途 | 字段要点 | 实际行数(2026-08-23) |
-|----|------|----------|----------------------|
-| `work_logs` | 工作经验 | id / title / content / created_at | 25 |
-| `error_logs` | 错误经验 | id / title / error_type / solution | 9 |
-| `todo_items` | 待办事项 | id / content / done | 3 |
-| `notices` | 公司通知 | id / category / content / sort_order / img_cols | 26 |
-| `notice_images` | 通知图片 | id / notice_pk / file_name(走 `static/notice/`) | 5 |
-| `vehicle_maintenance` | 车辆维护 | id / date / vehicle_plate / type / cost | 1 |
+| 表                     | 用途   | 字段要点                                            | 实际行数(2026-08-23) |
+| --------------------- | ---- | ----------------------------------------------- | ---------------- |
+| `work_logs`           | 工作经验 | id / title / content / created_at               | 25               |
+| `error_logs`          | 错误经验 | id / title / error_type / solution              | 9                |
+| `todo_items`          | 待办事项 | id / content / done                             | 3                |
+| `notices`             | 公司通知 | id / category / content / sort_order / img_cols | 26               |
+| `notice_images`       | 通知图片 | id / notice_pk / file_name(走 `static/notice/`)  | 5                |
+| `vehicle_maintenance` | 车辆维护 | id / date / vehicle_plate / type / cost         | 1                |
 
 ### 5.2 三大订单(9 张)
 
@@ -175,32 +175,33 @@ worklog-app/
 
 ### 5.3 订单配套(2 张,2026-08 上线)
 
-| 表 | 用途 | 行数 |
-|----|------|------|
-| `placement_marks` | 出货**摆放图**(散点 + 散码 + 支/件),关联 shipping_records.id | 2,104 |
-| `loading_placement_marks` | 装柜**摆放图**(装柜当前未启用) | 0 |
+| 表                         | 用途                                              | 行数    |
+| ------------------------- | ----------------------------------------------- | ----- |
+| `placement_marks`         | 出货**摆放图**(散点 + 散码 + 支/件),关联 shipping_records.id | 2,104 |
+| `loading_placement_marks` | 装柜**摆放图**(装柜当前未启用)                              | 0     |
 
 ### 5.4 商品资料(4 张)
 
-| 表 | 用途 | 字段要点 | 行数 |
-|----|------|----------|------|
-| `product_units` | 商品单位/规格 + YPP 码/支换算 | product_name / spec_keyword / yards_per_piece / is_usingyardforcounting | 77 |
-| `product_categories` | 3 级树(1 根 + 9 大类 + 叶子) | category_code / category_name / level(1-4)/ parent_id / sort_order / status | 205 |
-| `product` | 产品库 | product_code / product_name / category_id / specification / barcode / cost_price / stock_quantity / preset_price | 1,145 |
-| `piece_conversions` | 件数换算规则(件→张/只/令) | product_name / units_per_piece / target_unit | 16 |
+| 表                    | 用途                    | 字段要点                                                                                                             | 行数    |
+| -------------------- | --------------------- | ---------------------------------------------------------------------------------------------------------------- | ----- |
+| `product_units`      | 商品单位/规格 + YPP 码/支换算   | product_name / spec_keyword / yards_per_piece / is_usingyardforcounting                                          | 77    |
+| `product_categories` | 3 级树(1 根 + 9 大类 + 叶子) | category_code / category_name / level(1-4)/ parent_id / sort_order / status                                      | 205   |
+| `product`            | 产品库                   | product_code / product_name / category_id / specification / barcode / cost_price / stock_quantity / preset_price | 1,145 |
+| `piece_conversions`  | 件数换算规则(件→张/只/令)       | product_name / units_per_piece / target_unit                                                                     | 16    |
 
 > 迁移残留:`product_units_new` 在 `_init.py` 出现,实际为旧迁移 ALTER 残留,业务上不直接用。
 
 ### 5.5 任务流(5 张,2026-08 M1 落地)
 
-| 表 | 用途 | 字段要点 | 行数 |
-|----|------|----------|------|
-| `staff` | 人员档案(6 角色) | name / role(CHECK 约束)/ phone / vehicle_id(FK)/ is_active(软删) | 7 |
-| `vehicles` | 车辆档案 | plate_no(UNIQUE)/ tonnage / length / width / height / status | 1 |
-| `tasks` | 任务(主线) | task_no / status / coding_status / customer / dest_address / driver_id / vehicle_id / is_cancelled / depart_at / arrive_at | 0 |
-| `task_items` | 任务明细 | product_name / specification / quantity / unit / remark / sort_order | 0 |
-| `task_images` | 任务证据照(9 种 stage) | stage(白名单)/ image_path | 0 |
-| `task_events` | 任务事件历史 | event_type(advance/assign/driver_release)/ from_status / to_status / operator_id | 0 |
+| 表             | 用途               | 字段要点                                                                                                                       | 行数 |
+| ------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------- | -- |
+| `staff`       | 人员档案(6 角色)       | name / role(CHECK 约束)/ phone / vehicle_id(FK)/ is_active(软删)                                                               | 7  |
+| `vehicles`    | 车辆档案             | plate_no(UNIQUE)/ tonnage / length / width / height / status                                                               | 1  |
+| `tasks`       | 任务(主线)           | task_no / status / coding_status / customer / dest_address / driver_id / vehicle_id / is_cancelled / depart_at / arrive_at | 0  |
+| `task_items`  | 任务明细             | product_name / specification / quantity / unit / remark / sort_order                                                       | 0  |
+| `task_images` | 任务证据照(9 种 stage) | stage(白名单)/ image_path                                                                                                     | 0  |
+| `task_events` | 任务事件历史           | event_type(advance/assign/driver_release)/ from_status / to_status / operator_id                                           | 0  |
+
 
 > 任务表 2026-08-23 实际尚未投产,但 schema/状态机/UI 全部就位。
 
@@ -468,6 +469,7 @@ python -m pytest tests/ -v
 | `BAIDU_SECRET_KEY` | 是(语音) | — | 同上 |
 | `FFMPEG_PATH` | 否 | `ffmpeg` | 语音 webm → pcm 转码 |
 | `VOICE_DEBUG_SAVE` | 否 | `0` | `1` 时保留原始录音到 `upload/voice-debug/` |
+
 
 ### 8.2 数据库
 
