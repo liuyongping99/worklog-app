@@ -49,12 +49,14 @@
     document.addEventListener('DOMContentLoaded', function () {
         // 2026-10-09: 免 AI 比对标签图删除 (渲染在普通商品图区, 独立 handler)
         document.body.addEventListener('click', function (e) {
-            var btn = e.target.closest('.no-ai-label-del-btn');
+            var btn = e.target.closest('.no-ai-label-del-btn, .copy-paper-label-del-btn');
             if (!btn) return;
             if (!confirm('删除这张标签图？')) return;
             var iid = btn.getAttribute('data-image-id');
-            // 复用通用订单图删除端点（标签图已存 shipping_images(source='copy_paper_label')）
-            fetch('/api/v1/shipping-orders/images/' + iid, { method: 'DELETE' })
+            // 2026-10-15: 用 IMAGE_API(由 _image_upload_modal.html 注入)而非硬编码 shipping-orders 路径,
+            // 装柜页 IMAGE_API=/api/v1/loading-orders,出货/入库/装柜三页通用。
+            var apiBase = (typeof IMAGE_API !== 'undefined' ? IMAGE_API : '/api/v1/shipping-orders');
+            fetch(apiBase + '/images/' + iid, { method: 'DELETE' })
                 .then(function (r) { return r.json() })
                 .then(function (j) {
                     if (!j.success) { alert('删除失败: ' + (j.error || '')); return; }
