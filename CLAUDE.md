@@ -155,6 +155,7 @@ worklog-app/
 │   ├── mainflow.png / furongflow.png / warehouse.png
 │   └── notice/             # 通知图片
 ├── upload/YYYY-MM/         # 用户上传图片，按月分组（8 个目录 / 10,941 个文件 / ~3 GB）
+│                            # ⚠️ 铁律：只增不删。任何脚本/命令都不许删这里面的文件(见「踩坑点 11」)
 ├── log/                     # 业务日志（log/YYYYMM/ 按天分文件，OCR/AI 落盘）
 ├── logging_setup.py        # 日志初始化（166 行）：trace_id ContextVar + 线程上下文传播 + 日志格式
 ├── tests/                  # 测试套件（115 个 .py = 顶层 112 + tests/regression/ 3，18,734 行）
@@ -1534,6 +1535,11 @@ DELETE /api/v1/<page>-orders/placement-images/<id>/marks/last
 **教训**：废弃一张表时，`models/_init.py` 要留注释说明「已废弃 + 迁往何处」（本项目 `_init.py:1023` 就是这么做的），否则下一个读代码的人会重新加回来。历史上 `product_units_new` 也是同类残留（现已清理）。
 
 ### 11. 临时目录里不要给生产目录建 junction（2026-10-28 · 误删 upload\2026-10 整个目录）
+
+> ⛔ **铁律（用户 2026-10-28 明确要求，已写入记忆）**：
+> **绝对不要删除 `D:\worklog-app\upload\` 及其任何子目录下的任何内容。**
+> upload 是**只增不删**的 —— 删除图片只能走应用内的删除功能（它会同时删 DB 行）。
+> 任何脚本、命令、清理操作都不许碰这个目录里的文件。递归删除前先 `dir /AL` 查重解析点（junction）。
 
 **事故**：为对比测试提交，把 git worktree 建在 `D:\tmp\basecheck`，随后执行
 `cmd /c mklink /J D:\tmp\basecheck\upload D:\worklog-app\upload` —— **把临时 worktree 的 `upload` 指向了生产图片目录**。
