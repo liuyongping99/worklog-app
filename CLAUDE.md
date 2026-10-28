@@ -1316,6 +1316,8 @@ DELETE /api/v1/<page>-orders/placement-images/<id>/marks/last
 - [x] ~~**腊光纸（0108）行没有行级图片入口**~~ — 已完成（2026-10-08）：`_is_copy_paper_item` 并入 `_is_no_ai_match_item`（0105-0108 单一谓词），PC 标签 🖼️ 按钮按 `is_no_ai_match` 渲染、移动端隐藏拍照识别改出「📷 标签」+ 徽章「标签图」
 - [x] ~~**`_is_no_ai_match_item` 与 `_is_copy_paper_item` 重复查库**~~ — 已完成（2026-10-08）：两个谓词合并为 `_is_no_ai_match_item` 单一入口（0105-0108），`_is_copy_paper_item` 已彻底移除（代码/文档 0 引用），`classify_record` 调用次数从每行 2 次降到 1 次
 - [x] ~~**明细导入接口不返回 mismatch 标志（概述 §f 的"导入即校验"闭环）**~~ — 已完成（2026-10-09）：`_helpers.annotate_import_validation()` + `summarize_import_validation()` 新增，三页 `records/batch` 端点在插入后调用并回传 `mismatch`/`piece_mismatch`/`qty_invalid`/`unit_hint`/`piece_hint`/`mismatch_detail` + 顶层 `validation`；前端三页 build 函数改走 `readImportFlags()`（**服务端优先**）+ `notifyImportValidation()` 弹汇总。**拍板不落库**（mismatch 由备注+数量完全决定，刷新现算）。验证：`tools/verify_import_validation.py`（14 用例 + 零漂移）+ `_http.py`（三页端到端全绿，临时数据零残留）+ `_js.js`（前端 29/29）
+- [ ] **upload 目录纳入每日备份**（2026-10-28 事故的直接补救）：脚本 `tools/backup_upload_dir.py` 已就位（增量 + 每日快照 + 旧快照清理 + `--verify` 体检），首份快照已生成 `E:\BAK_upload\upload_20261028`（7,141 文件 / 2.2 GB）。**待办：给脚本加一条 Windows 计划任务**（脚本本身不会自动注册，见「数据库备份约定」章节说明）
+- [ ] **DB 里"引用但文件已丢"的断链图要治本**（2026-10-28 体检发现 **3,142 张**：2026-10 1,655 + **2026-09 1,480** + 2026-07/06 各若干）。九月那批**不是本次事故造成的**，说明历史上也丢过 —— 需查清是"删明细只删文件不删行"还是别的路径导致，并补上自动清理/自愈逻辑
 - [ ] **引擎白名单 4 处重复**：`ocr_engine._VALID_ENGINES` 已是唯一真源，但 shipping / inbound / loading 三个 `ai-recognize` 端点各自硬编码了一份 5 元组 → 下次加引擎要改 4 处。建议蓝图改 `from blueprints.ocr_engine import _VALID_ENGINES`（或把 `_` 前缀去掉暴露成 `VALID_ENGINES`）
 - [ ] **`PaddleOCRMiniMaxEngine` 靠私有方法 + 第二份 PaddleOCR 模型**：`DeepSeekEngine.__init__` 里 `self._ocr_engine = PaddleOCREngine()` 是新建实例而非 `get_ocr_engine('paddleocr')` 单例，复合引擎复用它的 `_ocr_image` 后，`paddleocr` + `paddleocr_minimax` 同进程会加载两份 PaddleOCR 模型。建议把 `DeepSeekEngine.__init__` 改成取单例
 - [ ] **整单 `ai-match` 全单被过滤时返回误导性 400**：`records` 过滤后为空 → `ocr_text` 空 → 返回「没有可识别的行级图片」，实际语义是「本单全部明细都跳过 AI 比对」。建议在过滤后加早退分支给明确文案
@@ -1531,6 +1533,33 @@ DELETE /api/v1/<page>-orders/placement-images/<id>/marks/last
 
 **教训**：废弃一张表时，`models/_init.py` 要留注释说明「已废弃 + 迁往何处」（本项目 `_init.py:1023` 就是这么做的），否则下一个读代码的人会重新加回来。历史上 `product_units_new` 也是同类残留（现已清理）。
 
+### 11. 临时目录里不要给生产目录建 junction（2026-10-28 · 误删 upload\2026-10 整个目录）
+
+**事故**：为对比测试提交，把 git worktree 建在 `D:\tmp\basecheck`，随后执行
+`cmd /c mklink /J D:\tmp\basecheck\upload D:\worklog-app\upload` —— **把临时 worktree 的 `upload` 指向了生产图片目录**。
+之后 `git worktree remove --force` 递归删除 worktree 时**穿过了 junction**，把真实的 `D:\worklog-app\upload\2026-10`
+整个目录删掉：**3,801 个文件，其中 1,655 个仍在 DB 被引用**（页面全成裂图）。
+
+**为什么难恢复**（四条元数据途径全断，这是最贵的部分）：
+
+| 途径 | 结果 |
+|---|---|
+| `$MFT` 记录（文件名 + 簇链） | ❌ 记录被后续写入整体复用（11:16 那次把 upload 全量复制到 `D:\BAK` 时复用了刚释放的 MFT 记录） |
+| USN 日志（删除事件 + FRN） | ❌ 卡在日志轮转点之前 |
+| Windows 卷影副本 | ❌ D: 完全没有卷影副本 |
+| 空闲空间簇雕刻 | ⚠️ 只能捞回**无主**图片（无文件名），需靠 DB 里残留的 OCR 原文反查 |
+
+**能用的救命稻草**：`ocr_match_event.ocr_text` 里存着每张图的 **OCR 原文**（DB 里 3,142 张断链图中有 777 张带原文），
+这才让「雕刻出的残图 → OCR → 文本比对 → 反查原文件名」成为可能。
+
+**教训**：
+
+1. **别给生产目录建 junction**（尤其是在会被递归删除的临时目录里）。要共享数据，用**复制**或**符号链接到只读副本**。
+2. **Windows 上 `git worktree remove --force` 会跟随目录联接删到目标**（同理 `rm -rf`、`shutil.rmtree` 对 junction 也危险）。
+3. **元数据（账本）没了就只剩雕刻** —— 所以**备份要覆盖图片，不只是 `.db`**（见下方备份约定新增的 upload 目录条款）。
+4. **数据库里"引用但文件已丢"的行要定期体检**：`tools/backup_upload_dir.py --verify` 就是干这个的。
+   实测本次体检发现 **2026-09 还有 1,480 张断链图**（早于本次事故，说明历史上也丢过）。
+
 ## 数据库备份约定（2026-06-10 起）
 
 **专用备份目录**：`D:\BAK\`
@@ -1552,12 +1581,61 @@ Copy-Item "D:\worklog-app\worklog.db" "D:\BAK\worklog_$(Get-Date -Format 'yyyyMM
 
 > **工作目录 = `D:\worklog-app`**（唯一真实目录）。`C:\Users\Administrator\worklog-app` 是 2026-09-11 迁移前的旧副本，**2026-09-16 起不再维护、不再改动**。
 >
-> 备份脚本已就位：`D:\BAK\_backup_now.py`（一键备份，固定 `src=D:\worklog-app\worklog.db`）+ `D:\BAK\_verify_backup.py`（一致性校验）+ `D:\BAK\_list_tables.py`（表清单）。
+> 备份脚本已就位：`D:\BAK\_backup_now.py`（一键备份，固定 `src=D:\worklog-app\worklog.db`）+ `D:\BAK\_verify_backup.py`（一致性校验）+ `D:\BAK\_list_tables.py`（表清单）+ `D:\BAK\_daily_backup.py`（每日自动备份 wrapper）。
+
+### upload 图片目录备份（2026-10-28 起 · 踩坑点 11 的直接补救）
+
+**为什么必须补**：此前备份约定**只覆盖 `.db`**，`upload/` 下 3 GB 图片从来没备份过 —— 一次误删就彻底没了，
+而恢复时 MFT 记录已被复用、USN 日志已轮转、无卷影副本，四条元数据途径全断（详见「踩坑点 11」）。
+
+**脚本**：`tools/backup_upload_dir.py`（增量复制 + 每日快照 + 旧快照清理 + 日志 + `--verify` 体检）
+
+```powershell
+# 手动跑一次（备份到 E:，与源盘不同物理盘 —— 同盘备份挡不住磁盘故障）
+python tools\backup_upload_dir.py --dst "E:\BAK_upload" --keep 7
+
+# 只校验最新快照与源目录是否一致（不写入）→ 顺带查出"DB 引用但文件已丢"的断链
+python tools\backup_upload_dir.py --verify
+```
+
+**约定**：
+
+- 目标盘用 **`E:`**（`D:` 是源盘，同盘备份对磁盘故障无意义）；快照目录 `E:\BAK_upload\upload_YYYYMMDD\`
+- 保留 **7 天**，每日一份完整快照（增量：只拷新增/变化的文件）
+- 日志：`D:\BAK\logs\upload_backup_YYYY-MM-DD.log`
+- **脚本不会自己注册计划任务** —— 每天自动跑需自行加一条 Windows 计划任务（与 `FengYuan_DB_Daily_Backup` 同风格，23:30 之后执行）
+- ⚠️ **恢复期间禁止往 `D:` 写入任何东西**（日志、备份、编译产物都算）—— 写入会覆盖空闲簇里的待恢复数据
+
+
+### 每日自动备份（2026-10-28 上线）
+
+**Windows 计划任务**：`FengYuan_DB_Daily_Backup`
+
+| 项 | 值 |
+|---|---|
+| 触发 | 每天 23:30（`CalendarTrigger` + `DaysInterval=1`） |
+| 执行 | `C:\Users\Administrator\AppData\Local\Programs\Python\Python312\python.exe "D:\BAK\_daily_backup.py"` |
+| 运行身份 | `SYSTEM`（`ServiceAccount` + `RunLevel=Highest`）→ 无人登录也能跑，无需存密码 |
+| 错过后补跑 | `StartWhenAvailable = True` → 关机错过时点，开机后自动补 |
+| 其它 | `AllowStartIfOnBatteries` / `DontStopIfGoingOnBatteries` / `MultipleInstances=IgnoreNew` / 超时 30 分钟 |
+
+**`_daily_backup.py` 做什么**：用 `sqlite3` 在线备份 API（`Connection.backup()`，WAL 模式下对运行中的库安全）复制到 `D:\BAK\worklog_YYYYMMDD_HHMM.db` → 对**全部**表逐表比对源库/备份库行数 + `integrity_check` → 结果追加写入 `D:\BAK\logs\backup_YYYY-MM-DD.log` → 清理 30 天前的旧日志（**不动 .db 备份**）。退出码 0 = MATCH。
+
+**查执行结果**：
+```powershell
+Get-ScheduledTaskInfo -TaskName FengYuan_DB_Daily_Backup   # LastTaskResult=0 即成功
+Get-Content "D:\BAK\logs\backup_$(Get-Date -Format 'yyyy-MM-dd').log" -Tail 20
+```
+
+> ⚠️ 计划任务产出的 .db 文件属主是 `NT AUTHORITY\SYSTEM`（手工跑的是 `BUILTIN\Administrators`），两者都能正常读/删，不用改。
 
 **触发时机**：
 
 - 补录完一批订单/通知/分类后（用户明确要求时）
 - 任何 db 破坏性操作前（见"踩坑点 6"）
 - 每次大改 schema / 跑迁移脚本前
+- 上述计划任务已覆盖日常场景，手动备份用于"刚做完大批量修改后立刻留档"
 
 **保留策略**：D 盘容量充足，**不主动清理**——保留历史快照作为时间机器；用户主动说"清理旧的"才动手（必须用 `mavis-trash`，不许 `Remove-Item -Force`）。项目目录下的临时备份保留至少 1 份作近期参考即可，不需要全量同步到 D 盘。
+>
+> 当前 `D:\BAK` 已有 87 份备份（约 440 MB），按每天 19 MB 估算年增约 7 GB，D 盘余量 240 GB+，**暂不需要清理**。
