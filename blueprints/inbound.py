@@ -119,6 +119,22 @@ def inbound_records():
         end_date = end.isoformat()
     groups = InboundRecord.get_groups(start_date, end_date)
     total_orders = InboundOrder.count_by_date(today)
+    locked_orders = InboundOrder.count_locked_by_date(today)  # 2026-10-19 新增
+
+    # 2026-10-19: 顶部趋势图数据 —— 最近 7 天(按日) + 最近 6 个月(按月)
+    # 对齐出货页(/shipping-records),SQL 表名 inbound_orders,逻辑同 ShippingOrder。
+    _today_d = date_cls.today()
+    _week_start = (_today_d - timedelta(days=6)).isoformat()  # 含今天共 7 天
+    trend_daily = InboundOrder.count_by_date_range(_week_start, today)
+    # 最近 6 个月:相对今天往前推 5 个月 + 当月,共 6 个月
+    _six_months_ago_y = _today_d.year
+    _six_months_ago_m = _today_d.month - 5
+    while _six_months_ago_m <= 0:
+        _six_months_ago_m += 12
+        _six_months_ago_y -= 1
+    _month_start = f'{_six_months_ago_y:04d}-{_six_months_ago_m:02d}'
+    _month_end = f'{_today_d.year:04d}-{_today_d.month:02d}'
+    trend_monthly = InboundOrder.count_by_month_range(_month_start, _month_end)
 
     # 2026-08-26:placement images collection (per record)
     placement_by_record = {}
@@ -293,6 +309,9 @@ def inbound_records():
         record_by_pk=record_by_pk,
         placement_groups=placement_groups,
         placement_by_record=placement_by_record,
+        trend_daily=trend_daily,  # 2026-10-19: 最近 7 天每日入库单数
+        trend_monthly=trend_monthly,  # 2026-10-19: 最近 6 个月每月入库单数
+        locked_orders=locked_orders,  # 2026-10-19: 当日已锁单数(page-meta 用)
     )
 
 

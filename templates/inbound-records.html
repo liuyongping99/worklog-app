@@ -5,6 +5,8 @@
 /* ── 入库页专属色：成功绿 ── */
 :root { --page-accent: #00b894; --page-accent-bg: #d4f5e9; --page-accent-light-bg: #f8fff8; }
 .inbound-page .card-title { color: var(--page-accent); border-bottom-color: var(--page-accent-bg); }
+.inbound-page .page-meta { margin: 0.25rem 0 0.5rem; color: #495057; font-size: 0.85rem; }
+.inbound-page .page-meta strong { color: var(--page-accent); font-weight: 700; }
 .inbound-page .date-group { margin-bottom: var(--space-2xl); border-bottom: 1px dashed var(--gray-300); padding-bottom: var(--space-sm); }
 .inbound-page .date-group[data-locked="1"] .lock-hide { display: none !important; }
 .inbound-page .date-group[data-locked="1"] .lock-show { display: inline-block !important; }
@@ -664,6 +666,61 @@
     border: none; border-radius: 50%; background: rgba(200,30,30,0.85); color: #fff;
     font-size: 0.8rem; cursor: pointer; padding: 0;
 }
+/* 2026-10-19: 顶部入库趋势面板(最近 7 天 + 最近 6 个月) —— 对齐出货页 */
+.inbound-page .trends-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-md);
+    margin-top: 0.5rem;
+}
+.inbound-page .trend-panel {
+    background: linear-gradient(180deg, #f8fff8 0%, #ffffff 100%);
+    border: 1px solid var(--page-accent-bg);
+    border-radius: var(--radius-lg);
+    padding: 0.85rem 1rem 0.6rem;
+}
+.inbound-page .trend-panel-title {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--gray-800);
+    margin-bottom: 0.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.inbound-page .trend-panel-title .trend-total {
+    font-size: 0.78rem;
+    color: var(--gray-600);
+    font-weight: 500;
+}
+.inbound-page .trend-panel-title .trend-total strong {
+    color: var(--page-accent);
+    font-weight: 700;
+}
+.inbound-page .trend-chart {
+    width: 100%;
+    height: 150px;
+    display: block;
+}
+.inbound-page .trend-chart svg { width: 100%; height: 100%; display: block; }
+.inbound-page .trend-chart .bar { fill: var(--page-accent); transition: fill 0.15s; cursor: default; }
+.inbound-page .trend-chart .bar:hover { fill: #00997a; }
+.inbound-page .trend-chart .bar-zero { fill: #e9ecef; }
+.inbound-page .trend-chart .bar-label {
+    font-size: 11px; fill: var(--gray-700); text-anchor: middle;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+.inbound-page .trend-chart .axis-label {
+    font-size: 10px; fill: var(--gray-500); text-anchor: middle;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+.inbound-page .trend-chart .empty-hint {
+    font-size: 0.85rem; fill: var(--gray-500); text-anchor: middle;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+@media (max-width: 768px) {
+    .inbound-page .trends-grid { grid-template-columns: 1fr; }
+}
 </style>
 
 <script>
@@ -672,6 +729,27 @@
 </script>
 
 <div class="container inbound-page">
+    <!-- 2026-10-19: 顶部入库趋势 —— 最近 7 天(每日) + 最近 6 个月(每月),两个并排 -->
+    <div class="card" style="margin-bottom: 1.5rem;">
+        <h2 class="card-title">📈 入库趋势</h2>
+        <div class="trends-grid">
+            <div class="trend-panel">
+                <div class="trend-panel-title">
+                    <span>📅 最近一周（每日）</span>
+                    <span class="trend-total">本周共 <strong>{{ trend_daily | sum(attribute='count') }}</strong> 单</span>
+                </div>
+                <div class="trend-chart" id="trendDaily" data-points='{{ trend_daily | tojson }}'></div>
+            </div>
+            <div class="trend-panel">
+                <div class="trend-panel-title">
+                    <span>📊 最近 6 个月（每月）</span>
+                    <span class="trend-total">近 6 月共 <strong>{{ trend_monthly | sum(attribute='count') }}</strong> 单</span>
+                </div>
+                <div class="trend-chart" id="trendMonthly" data-points='{{ trend_monthly | tojson }}'></div>
+            </div>
+        </div>
+    </div>
+
     <!-- 新建入库单（日期+供应商） -->
     <div class="card" style="margin-bottom: 1.5rem;">
         <h2 class="card-title" style="margin-bottom: 0.75rem;">📥 新建入库单</h2>
@@ -683,6 +761,8 @@
             <span style="color:#b2bec3;">|</span>
             <span><strong>📞 未通知的货物需和陈傲确认后才能收货</strong></span>
         </div>
+        {# 2026-10-19: 当日入库单数 + 当日已锁单数 —— 对齐出货页 page-meta #}
+        <p class="page-meta">📅 当前日期：<strong>{{ today }}</strong> ｜ 当天入库单数：<strong>{{ total_orders }}</strong> ｜ 当日已锁单：<strong>{{ locked_orders }}</strong></p>
         <form id="createInboundForm" style="display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap;">
             <div style="flex: 1; min-width: 150px;">
                 <label style="display: block; font-size: 0.85rem; color: #636e72; margin-bottom: 0.25rem;">日期</label>
@@ -2223,6 +2303,75 @@ setTimeout(() => {
         window._recordInfoMap = window._recordInfoMap || buildRecordInfoMap();
         return window._recordInfoMap[recordId];
     };
+
+// 2026-10-19: 渲染顶部入库趋势柱状图(纯 SVG,无外部依赖)—— 对齐出货页 renderTrendCharts
+(function renderTrendCharts() {
+    var NS = 'http://www.w3.org/2000/svg';
+    function el(tag, attrs, parent) {
+        var n = document.createElementNS(NS, tag);
+        if (attrs) for (var k in attrs) n.setAttribute(k, attrs[k]);
+        if (parent) parent.appendChild(n);
+        return n;
+    }
+    function fmtLabel(key, value) {
+        // 日: 'YYYY-MM-DD' → 'MM-DD';月: 'YYYY-MM' → 'XX月'
+        if (key === 'date') {
+            var p = value.split('-');
+            return p[1] + '-' + p[2];
+        }
+        if (key === 'month') {
+            var p2 = value.split('-');
+            return p2[1] + '月';
+        }
+        return value;
+    }
+    function draw(containerId, key) {
+        var box = document.getElementById(containerId);
+        if (!box) return;
+        var points;
+        try { points = JSON.parse(box.getAttribute('data-points') || '[]'); }
+        catch (e) { points = []; }
+        if (!points.length) {
+            box.innerHTML = '<svg viewBox="0 0 400 150" preserveAspectRatio="xMidYMid meet"><text x="200" y="80" class="empty-hint">暂无数据</text></svg>';
+            return;
+        }
+        // SVG 视口:宽 600,高 200,坐标按 viewBox 比例自动适配容器
+        var W = 600, H = 200;
+        var padTop = 24, padBottom = 36, padLeft = 16, padRight = 16;
+        var innerW = W - padLeft - padRight;
+        var innerH = H - padTop - padBottom;
+        var n = points.length;
+        var gap = 4;
+        var barW = (innerW - gap * (n - 1)) / n;
+        var maxV = Math.max.apply(null, points.map(function (p) { return p.count; }));
+        // Y 轴上限抬高到 ≥1,避免 max=0 时柱条不可见
+        var yMax = Math.max(maxV, 1);
+
+        var svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, preserveAspectRatio: 'xMidYMid meet' }, box);
+
+        // 顶部水平基线(辅助读数,极浅)
+        el('line', { x1: padLeft, x2: W - padRight, y1: padTop + innerH, y2: padTop + innerH, stroke: '#e9ecef', 'stroke-width': 1 }, svg);
+
+        points.forEach(function (p, i) {
+            var cx = padLeft + i * (barW + gap) + barW / 2;
+            var h = (p.count / yMax) * innerH;
+            var y = padTop + (innerH - h);
+            var isZero = p.count === 0;
+            el('rect', {
+                x: cx - barW / 2, y: y, width: barW, height: Math.max(h, 0),
+                rx: 3, ry: 3, class: isZero ? 'bar bar-zero' : 'bar'
+            }, svg);
+            // 柱顶数值(0 不显示,避免冗余)
+            if (!isZero) {
+                el('text', { x: cx, y: Math.max(y - 4, 12), class: 'bar-label' }, svg).textContent = p.count;
+            }
+            // 底部 X 轴标签
+            el('text', { x: cx, y: H - 12, class: 'axis-label' }, svg).textContent = fmtLabel(key, p[key]);
+        });
+    }
+    draw('trendDaily', 'date');
+    draw('trendMonthly', 'month');
+})();
 </script>
 
 {% endblock %}
