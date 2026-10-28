@@ -2326,7 +2326,7 @@ setTimeout(() => {
                             bindRecordImageButtons();
                             recalcInboundSummary(dateGroup);
                             if (imgData && imgData.success && imgData.image) insertAiImage(imgData, dateGroup);
-                            if (typeof notifyImportValidation === 'function') notifyImportValidation(d.validation);
+                            if (typeof notifyImportValidation === 'function') notifyImportValidation(data.validation);
                         }
                     }
                 } else { alert('添加失败：' + (data.error || '未知错误')); }
