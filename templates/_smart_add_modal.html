@@ -615,6 +615,16 @@ function submitAiRecognize() {
                 document.getElementById('aiAddBtn').disabled = false;
             }
             alert('AI 未能从图片中识别到商品信息，请尝试其他图片或手动输入。');
+        } else if (data.same_warehouse) {
+            // 【2026-10-21】同仓库流转拦截:出货订单默认芙蓉仓 → 田心仓,
+            // 单据两个仓库相同说明没有真实货物位移,禁止凭空记一笔出货。
+            // 用醒目红框而非普通 alert,避免被一路"确定"点过去忽略掉。
+            document.getElementById('aiAddBtn').disabled = false;
+            var whMsg = '🚫 出货订单禁止同仓库流转\n\n'
+                + '发货仓库：' + (data.from_warehouse || '?') + '\n'
+                + '收货仓库：' + (data.to_warehouse || '?') + '\n\n'
+                + (data.hint || '出货订单默认是芙蓉仓 → 田心仓,同仓库不允许。');
+            if (confirm(whMsg)) { /* 用户已读;不改任何状态,留在当前弹框 */ }
         } else {
             var m = data.hint ? data.error + '\n\n💡 ' + data.hint : (data.error || '未知错误');
             alert('识别失败：' + m);

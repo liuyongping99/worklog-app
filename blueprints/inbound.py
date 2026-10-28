@@ -25,6 +25,7 @@ from blueprints._helpers import (
     apply_user_rotation,
     compute_placement_expected_zhi, parse_loose_yards,
     validate_weight_unit,
+    check_same_warehouse,
 )
 from blueprints.ocr_engine import PaddleOCREngine, get_ocr_engine, OCR_MATCH_PROMPT_VERSION, ocr_preprocess_kind
 from blueprints.ocr_pipeline import RecordImageProcessor
@@ -1064,6 +1065,21 @@ def inbound_ai_recognize():
         }), 500
 
     if result.get('success'):
+        # 【2026-10-21】同仓库流转禁止:入库是 田心仓 → 芙蓉仓 的反向,同仓流转
+        # 同样没有真实位移。与出货页共用 _helpers.check_same_warehouse 判定。
+        _wh = check_same_warehouse(result, '入库单')
+        if _wh:
+            _err, _hint, _fw, _tw = _wh
+            current_app.logger.warning(
+                'AI-识别 同仓库流转拦截(入库): from=%r to=%r', _fw, _tw)
+            return jsonify({
+                'success': False,
+                'error': _err,
+                'hint': _hint,
+                'from_warehouse': _fw,
+                'to_warehouse': _tw,
+                'same_warehouse': True,
+            }), 400
         return jsonify(result)
     else:
         error_msg = result.get('error', '')

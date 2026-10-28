@@ -1218,5 +1218,175 @@ def _validate_weight_unit_for_record(record, units_cache=None):
     }
 
 
+# =====================================================================
+#  仓库抽取 / 同仓库流转禁止(2026-10-21)
+# =====================================================================
+#
+# 出货订单默认是 芙蓉仓 → 田心仓,如果 AI 识别的订单图片在 OCR 文本里同时出现
+# 「发货仓库 / 收货仓库」两个标签且规范化后相等,就是「同仓流转」——没有真实
+# 货物位移,只是凭空记一笔账,容易导致虚增库存/出库数据。
+# 此处只依赖 ocr_text(PaddleOCR 抽出的原文)做正则解析,不动 LLM prompt;
+# moonshot / 纯 paddleocr 引擎(没有 ocr_text)跳过本检查。
+
+# 字面常量用 \uXXXX 转义避免编辑/落盘被全角字符吞掉。下列码位对照:
+#   全角冒号 U+FF1A 全角逗号 U+FF0C 全角分号 U+FF1B 中文句号 U+3002
+#   全角空格 U+3000 顿号 U+3001 直角引号「 U+300C / 」 U+300D
+#   弯引号 LEFT U+201C / RIGHT U+201D / LEFT' U+2018 / RIGHT' U+2019
+#   全角小括号（ U+FF08 / ） U+FF09 方头括号【 U+3010 / 】 U+3011
+
+_LABEL_TAIL_FROM = (
+    r'(?:发货仓库|出货仓库|调出仓库|from\s*warehouse|ship\s*from)'
+)
+_LABEL_TAIL_TO = (
+    r'(?:收货仓库|目的仓库|调入仓库|到货仓库|to\s*warehouse|ship\s*to)'
+)
+# 冒号 class 同时含全角 U+FF1A 和半角 :
+_COLON_CLASS = r'[:：]'
+# label 两边可能被 OCR 加 【】()（） 等包起来,允许这些修饰符紧贴 label
+_LABEL_WRAP_PREFIX = r'[\s\[\]【】()（）]*'
+_LABEL_WRAP_SUFFIX = r'[\s\[\]【】()（）]*'
+# 值:非空白连续字符 + 长度上限 8(覆盖常用仓库名:芙蓉仓/田心仓/武汉中心仓A区 等)
+# 不含空白,避免 OCR 同行布局里把下一段标签(录单日期/单据编号/摘要…)吃进来;
+# 真要 "芙 蓉 仓" 之类的 OCR 断字,会被切成 "芙" 单字,后续 is_same_warehouse
+# 仍能正确比较(不需要精确提取,只需正确判断同/异)
+_VALUE = r'([^\s,;/\。，；]{1,8})'
+
+_RE_FROM_WAREHOUSE = re.compile(
+    _LABEL_WRAP_PREFIX + _LABEL_TAIL_FROM + _LABEL_WRAP_SUFFIX
+    + r'\s*' + _COLON_CLASS + r'\s*' + _VALUE,
+    re.IGNORECASE,
+)
+_RE_TO_WAREHOUSE = re.compile(
+    _LABEL_WRAP_PREFIX + _LABEL_TAIL_TO + _LABEL_WRAP_SUFFIX
+    + r'\s*' + _COLON_CLASS + r'\s*' + _VALUE,
+    re.IGNORECASE,
+)
+
+# 仓库名两侧常见包装符号 + 空白 + 标点(用 set 形式,strip() 不支持 set;改成 str)
+# 顺序无意义,str.strip() 会按字符去两侧任意匹配。
+_WAREHOUSE_TRIM_CHARS = (
+    ' '            # 半角空格
+    '\t\r\n'       # 各种 ASCII 空白
+    '　'       # 全角空格
+    '“”' # 双弯引号 LEFT/RIGHT
+    '‘’' # 单弯引号 LEFT/RIGHT
+    '「」' # 直角引号「 / 」
+    '【】' # 方头括号【 / 】
+    '（）' # 全角小括号（ / ）
+    '()'           # 半角小括号
+    '、'       # 顿号 、
+    ',.;'          # 半角 , ; .
+    '。，；'  # 中文句号 + 全角 , ;
+    ':/'           # 半角 : /
+    '：'       # 全角冒号(防值里残留)
+    '"\'\''        # 半角直引号 + apostrophe
+)
+
+
+def extract_warehouses_from_ocr(ocr_text):
+    """从 OCR 原文抽「发货仓库 / 收货仓库」标签值。
+
+    返回 (from_wh, to_wh) 二元组;任一标签缺失则对应位置返回空字符串。
+    输入兼容 None / 非字符串 / 空字符串。
+    """
+    if not ocr_text or not isinstance(ocr_text, str):
+        return ('', '')
+    from_wh = to_wh = ''
+    m_from = _RE_FROM_WAREHOUSE.search(ocr_text)
+    if m_from:
+        from_wh = m_from.group(1).strip().strip(_WAREHOUSE_TRIM_CHARS).strip()
+    m_to = _RE_TO_WAREHOUSE.search(ocr_text)
+    if m_to:
+        to_wh = m_to.group(1).strip().strip(_WAREHOUSE_TRIM_CHARS).strip()
+    return (from_wh, to_wh)
+
+
+def normalize_warehouse(name):
+    """仓库名规范化(全角字母→半角 + 小写、去空白、抠尾标点)。
+
+    仅用于相等比较,不做业务真值校验。
+    """
+    if not name:
+        return ''
+    s = str(name).strip()
+    if not s:
+        return ''
+    # 中英文全角空格统一去掉(「芙蓉 仓」「芙蓉　仓」都看成「芙蓉仓」)
+    s = s.replace('　', '').replace(' ', '').replace('\t', '')
+    # 半角化的字母小写化(全角Ａ-Ｚ / ａ-ｚ → a-z)
+    out = []
+    for ch in s:
+        cp = ord(ch)
+        if 0xFF21 <= cp <= 0xFF3A:        # full-width A-Z
+            out.append(chr(cp - 0xFEE0).lower())
+        elif 0xFF41 <= cp <= 0xFF5A:      # full-width a-z
+            out.append(chr(cp - 0xFEE0).lower())
+        elif 'A' <= ch <= 'Z':            # ASCII A-Z
+            out.append(ch.lower())
+        else:
+            out.append(ch)
+    # 抠掉尾部常见标点
+    while out and out[-1] in ',.;' or (out and out[-1] in '。，；、'):
+        out.pop()
+    return ''.join(out)
+
+
+def is_same_warehouse(from_wh, to_wh):
+    """两个仓库名规范化后是否相等(任一为空 → False)。
+
+    出货订单「同仓流转」就靠此函数拦截。
+    """
+    a = normalize_warehouse(from_wh)
+    b = normalize_warehouse(to_wh)
+    return bool(a) and bool(b) and a == b
+
+
+def extract_warehouses_from_result(result):
+    """从引擎识别结果里拿发货/收货仓库(统一入口,三页 + 五引擎共用)。
+
+    取值优先级:
+      1. LLM 直接吐的 from_warehouse / to_warehouse 字段(moonshot 走这条)
+      2. ocr_text 正则兜底(deepseek / paddleocr_minimax / paddleocr 走这条)
+
+    返回 (from_wh, to_wh),缺失一侧则该侧为空字符串。
+    """
+    if not isinstance(result, dict):
+        return ('', '')
+    fw = str(result.get('from_warehouse') or '').strip()
+    tw = str(result.get('to_warehouse') or '').strip()
+    if fw and tw:
+        return (fw, tw)
+    ocr_text = result.get('ocr_text') or ''
+    if not ocr_text:
+        return (fw, tw)
+    a, b = extract_warehouses_from_ocr(ocr_text)
+    return (fw or a, tw or b)
+
+
+def check_same_warehouse(result, biz_label='出货订单'):
+    """判定识别结果是否为「同仓库流转」,是则返回 (error, hint, fw, tw)。
+
+    出货订单默认是芙蓉仓 → 田心仓;发货仓库与收货仓库相同时没有真实货物
+    位移,只记一笔账会虚增出入库数据,必须拦下。三页(出货/入库/装柜)共用
+    本函数,文案只在 biz_label 上区分,避免三份复制。
+
+    Args:
+        result: 引擎 recognize() 的返回 dict
+        biz_label: 业务名(出货订单/入库单/装柜单),用于文案
+
+    Returns:
+        None → 未检出同仓流转(无仓库字段 / 只有一侧 / 两侧不同),放行
+        (error, hint, fw, tw) → 检出,error/hint 可直接进 jsonify 响应体
+    """
+    fw, tw = extract_warehouses_from_result(result)
+    if not (fw and tw) or not is_same_warehouse(fw, tw):
+        return None
+    error = f'{biz_label}禁止同仓库流转:检测到发货仓库与收货仓库都是「{fw}」'
+    hint = (f'{biz_label}默认是芙蓉仓 → 田心仓,同仓库不允许。'
+            '请检查单据是否录错,或确认这份单据不该走本流程'
+            '(同仓调拨请改用另一侧的流程或作废)。')
+    return (error, hint, fw, tw)
+
+
 # 公开别名(去掉下划线,供订单蓝图外部导入)
 validate_weight_unit = _validate_weight_unit_for_record

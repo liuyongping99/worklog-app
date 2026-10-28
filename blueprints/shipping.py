@@ -31,6 +31,7 @@ from blueprints._helpers import (
     apply_user_rotation,
     compute_placement_expected_zhi, parse_loose_yards,
     validate_weight_unit,
+    check_same_warehouse,
 )
 from blueprints.ocr_engine import (
     PaddleOCREngine, get_ocr_engine, OCR_MATCH_PROMPT_VERSION,
@@ -1750,6 +1751,25 @@ def shipping_records_ai_recognize():
         }), 500
 
     if result.get('success'):
+        # 【2026-10-21】同仓库流转禁止检查:发货仓库与收货仓库相同 → 拦截。
+        # 出货订单默认芙蓉仓 → 田心仓,同仓流转没有真实货物位移,会凭空虚增
+        # 出库数据。取值走 _helpers.check_same_warehouse 统一入口:优先用 LLM
+        # 直接吐的 from_warehouse/to_warehouse(moonshot),回落 ocr_text 正则
+        # (deepseek / paddleocr_minimax / paddleocr)。三页共用同一套判定。
+        _wh = check_same_warehouse(result, '出货订单')
+        if _wh:
+            _err, _hint, _fw, _tw = _wh
+            current_app.logger.warning(
+                'AI-识别 同仓库流转拦截: from=%r to=%r', _fw, _tw)
+            return jsonify({
+                'success': False,
+                'error': _err,
+                'hint': _hint,
+                'from_warehouse': _fw,
+                'to_warehouse': _tw,
+                'same_warehouse': True,
+            }), 400
+
         # 【2026-09-15】重复检测:对照订单已有明细,对重复项标 duplicate=true,
         # 前端智能添加弹框渲染红色 ⚠️ 警示,让用户手动核对而不是盲目批量入库。
         # 场景:订单 1011 (KILA GROUP装柜) AI 误把 3 条数量(3504/2001/3483)

@@ -1354,6 +1354,21 @@ def parse_paddleocr_result(ocr_result):
     return items
 
 
+def paddleocr_raw_text(ocr_result):
+    """PaddleOCR 原始结果 → 按行拼接的纯文本(每行一行)。
+
+    与 parse_paddleocr_result 同源(共用 _extract_lines + _group_into_rows),
+    但不做商品行解析,只还原版面文字。用途:纯 paddleocr 引擎 recognize()
+    回传 ocr_text,让 _helpers.check_same_warehouse 的「同仓库流转」正则
+    也覆盖到本地引擎(2026-10-21)。同一份 OCR 结果被调用两次都是纯 CPU
+    运算,不重跑模型。
+    """
+    if not ocr_result or not ocr_result[0]:
+        return ''
+    rows = _group_into_rows(_extract_lines(ocr_result))
+    return '\n'.join(r for r in rows if r)
+
+
 # ═══════════════════════════════════════════════════════════════════
 # 共享后处理：汇总行二次过滤（安全网）
 # ═══════════════════════════════════════════════════════════════════
@@ -1505,6 +1520,10 @@ class MoonshotEngine(BaseOCREngine):
         '**务必把单据抬头的单位/公司名提取出来** — 即使没有明确标签, 只要在标题/抬头/左上角出现的公司名就算。'
         '**注意区分**: 商品行右侧/下方的"备注/购货单位"等不算客户, 抬头第一行/左上角的单位/公司名才是客户。'
         '提取后去掉"客户:"等标签前缀,只保留公司名本身。无则空字符串。\n'
+        '- from_warehouse: 发货仓库 — 找"发货仓库/出货仓库/调出仓库/from warehouse"等标签后面的值,'
+        '如"芙蓉仓"。同价调拨单这类单据抬头必带。无则空字符串\n'
+        '- to_warehouse: 收货仓库 — 找"收货仓库/目的仓库/调入仓库/to warehouse"等标签后面的值,'
+        '如"田心仓"。无则空字符串\n'
         '- items: 商品列表数组，每条商品包含：\n'
         '  - product_name: 商品名称（必须）\n'
         '  - specification: 规格型号（必须，无则空字符串）\n'
@@ -1542,12 +1561,14 @@ class MoonshotEngine(BaseOCREngine):
         '如果某行只有部分信息，quantity默认"1"\n'
         '只返回纯 JSON 对象，不要其他解释文字，不要 markdown 代码块。\n'
         '示例（注意 remark 都有值）：\n'
-        '{"doc_number":"SO20260701","customer_name":"AC公司","items":['
+        '{"doc_number":"SO20260701","customer_name":"AC公司",'
+        '"from_warehouse":"芙蓉仓","to_warehouse":"田心仓","items":['
         '{"product_name":"PVC桌布","specification":"1.2×1.8m","quantity":"50","unit":"支","remark":"急单"},'
         '{"product_name":"无纺布","specification":"2m","quantity":"30","unit":"kg","remark":"A-03仓位"},'
         '{"product_name":"7P环保杂胶","specification":"","quantity":"100","unit":"y","remark":"每箱25y"}'
         ']}\n'
-        '如果图片中没有任何可识别的商品行，返回 {"doc_number":"","customer_name":"","items":[]}'
+        '如果图片中没有任何可识别的商品行，返回 '
+        '{"doc_number":"","customer_name":"","from_warehouse":"","to_warehouse":"","items":[]}'
     )
 
     def _image_to_data_url(self, image_bytes, filename):
@@ -1643,18 +1664,27 @@ class MoonshotEngine(BaseOCREngine):
             data = json.loads(raw_text)
 
             # 兼容新旧格式：新格式 {"doc_number":"...", "items":[...]}，旧格式 [...]
+            # from_warehouse / to_warehouse 是 2026-10-21 加的:发货/收货仓库,
+            # 供 _helpers.check_same_warehouse 做「同仓库流转」拦截。旧响应无此
+            # 字段时走空串,不影响既有 item 解析。
             if isinstance(data, list):
                 items = data
                 doc_number = ''
                 customer_name = ''
+                from_warehouse = ''
+                to_warehouse = ''
             elif isinstance(data, dict):
                 items = data.get('items', [])
                 doc_number = data.get('doc_number', '') or ''
                 customer_name = data.get('customer_name', '') or ''
+                from_warehouse = data.get('from_warehouse', '') or ''
+                to_warehouse = data.get('to_warehouse', '') or ''
             else:
                 items = None
                 doc_number = ''
                 customer_name = ''
+                from_warehouse = ''
+                to_warehouse = ''
 
             if not isinstance(items, list):
                 return {
@@ -1668,6 +1698,8 @@ class MoonshotEngine(BaseOCREngine):
                 'items': items,
                 'doc_number': doc_number,
                 'customer_name': customer_name,
+                'from_warehouse': from_warehouse,
+                'to_warehouse': to_warehouse,
             }
 
         except openai.AuthenticationError:
@@ -2472,11 +2504,16 @@ class PaddleOCREngine(BaseOCREngine):
             result = self._ocr.ocr(resized, cls=True)
 
             if not result or not result[0]:
-                return {'success': True, 'items': []}
+                return {'success': True, 'items': [], 'ocr_text': ''}
 
             items = parse_paddleocr_result(result)
             items, _removed = _filter_summary_items(items)
-            return {'success': True, 'items': items}
+            # 2026-10-21: 回传 ocr_text 让「同仓库流转」检查覆盖纯本地引擎
+            return {
+                'success': True,
+                'items': items,
+                'ocr_text': paddleocr_raw_text(result),
+            }
 
         except ImportError:
             return {

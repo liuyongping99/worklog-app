@@ -27,6 +27,7 @@ from blueprints._helpers import (
     match_label_to_row, detect_bg_color,
     compute_placement_expected_zhi, apply_user_rotation, parse_loose_yards,
     validate_weight_unit,
+    check_same_warehouse,
 )
 from blueprints.ocr_engine import PaddleOCREngine, get_ocr_engine, OCR_MATCH_PROMPT_VERSION, ocr_preprocess_kind
 from blueprints.ocr_pipeline import RecordImageProcessor, _OCR_LOCK, _ASYNC_JOBS
@@ -796,6 +797,21 @@ def loading_ai_recognize():
         }), 500
 
     if result.get('success'):
+        # 【2026-10-21】同仓库流转禁止:装柜单若发货/收货仓库相同则拦截。
+        # 装柜单多数不带仓库标签,取不到就自动放行(只拦能确认同仓的情况)。
+        _wh = check_same_warehouse(result, '装柜单')
+        if _wh:
+            _err, _hint, _fw, _tw = _wh
+            current_app.logger.warning(
+                'AI-识别 同仓库流转拦截(装柜): from=%r to=%r', _fw, _tw)
+            return jsonify({
+                'success': False,
+                'error': _err,
+                'hint': _hint,
+                'from_warehouse': _fw,
+                'to_warehouse': _tw,
+                'same_warehouse': True,
+            }), 400
         return jsonify(result)
     else:
         error_msg = result.get('error', '')
