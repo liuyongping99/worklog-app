@@ -20,6 +20,7 @@ from models import (
     OcrMatchEvent, PlacementImage,
     InboundRecord, LoadingOrderRecord,  # 2026-09-21: ypp-review scan 支持入库/装柜
     classify_record, CategoryPrompt,
+    DailyOrderCheck,  # 2026-10-26: 日终盘点(手填当日单据总量)
 )
 from blueprints._helpers import (
     get_upload_dir as get_helpers_upload_dir,
@@ -32,6 +33,7 @@ from blueprints._helpers import (
     compute_placement_expected_zhi, parse_loose_yards,
     validate_weight_unit,
     check_same_warehouse,
+    compute_daily_check_status,  # 2026-10-26: 日终盘点状态判定
 )
 from blueprints.ocr_engine import (
     PaddleOCREngine, get_ocr_engine, OCR_MATCH_PROMPT_VERSION,
@@ -218,6 +220,91 @@ def _as_bool(value, default=True):
 def _get_upload_dir():
     """薄包装，返回 (upload_dir, month_str)。"""
     return get_helpers_upload_dir()
+
+
+# ── 日终盘点(2026-10-26) ──────────────────────────────
+# 纸质出货单一天一张张开,单号 TD-YYYY-MM-DD-NNN 本身不连续(实测 09-16 最大
+# 序号 017 但当天只有 7 单),光看单号编号判断不出少录了几单。日终时用户把
+# 纸面单据总数手填进来,和系统实际录入的单数当场对账。
+#
+# 口径(与用户确认):
+#   system_total  = COUNT(shipping_orders WHERE date = D)  一张纸单 = 一行
+#   empty_records = 当天 0 条明细的空壳单数   → 副提示"没填明细"
+#   unlocked      = 当天未锁定的单数           → 副提示"没锁定"
+#   status        = unfilled / ok / short / extra(判定见 _helpers.compute_daily_check_status)
+
+
+def _build_eod_days(start_date, end_date, scope=DailyOrderCheck.SCOPE_SHIPPING):
+    """组装区间内每一天的日终盘点数据。
+
+    返回 [{'date','system_total','empty_records','unlocked',
+           'manual_total','status','label','gap','flags','flags_text','remark'}, ...]
+
+    日期骨架复用 ShippingOrder.count_by_date_range(已把 0 单日期补齐),
+    再把 daily_stock_stats 和用户手填值覆盖上去 —— 所以区间内没有出货单的
+    那天也会出现在结果里(用户可能要给休息日记"0")。
+
+    flags_text 在这里拼好(而不是在前端 Jinja/JS 各拼一遍)—— 服务端渲染和
+    保存后的局部刷新必须给出同一句话,否则两处会显示不一样。
+    """
+    if not start_date or not end_date:
+        return []
+    spine = ShippingOrder.count_by_date_range(start_date, end_date)
+    stats = {s['date']: s for s in ShippingOrder.daily_stock_stats(start_date, end_date)}
+    checks = DailyOrderCheck.get_map(scope, start_date, end_date)
+
+    days = []
+    for item in spine:
+        d = item['date']
+        st = stats.get(d, {})
+        ck = checks.get(d)
+        manual = ck['manual_total'] if ck else None
+        status = compute_daily_check_status(
+            st.get('total', 0), manual,
+            st.get('empty_records', 0), st.get('unlocked', 0),
+        )
+        flag_parts = []
+        if 'empty_records' in status['flags']:
+            flag_parts.append(f"{st.get('empty_records', 0)} 单没填明细")
+        if 'unlocked' in status['flags']:
+            flag_parts.append(f"{st.get('unlocked', 0)} 单没锁定")
+        days.append({
+            'date': d,
+            'system_total': st.get('total', 0),
+            'empty_records': st.get('empty_records', 0),
+            'unlocked': st.get('unlocked', 0),
+            'manual_total': manual,
+            'remark': (ck or {}).get('remark', ''),
+            'status': status['status'],
+            'label': status['label'],
+            'gap': status['gap'],
+            'flags': status['flags'],
+            'flags_text': ' · '.join(flag_parts),
+        })
+    return days
+
+
+def _eod_day_payload(scope, d):
+    """取某一天的日终盘点数据(端点保存/删除后回给前端刷新用)。"""
+    days = _build_eod_days(d, d, scope=scope)
+    return days[0] if days else {
+        'date': d, 'system_total': 0, 'empty_records': 0, 'unlocked': 0,
+        'manual_total': None, 'remark': '', 'status': 'unfilled',
+        'label': '未盘点', 'gap': 0, 'flags': [], 'flags_text': '',
+    }
+
+
+def _validate_eod_date(d):
+    """校验 YYYY-MM-DD 日期串,合法返回 None,非法返回错误文案。"""
+    if not d:
+        return '日期不能为空'
+    try:
+        parsed = datetime.strptime(d, '%Y-%m-%d')
+    except (ValueError, TypeError):
+        return '日期格式必须是 YYYY-MM-DD'
+    if parsed.strftime('%Y-%m-%d') != d:
+        return '日期格式必须是 YYYY-MM-DD'
+    return None
 
 
 # ── 页面 ──────────────────────────────────────────────
@@ -424,6 +511,21 @@ def shipping_records():
         for r in grp.get('records', []):
             record_by_pk[r['id']] = r
 
+    # 2026-10-26: 日终盘点 —— 手填当日纸面单据总量 vs 系统实际录入单数
+    eod_days = _build_eod_days(start_date, end_date)
+
+    # 2026-10-26: 给每个日期的「首个订单」打 is_day_head 标记。
+    # 模板里的 .date-group 其实是订单级(一个 date-group = 一张出货单),
+    # 日期级 band 只能渲染一次,挂在该日期首次出现的那一单前面。
+    # 注意 groups 是 ORDER BY created_at DESC,补录/跨日下单会让日期交错,
+    # 所以必须按"首次出现"判定,不能按相邻两单日期是否相同来判定。
+    _seen_dates = set()
+    for grp in groups:
+        _d = grp.get('date')
+        if _d and _d not in _seen_dates:
+            _seen_dates.add(_d)
+            grp['is_day_head'] = True
+
     return render_template(
         'shipping-records.html',
         groups=groups,
@@ -440,9 +542,92 @@ def shipping_records():
         end_date=end_date,
         trend_daily=trend_daily,  # 2026-09-29: 最近 7 天每日出货单数
         trend_monthly=trend_monthly,  # 2026-09-29: 最近 6 个月每月出货单数
+        eod_days=eod_days,  # 2026-10-26: 日终盘点(每天的手填值 + 系统值 + 状态)
+        eod_map={d['date']: d for d in eod_days},  # 2026-10-26: 供日期级 band 按 date 取当天数据
         unit_list=unit_list,
         piece_conversions=piece_conv_list,
     )
+
+
+# ── 日终盘点 REST(2026-10-26) ───────────────────────────
+# GET    /api/v1/shipping-orders/daily-check?start_date=&end_date=
+# POST   /api/v1/shipping-orders/daily-check        {date, manual_total, remark?}
+# DELETE /api/v1/shipping-orders/daily-check/<date>
+
+
+@bp.route('/api/v1/shipping-orders/daily-check', methods=['GET'])
+def api_v1_shipping_daily_check_list():
+    """查区间内每天的日终盘点数据 → {success, days:[...]}"""
+    start_date = request.args.get('start_date', '').strip()
+    end_date = request.args.get('end_date', '').strip()
+    if not start_date or not end_date:
+        end = date_cls.today()
+        start = end - timedelta(days=1)
+        start_date = start.isoformat()
+        end_date = end.isoformat()
+    err = _validate_eod_date(start_date) or _validate_eod_date(end_date)
+    if err:
+        return jsonify({'success': False, 'error': err}), 400
+    try:
+        days = _build_eod_days(start_date, end_date)
+    except Exception as e:
+        current_app.logger.exception('daily-check list failed')
+        return jsonify({'success': False, 'error': f'查询失败: {e}'}), 500
+    return jsonify({'success': True, 'start_date': start_date,
+                    'end_date': end_date, 'days': days})
+
+
+@bp.route('/api/v1/shipping-orders/daily-check', methods=['POST'])
+def api_v1_shipping_daily_check_set():
+    """保存某天的手填单据总量 → {success, day:{...}}
+
+    同一天重复保存是覆盖(表上有 UNIQUE(scope, date)),不是追加。
+    """
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({'success': False, 'error': '请求体不能为空'}), 400
+    d = (data.get('date') or '').strip()
+    err = _validate_eod_date(d)
+    if err:
+        return jsonify({'success': False, 'error': err}), 400
+    raw = data.get('manual_total')
+    try:
+        manual_total = int(raw)
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'error': '手填单数必须是整数'}), 400
+    if manual_total < 0:
+        return jsonify({'success': False, 'error': '手填单数不能为负'}), 400
+    remark = (data.get('remark') or '').strip()
+    try:
+        row_id = DailyOrderCheck.upsert(
+            DailyOrderCheck.SCOPE_SHIPPING, d, manual_total, remark,
+            session.get('operator_id'),
+        )
+    except Exception as e:
+        current_app.logger.exception('daily-check set failed')
+        return jsonify({'success': False, 'error': f'保存失败: {e}'}), 500
+    AuditLog.log('set_daily_check', 'daily_order_check', row_id,
+                 detail={'date': d, 'manual_total': manual_total})
+    return jsonify({'success': True, 'day': _eod_day_payload(
+        DailyOrderCheck.SCOPE_SHIPPING, d)})
+
+
+@bp.route('/api/v1/shipping-orders/daily-check/<date_str>', methods=['DELETE'])
+def api_v1_shipping_daily_check_clear(date_str):
+    """清除某天的手填值(恢复「未盘点」) → {success, day:{...}}"""
+    d = (date_str or '').strip()
+    err = _validate_eod_date(d)
+    if err:
+        return jsonify({'success': False, 'error': err}), 400
+    try:
+        DailyOrderCheck.delete(DailyOrderCheck.SCOPE_SHIPPING, d)
+    except Exception as e:
+        current_app.logger.exception('daily-check clear failed')
+        return jsonify({'success': False, 'error': f'清除失败: {e}'}), 500
+    AuditLog.log('clear_daily_check', 'daily_order_check', None,
+                 detail={'date': d})
+    return jsonify({'success': True, 'day': _eod_day_payload(
+        DailyOrderCheck.SCOPE_SHIPPING, d)})
 
 
 

@@ -21,6 +21,7 @@ from .audit import AuditLog
 from .audit_query import OcrEventAudit
 from .category_prompt import CategoryPrompt, classify_record
 from .voice_mapping import VoiceMapping
+from .daily_check import DailyOrderCheck
 
 __all__ = [
     'get_db', 'DB_PATH', 'init_db',
@@ -39,4 +40,5 @@ __all__ = [
     'CategoryPrompt',
     'classify_record',
     'VoiceMapping',
+    'DailyOrderCheck',
 ]

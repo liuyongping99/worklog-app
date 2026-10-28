@@ -689,6 +689,63 @@
 }
 .loose-count-modal .lcm-cancel { background: #dfe6e9; color: #2d3436; }
 .loose-count-modal .lcm-save { background: #00b894; color: #fff; }
+
+/* 2026-10-26: 日终盘点 —— 手填当日纸面单据总量 vs 系统实际录入单数 */
+.shipping-page .eod-summary {
+    margin: 0 0 0.6rem; font-size: 0.86rem; color: var(--gray-700);
+}
+.shipping-page .eod-summary b { color: #d63031; }
+.shipping-page .eod-scroll {
+    max-height: 320px; overflow-y: auto;
+    border: 1px solid var(--gray-200, #e9ecef); border-radius: var(--radius-lg);
+}
+.shipping-page .eod-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.shipping-page .eod-table thead th {
+    position: sticky; top: 0; z-index: 1;
+    background: #f8f9fa; color: var(--gray-600);
+    font-weight: 600; font-size: 0.78rem; text-align: left;
+    padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--gray-300, #dee2e6);
+}
+.shipping-page .eod-table td { padding: 0.35rem 0.6rem; border-bottom: 1px solid #f1f3f5; vertical-align: middle; }
+.shipping-page .eod-table tbody tr:hover { background: #f8fff8; }
+.shipping-page .eod-date { font-family: monospace; color: var(--gray-700); white-space: nowrap; }
+.shipping-page .eod-sys { font-weight: 700; text-align: center; }
+.shipping-page .eod-input {
+    width: 68px; padding: 0.2rem 0.35rem; font-size: 0.85rem;
+    border: 1px solid var(--gray-300, #dee2e6); border-radius: 4px; text-align: center;
+}
+.shipping-page .eod-input:focus { outline: 2px solid #74b9ff; outline-offset: -1px; }
+/* 输入框 + 保存按钮排一行,别被挤到下一行 */
+.shipping-page .eod-input-cell { white-space: nowrap; }
+.shipping-page .eod-input-cell .eod-btn { margin-left: 0.25rem; }
+.shipping-page .eod-btn {
+    padding: 0.2rem 0.45rem; font-size: 0.75rem; cursor: pointer; white-space: nowrap;
+    background: #00b894; color: #fff; border: none; border-radius: 4px;
+}
+.shipping-page .eod-clear-btn { background: #b2bec3; margin-left: 0.2rem; }
+.shipping-page .eod-clear-btn:hover { background: #8e9ba6; }
+.shipping-page .eod-btn:hover { background: #00a383; }
+.shipping-page .eod-status {
+    display: inline-block; padding: 0.15rem 0.5rem; border-radius: 8px;
+    font-size: 0.75rem; font-weight: 600; white-space: nowrap;
+}
+.shipping-page .eod-status.eod-ok { background: #d4f5e9; color: #1e7e34; border: 1px solid #27ae60; }
+.shipping-page .eod-status.eod-short { background: #ffe0e0; color: #b71c1c; border: 1px solid #e74c3c; }
+.shipping-page .eod-status.eod-extra { background: #fff3cd; color: #856404; border: 1px solid #fdcb6e; }
+.shipping-page .eod-status.eod-unfilled { background: #f1f3f5; color: #868e96; border: 1px solid #ced4da; }
+.shipping-page .eod-flags { font-size: 0.75rem; color: #e17055; white-space: nowrap; }
+
+/* 日期级 band —— .date-group 其实是订单级,日期级盘点条单独挂一块 */
+.shipping-page .day-band {
+    display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+    background: linear-gradient(135deg, #fff8e1 0%, #ffeaa7 100%);
+    border: 1px solid #fdcb6e; border-left: 4px solid #e17055;
+    border-radius: 6px; padding: 0.4rem 0.7rem; margin: 0.5rem 0 0.4rem;
+    font-size: 0.83rem; color: #6c5d00;
+}
+.shipping-page .day-band-date { font-weight: 700; font-family: monospace; }
+.shipping-page .day-band-label { font-weight: 600; }
+.shipping-page .day-band .eod-input { width: 68px; }
 </style>
 
 <!-- 2026-09-29: 顶部出货趋势 —— 最近 7 天(每日) + 最近 6 个月(每月),两个并排 -->
@@ -710,6 +767,48 @@
             <div class="trend-chart" id="trendMonthly" data-points='{{ trend_monthly | tojson }}'></div>
         </div>
     </div>
+</div>
+
+<!-- 2026-10-26: 日终盘点 —— 手工填「当日纸面单据总数」,和系统实际录入的单数当场对账。
+     纸质出货单一天一张张开,单号 TD-YYYY-MM-DD-NNN 本身不连续(实测 09-16 最大序号 017
+     但当天只有 7 单),光看单号编号判断不出少录了几单,必须靠人工填总数来兜底。 -->
+<div class="card shipping-page" id="eodCard">
+    <h2 class="card-title">📋 日终盘点</h2>
+    <p class="eod-summary" id="eodSummary">…</p>
+    {% if eod_days %}
+    <div class="eod-scroll">
+        <table class="eod-table">
+            <thead>
+                <tr>
+                    <th style="width:110px;">日期</th>
+                    <th style="width:150px;">手填单数</th>
+                    <th style="width:80px;text-align:center;">系统单数</th>
+                    <th style="width:150px;">状态</th>
+                    <th>提示</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for day in eod_days %}
+                <tr data-eod-row="{{ day.date }}">
+                    <td class="eod-date">{{ day.date }}</td>
+                    <td class="eod-input-cell">
+                        <input type="number" class="eod-input" data-eod-input="{{ day.date }}"
+                               value="{{ day.manual_total if day.manual_total is not none else '' }}"
+                               min="0" step="1" placeholder="未填">
+                        <button type="button" class="eod-btn" data-eod-save="{{ day.date }}">💾</button>
+                        <button type="button" class="eod-btn eod-clear-btn" data-eod-clear="{{ day.date }}" title="清除手填值,恢复「未盘点」">✕</button>
+                    </td>
+                    <td class="eod-sys" data-eod-sys>{{ day.system_total }}</td>
+                    <td><span class="eod-status eod-{{ day.status }}" data-eod-status>{{ day.label }}</span></td>
+                    <td class="eod-flags" data-eod-flags>{{ day.flags_text }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="eod-summary" style="color:#868e96;">当前日期范围内没有可盘点的日期。</p>
+    {% endif %}
 </div>
 
 <!-- 新建出货单（日期+客户） -->
@@ -943,6 +1042,28 @@ document.getElementById('voiceInputBtn').addEventListener('click', function () {
     </script>
     {% if groups %}
         {% for group in groups %}
+        {# 2026-10-26: 日期级「日终盘点」band。
+           .date-group 其实是订单级(一个 date-group = 一张出货单),同一天会有好几块。
+           所以 band 只在该日期「首次出现」的那一单前渲染一次(is_day_head 由后端打标记,
+           考虑 groups 是 ORDER BY created_at DESC、日期会交错,不能按相邻日期判)。 #}
+        {% if group.is_day_head %}
+        {% set eod = eod_map.get(group.date) %}
+        <div class="day-band" data-eod-band="{{ group.date }}">
+            <span class="day-band-date">📅 {{ group.date }}</span>
+            <span class="day-band-label">📋 日终盘点</span>
+            <span>手填</span>
+            <input type="number" class="eod-input" data-eod-input="{{ group.date }}"
+                   value="{{ eod.manual_total if eod and eod.manual_total is not none else '' }}"
+                   min="0" step="1" placeholder="未填">
+            <span>单 · 系统</span>
+            <b data-eod-sys>{{ eod.system_total if eod else 0 }}</b>
+            <span>单 ·</span>
+            <span class="eod-status eod-{{ eod.status if eod else 'unfilled' }}" data-eod-status>{{ eod.label if eod else '未盘点' }}</span>
+            <button type="button" class="eod-btn" data-eod-save="{{ group.date }}">💾 保存</button>
+            <button type="button" class="eod-btn eod-clear-btn" data-eod-clear="{{ group.date }}" title="清除手填值,恢复「未盘点」">✕</button>
+            <span class="eod-flags" data-eod-flags>{{ eod.flags_text if eod else '' }}</span>
+        </div>
+        {% endif %}
         <div class="date-group" data-order-id="{{ group.id }}" data-locked="{{ '1' if group.is_locked else '0' }}">
             <div class="group-header" data-order-id="{{ group.id }}" data-locked="{{ 1 if group.is_locked else 0 }}">
                 <span class="group-date">📅 {{ group.date }}</span>
@@ -2270,6 +2391,184 @@ if (typeof bindReOcrButtons === 'function') bindReOcrButtons();
 // ── "已核查"按钮回调 ──
 // markRecordVerified / unmarkRecordVerified 的实现已上移到共享模板
 // _smart_add_modal.html(走 _smartAddApi 拼 URL,三套订单共用一份),此处不再重复定义。
+
+
+// ── 日终盘点(2026-10-26) ──────────────────────────────────
+// 手填当日纸面单据总数,和系统实际录入的单数当场对账。
+// 页面上有两处入口:顶部「📋 日终盘点」卡片(全局概览)+ 每个日期的日期级 band
+// (就地填写)。两处显示同一天的数据,保存后必须同步刷新。
+(function () {
+    var API = '/api/v1/shipping-orders/daily-check';
+
+    // 用后端返回的 day 对象刷新页面上该日期的所有位置(表格行 + 日期 band)
+    function renderEodDay(day) {
+        if (!day || !day.date) return;
+        var sel = '[data-eod-input="' + day.date + '"]';
+        // 输入框:只有当用户没在编辑时才覆盖(避免打字被打断)
+        document.querySelectorAll(sel).forEach(function (inp) {
+            if (document.activeElement !== inp) {
+                inp.value = (day.manual_total === null || day.manual_total === undefined)
+                    ? '' : day.manual_total;
+            }
+        });
+        // 状态徽章:表格行 + 日期 band 都带 data-eod-status
+        document.querySelectorAll('[data-eod-status]').forEach(function (el) {
+            var band = el.closest('[data-eod-band]');
+            var row = el.closest('[data-eod-row]');
+            var ownerDate = band ? band.getAttribute('data-eod-band')
+                                 : (row ? row.getAttribute('data-eod-row') : null);
+            if (ownerDate !== day.date) return;
+            el.className = 'eod-status eod-' + day.status;
+            el.textContent = day.label;
+        });
+        // 系统单数
+        document.querySelectorAll('[data-eod-sys]').forEach(function (el) {
+            var band = el.closest('[data-eod-band]');
+            var row = el.closest('[data-eod-row]');
+            var ownerDate = band ? band.getAttribute('data-eod-band')
+                                 : (row ? row.getAttribute('data-eod-row') : null);
+            if (ownerDate !== day.date) return;
+            el.textContent = day.system_total;
+        });
+        // 副提示(没填明细 / 没锁定)
+        document.querySelectorAll('[data-eod-flags]').forEach(function (el) {
+            var band = el.closest('[data-eod-band]');
+            var row = el.closest('[data-eod-row]');
+            var ownerDate = band ? band.getAttribute('data-eod-band')
+                                 : (row ? row.getAttribute('data-eod-row') : null);
+            if (ownerDate !== day.date) return;
+            el.textContent = day.flags_text || '';
+        });
+        updateEodSummary();
+    }
+
+    // 顶部汇总行:范围内 N 天 · 已盘点 M 天 · 对上 X 天 · 有差异 Y 天
+    function updateEodSummary() {
+        var el = document.getElementById('eodSummary');
+        if (!el) return;
+        var rows = document.querySelectorAll('[data-eod-row]');
+        if (!rows.length) { el.textContent = '当前日期范围内没有可盘点的日期。'; return; }
+        var total = rows.length, filled = 0, ok = 0, bad = 0;
+        rows.forEach(function (row) {
+            var st = row.querySelector('[data-eod-status]');
+            var cls = st ? st.className : '';
+            if (cls.indexOf('eod-unfilled') === -1) filled++;
+            if (cls.indexOf('eod-ok') !== -1) ok++;
+            else if (cls.indexOf('eod-unfilled') === -1) bad++;
+        });
+        var parts = ['范围内 <b>' + total + '</b> 天', '已盘点 <b>' + filled + '</b> 天',
+                     '对上 <b>' + ok + '</b> 天'];
+        if (bad > 0) parts.push('有差异 <b>' + bad + '</b> 天');
+        else if (filled > 0) parts.push('全部对上');
+        el.innerHTML = parts.join(' · ');
+    }
+
+    // 取「按钮所在那一处」的输入框。
+    // 同一天在页面上有两个输入框(顶部表格行 + 日期 band),按 document 顺序全局查
+    // 会拿到另一个位置的旧值 —— 必须先在按钮自己的行/带里找。
+    function findEodInput(dateStr, btn) {
+        if (btn) {
+            var scope = btn.closest('[data-eod-row]') || btn.closest('[data-eod-band]');
+            if (scope) {
+                var inp = scope.querySelector('[data-eod-input]');
+                if (inp) return inp;
+            }
+        }
+        return document.querySelector('[data-eod-input="' + dateStr + '"]');
+    }
+
+    function saveEod(btn) {
+        var dateStr = btn.getAttribute('data-eod-save');
+        var input = findEodInput(dateStr, btn);
+        if (!input) return;
+        var raw = (input.value || '').trim();
+        if (raw === '') {
+            alert('请填当日纸面单据总数(没有单据就填 0)');
+            return;
+        }
+        var val = parseInt(raw, 10);
+        if (isNaN(val) || val < 0) {
+            alert('手填单数必须是非负整数');
+            return;
+        }
+        if (typeof showBtnLoading === 'function') showBtnLoading(btn, '保存中');
+        fetch(API, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({date: dateStr, manual_total: val})
+        }).then(function (r) {
+            return r.json().then(function (body) {
+                return {ok: r.ok, body: body};
+            });
+        }).then(function (res) {
+            if (typeof hideBtnLoading === 'function') hideBtnLoading(btn);
+            if (!res.ok || !res.body.success) {
+                alert('保存失败:' + ((res.body && res.body.error) || '未知错误'));
+                return;
+            }
+            renderEodDay(res.body.day);
+        }).catch(function (err) {
+            if (typeof hideBtnLoading === 'function') hideBtnLoading(btn);
+            alert('请求失败:' + err.message);
+        });
+    }
+
+    // 清除某天的手填值 → 恢复「未盘点」
+    function clearEod(btn) {
+        var dateStr = btn.getAttribute('data-eod-clear');
+        if (!confirm('清除 ' + dateStr + ' 的手填单数?\n清除后该天恢复「未盘点」。')) return;
+        if (typeof showBtnLoading === 'function') showBtnLoading(btn, '清除中');
+        fetch(API + '/' + encodeURIComponent(dateStr), {method: 'DELETE'})
+            .then(function (r) {
+                return r.json().then(function (body) { return {ok: r.ok, body: body}; });
+            }).then(function (res) {
+                if (typeof hideBtnLoading === 'function') hideBtnLoading(btn);
+                if (!res.ok || !res.body.success) {
+                    alert('清除失败:' + ((res.body && res.body.error) || '未知错误'));
+                    return;
+                }
+                renderEodDay(res.body.day);
+            }).catch(function (err) {
+                if (typeof hideBtnLoading === 'function') hideBtnLoading(btn);
+                alert('请求失败:' + err.message);
+            });
+    }
+
+    // 事件代理:输入框回车即保存
+    function bindEodStocktake() {
+        document.addEventListener('click', function (e) {
+            var clearBtn = e.target.closest('[data-eod-clear]');
+            if (clearBtn) {
+                e.preventDefault();
+                clearEod(clearBtn);
+                return;
+            }
+            var btn = e.target.closest('[data-eod-save]');
+            if (!btn) return;
+            e.preventDefault();
+            saveEod(btn);
+        });
+        document.addEventListener('keydown', function (e) {
+            if (e.key !== 'Enter') return;
+            var inp = e.target.closest('[data-eod-input]');
+            if (!inp) return;
+            e.preventDefault();
+            // 同上:按钮必须取输入框所在那一处的,否则会点到另一个位置的按钮
+            var scope = inp.closest('[data-eod-row]') || inp.closest('[data-eod-band]');
+            var btn = scope
+                ? scope.querySelector('[data-eod-save]')
+                : document.querySelector('[data-eod-save="' + inp.getAttribute('data-eod-input') + '"]');
+            if (btn) saveEod(btn);
+        });
+        updateEodSummary();
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', bindEodStocktake);
+    } else {
+        bindEodStocktake();
+    }
+})();
 </script>
 
 {# 2026-08-15: 摆放图计数功能(上传/展示/点击计数/撤销) #}

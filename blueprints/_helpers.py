@@ -661,6 +661,65 @@ def find_ypp_mismatches(records, units_cache=None):
     return mismatches
 
 
+# ── 日终盘点:手填单数 vs 系统单数的对账判定 ─────────────────────────
+# 纸质出货单一天一张张开,单号 TD-YYYY-MM-DD-NNN 本身不连续(实测 09-16 最大
+# 序号 017 但当天只有 7 单),光看单号编号判断不出少录了几单。日终时由用户
+# 手填纸面单据总数,和系统里实际录入的单数当场对账。
+#
+# 判定口径(2026-10-26 与用户确认):
+#   1) 比「单数」 —— 少录/多录都直接报出差值
+#   2) 副提示「已录但没填明细」—— 录了单没录货,也算没录完
+#   3) 副提示「已录但没锁定」—— 没走完点数流程
+# 不做「单号序号断档」检测 —— 实测单号本身不连续,噪音太大。
+#
+# 本函数是纯计算,出货/入库/装柜三页可共用。
+
+
+def compute_daily_check_status(system_total, manual_total,
+                               empty_records=0, unlocked=0) -> dict:
+    """算某一天的日终盘点状态。
+
+    Args:
+        system_total:  系统里当天实际录入的单数(int)
+        manual_total:  用户手填的纸面单据总数;None = 还没盘点
+        empty_records: 当天 0 条明细的空壳单数(int)
+        unlocked:      当天未锁定的单数(int)
+
+    Returns:
+        dict {
+            'status': 'unfilled' | 'ok' | 'short' | 'extra',
+            'label':  给用户看的一句话,
+            'gap':    差值(单数,正数表示还差几单;对上是 0),
+            'flags':  ['empty_records', 'unlocked'] —— 副提示,不影响 status,
+        }
+    """
+    system_total = int(system_total or 0)
+    empty_records = int(empty_records or 0)
+    unlocked = int(unlocked or 0)
+    flags = []
+    if empty_records > 0:
+        flags.append('empty_records')
+    if unlocked > 0:
+        flags.append('unlocked')
+
+    if manual_total is None:
+        return {'status': 'unfilled', 'label': '未盘点', 'gap': 0, 'flags': flags}
+
+    manual_total = int(manual_total)
+    if manual_total < 0:
+        manual_total = 0
+
+    if system_total == manual_total:
+        return {'status': 'ok', 'label': '✓ 对上', 'gap': 0, 'flags': flags}
+    if system_total < manual_total:
+        gap = manual_total - system_total
+        return {'status': 'short', 'label': f'⚠️ 还差 {gap} 单没录',
+                'gap': gap, 'flags': flags}
+    gap = system_total - manual_total
+    return {'status': 'extra', 'label': f'⚠️ 比手填多 {gap} 单',
+            'gap': gap, 'flags': flags}
+
+
 def summarize_remarks(records):
     """从一组明细里汇总备注支数、散码支数，以及辅助单位提示中的总支数。
 

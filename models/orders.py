@@ -248,6 +248,48 @@ class ShippingOrder:
         return result
 
     @staticmethod
+    def daily_stock_stats(start_date: str, end_date: str) -> list:
+        """按日期汇总出货单的三项指标(日终盘点用)。
+
+        2026-10-26 新增:出货页「日终盘点」功能。用户手工填当日纸面单据总量,
+        和这里的 total 对账;empty_records / unlocked 是"录了但没录完"的副提示。
+
+        - total         : 当日出货单数(= COUNT(shipping_orders WHERE date = D),
+                          一张纸质出货单对应一行,可直接和手填的纸面单数比)
+        - empty_records : 其中 0 条明细的空壳单数(录了单没录货)
+        - unlocked      : 其中未锁定(is_locked=0)的单数(没走完点数流程)
+
+        返回: [{'date':'YYYY-MM-DD','total':N,'empty_records':N,'unlocked':N}, ...]
+        按 date 升序。区间内没有出货单的日期不会出现在结果里
+        (日期骨架由 count_by_date_range 补齐)。
+        """
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT o.date AS date, "
+            "       COUNT(*) AS total, "
+            "       SUM(CASE WHEN COALESCE(r.n, 0) = 0 THEN 1 ELSE 0 END) AS empty_records, "
+            "       SUM(CASE WHEN o.is_locked = 0 THEN 1 ELSE 0 END) AS unlocked "
+            "FROM shipping_orders o "
+            "LEFT JOIN (SELECT order_pk, COUNT(*) n FROM shipping_records "
+            "           GROUP BY order_pk) r ON r.order_pk = o.id "
+            "WHERE o.date >= ? AND o.date <= ? "
+            "GROUP BY o.date ORDER BY o.date ASC",
+            (start_date, end_date)
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [
+            {
+                'date': row['date'],
+                'total': row['total'] or 0,
+                'empty_records': row['empty_records'] or 0,
+                'unlocked': row['unlocked'] or 0,
+            }
+            for row in rows
+        ]
+
+    @staticmethod
     def get_by_id(order_id: int):
         conn = get_db()
         cursor = conn.cursor()

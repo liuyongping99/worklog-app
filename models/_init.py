@@ -973,6 +973,28 @@ def init_db():
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_voice_phrase ON voice_phrase_mapping(phrase)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_voice_status ON voice_phrase_mapping(status)')
 
+    # 2026-10-26:日终盘点表 —— 用户手工填的「当日出货单总量」,与系统实际录入单数对账。
+    # 纸质出货单一天一张张开,单号 TD-YYYY-MM-DD-NNN 本身不连续(实测 09-16 最大 017
+    # 但只有 7 单),光看单号编号判断不出少录了几单,所以由用户手填纸面单据总数来对账。
+    #   scope   : shipping / inbound / loading(预留,后续入库/装柜页零改表复用)
+    #   date    : 业务日期 YYYY-MM-DD,与 shipping_orders.date 同格式
+    #   manual_total : 手填的当日单据总量(与系统 count_by_date 的结果比)
+    # 列一次写全 —— 全新库上 ALTER 段跑在 CREATE 之前会被 except 吞掉(见本文件上方注释)。
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS daily_order_check (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            scope TEXT NOT NULL DEFAULT 'shipping',
+            date TEXT NOT NULL,
+            manual_total INTEGER NOT NULL DEFAULT 0,
+            remark TEXT NOT NULL DEFAULT '',
+            user_id INTEGER DEFAULT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(scope, date)
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_daily_order_check_scope_date ON daily_order_check(scope, date)')
+
     # 2026-10-14:按重量计价的简化方案 — 在 product_units 表加 2 列,
     # 不再单独建重量类别表。同表两轨道(与 is_usingyardforcounting 并列)互不干扰:
     #   - is_usingyardforcounting=1 → 启用 YPP(按码卖)校验
