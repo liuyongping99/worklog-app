@@ -815,12 +815,17 @@
 <div class="card shipping-page">
     <h2 class="card-title">🚚 新建出货单</h2>
     {# 2026-09-21: 装车单扫描提示 + 同批外包装要求 —— 防止多批次混装 #}
+    {# 2026-10-21: 环保中性杂胶已调整为软性 —— 防止选错商品规格 #}
     <div style="background: linear-gradient(90deg, #fff5e1 0%, #ffeaa7 100%); border: 1px solid #fdcb6e; border-left: 4px solid #e17055; border-radius: 8px; padding: 0.55rem 1rem; margin: 0.6rem 0; display: flex; align-items: center; gap: 0.8rem; font-size: 0.88rem; color: #6c5d00; flex-wrap: wrap; line-height: 1.55;">
         <span style="font-weight: 600; flex: 0 0 auto;">📸 <strong>装车单扫描</strong></span>
         <span style="color:#b2bec3;">|</span>
         <span>有装车单必须同时扫描装车单和同价单</span>
         <span style="color:#b2bec3;">|</span>
         <span>出货商品保证出<strong>同一批外包装</strong>,<strong>不要多批次</strong></span>
+        <span style="flex-basis: 100%; height: 0;"></span>
+        <span style="font-weight: 600; flex: 0 0 auto;">⚠️ <strong>商品规格提示</strong></span>
+        <span style="color:#b2bec3;">|</span>
+        <span><strong>注意</strong>,<strong>环保中性杂胶</strong>在系统中已调整为<strong>软性</strong>,注意选对商品规格</span>
     </div>
     <p class="page-meta">📅 当前日期：<strong>{{ today }}</strong> ｜ 当天出货单数：<strong>{{ total_orders }}</strong> ｜ 当日已锁单：<strong>{{ locked_orders }}</strong></p>
     <form id="createOrderForm" action="/api/v1/shipping-orders" method="post">
