@@ -12,6 +12,27 @@
 .inbound-page .date-group[data-locked="1"] .lock-show { display: inline-block !important; }
 .inbound-page .date-group[data-locked="0"] .lock-hide { display: inline-block !important; }
 .inbound-page .date-group[data-locked="0"] .lock-show { display: none !important; }
+/* 2026-10-24: 订单锁定后,操作列 lock-show 状态标识 ("已核查" / "点数") —— 与出货对齐 */
+.inbound-page .record-table .actions-cell .status-badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.18rem 0.5rem;
+    border-radius: 8px;
+    line-height: 1.2;
+    margin-right: 0.2rem;
+    white-space: nowrap;
+}
+.inbound-page .record-table .actions-cell .verified-badge {
+    background: #55efc4;
+    color: #1e7e34;
+    border: 1px solid #27ae60;
+}
+.inbound-page .record-table .actions-cell .placement-badge {
+    background: #e6f9ec;
+    color: #1e7e34;
+    border: 1px solid #27ae60;
+}
 .inbound-page .group-header { background: linear-gradient(135deg, #f8fff8 0%, #e8f5e9 100%); }
 .inbound-page .group-supplier { color: var(--page-accent); background: var(--page-accent-bg); }
 .inbound-page .record-table { table-layout: fixed; }
@@ -990,6 +1011,10 @@
                         {# 2026-09-30: 与出货对齐 — 加 unit=='张' 让成品纸(张装)也能走 placement 点数 #}
                         {% if record.unit == '桶' or record.unit == '张' or '支' in (record.unit_hint or '') or '支' in (record.piece_hint or '') %}<button type="button" class="placement-add-btn lock-hide{% if record.placement_match %} placement-ok{% endif %}" data-record-id="{{ record.id }}" data-order-id="{{ group.id }}" title="添加点数图(供清点{{ record.unit }}数)" onclick="openPlacementImageModal('{{ record.id }}','{{ group.id }}')">点数</button>{% endif %}
                         <input type="file" class="record-image-input" data-record-id="{{ record.id }}" accept="image/*" multiple style="display:none;">
+                        {# 2026-10-24: 已核查徽章 — 对齐出货 shipping-records.html:1039。
+                           锁定订单时共享 JS 的 addRowWarning 直接早退(不渲染警告行/不挂 ✅ toggle),
+                           已核查状态只能靠这个服务端渲染的只读徽章体现。 #}
+                        {% if record.verified %}<span class="status-badge verified-badge lock-show" title="该行已核查">✓ 已核查</span>{% endif %}
                         {# 2026-09-05: 已点徽章 — 对齐出货 shipping-records.html:923 #}
                         {# 2026-09-30: 与出货对齐 — 加 unit=='张' 让成品纸(张装)行也能显示 ✓ 点数 标记 #}
                         {% if record.unit == '桶' or record.unit == '张' or '支' in (record.unit_hint or '') or '支' in (record.piece_hint or '') %}{% if record.placement_match %}<span class="status-badge placement-badge lock-show" title="该行已添加点数图">✓ 点数</span>{% endif %}{% endif %}
@@ -1808,6 +1833,30 @@ setTimeout(() => {
         });
     });
 
+    // ── 「✓ 已核查」只读徽章 —— 与服务端渲染保持一致 ──────────────────
+    // 服务端模板给已核查行渲染 <span class="status-badge verified-badge lock-show">✓ 已核查</span>。
+    // lock-show 语义:锁定时可见(只读状态标识),解锁时隐藏(改由 JS 的 ✅ toggle 承担交互)。
+    // 本函数补齐"本次会话内才核查"的行 —— 它们在首屏 DOM 里没有这个元素。
+    function syncVerifiedBadge(tr, verified) {
+        if (!tr) return;
+        var opCell = tr.querySelector('td.actions-cell');
+        if (!opCell) return;
+        var existing = opCell.querySelector('.verified-badge');
+        if (!verified) {
+            if (existing) existing.remove();
+            return;
+        }
+        if (existing) return;   // 已有(服务端渲染的)则不重复加
+        var badge = document.createElement('span');
+        badge.className = 'status-badge verified-badge lock-show';
+        badge.title = '该行已核查';
+        badge.textContent = '✓ 已核查';
+        // 插在「✓ 点数」徽章之前,和模板的渲染顺序一致
+        var placementBadge = opCell.querySelector('.placement-badge');
+        if (placementBadge) opCell.insertBefore(badge, placementBadge);
+        else opCell.appendChild(badge);
+    }
+
     // 切换入库订单锁定状态
     function toggleInboundLock(orderId, lock) {
         fetch('/api/v1/inbound-orders/' + orderId, {
@@ -1824,6 +1873,36 @@ setTimeout(() => {
                 var dg = document.querySelector('.date-group[data-order-id="' + orderId + '"]');
                 if (dg) {
                     dg.setAttribute('data-locked', data.is_locked ? '1' : '0');
+                    // 局部刷新:data-locked 改了,addRowWarning 的 isOrderLocked 判断会重新生效
+                    // 锁定的:删掉已渲染的警告行 + JS 的 ✅ 已核查 toggle(改由服务端徽章「✓ 已核查」显示)
+                    // 解锁的:重新扫描所有数据行加回警告
+                    dg.querySelectorAll('.record-table tbody tr').forEach(function(tr) {
+                        if (tr.classList && tr.classList.contains('record-warn-row')) {
+                            tr.remove();
+                            return;
+                        }
+                        var _pnCell = tr.querySelector('.product-name-cell');
+                        var _spCell = tr.querySelector('.spec-cell');
+                        var pn = (_pnCell && _pnCell.textContent || '').trim();
+                        var sp = (_spCell && _spCell.textContent || '').trim();
+                        if (!pn) return;
+                        var verified = (tr.dataset && tr.dataset.verified === '1') ? 1 : 0;
+                        var recordId = tr.getAttribute('data-record-id') || null;
+                        var _vw = {};
+                        try { _vw = JSON.parse(tr.dataset.verifiedWarnings || '{}'); } catch(e) { _vw = {}; }
+                        if (typeof addRowWarning === 'function') {
+                            addRowWarning(tr, {
+                                product_name: pn, specification: sp,
+                                verified: verified, record_id: recordId,
+                                verified_warnings: _vw
+                            });
+                        }
+                        // 服务端渲染的「✓ 已核查」徽章只在页面加载时存在。
+                        // 本次会话内才核查的行 DOM 里没有这个元素,锁定后就看不见"已核查"状态
+                        // (JS 的 ✅ toggle 会被 addRowWarning 在锁定分支清掉)。
+                        // 这里按最新 verified 状态补一次,保证徽章与数据库一致。
+                        syncVerifiedBadge(tr, verified);
+                    });
                 }
             })
             .catch(function(err) {

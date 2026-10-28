@@ -288,6 +288,11 @@ def loading_orders():
                     _pm = True
             item['placement_match'] = _pm
 
+            # 2026-10-25: 装柜对齐出货/入库 — 每条明细的 per-rule 核查状态
+            # (目前只用到 b_white_300g)。模板里 addRowWarning 据此决定每条警告
+            # 单独显示/隐藏 + 渲染 ✓/✗ 按钮;装柜之前没富化,永远是 {}。
+            item['verified_warnings'] = LoadingOrderRecord.get_verified_warnings(item['id'])
+
             # 2026-10-15: 装柜对齐出货 — 富化 is_no_ai_match / label_images / has_label_image,
             # 模板据此显示标签 🖼️ 按钮 + 隐藏普通 🖼️ 按钮 + 渲染标签图二级循环
             item['_record_imgs_cache'] = record_imgs_cache.get(item['id'], [])

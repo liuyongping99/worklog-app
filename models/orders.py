@@ -2730,7 +2730,8 @@ class LoadingOrderRecord:
             cursor.execute('''
                 SELECT o.id as order_pk, o.date, o.customer, o.order_num, o.is_locked, o.order_note, o.doc_number,
                        o.img_cols as img_cols,
-                       r.id as r_id, r.product_name, r.specification, r.quantity, r.unit, r.remark, r.created_at as r_created_at
+                       r.id as r_id, r.product_name, r.specification, r.quantity, r.unit, r.remark, r.created_at as r_created_at,
+                       r.verified as r_verified
                 FROM loading_orders o
                 LEFT JOIN loading_order_records r ON o.id = r.order_pk
                 WHERE o.date >= ? AND o.date <= ?
@@ -2740,7 +2741,8 @@ class LoadingOrderRecord:
             cursor.execute('''
                 SELECT o.id as order_pk, o.date, o.customer, o.order_num, o.is_locked, o.order_note, o.doc_number,
                        o.img_cols as img_cols,
-                       r.id as r_id, r.product_name, r.specification, r.quantity, r.unit, r.remark, r.created_at as r_created_at
+                       r.id as r_id, r.product_name, r.specification, r.quantity, r.unit, r.remark, r.created_at as r_created_at,
+                       r.verified as r_verified
                 FROM loading_orders o
                 LEFT JOIN loading_order_records r ON o.id = r.order_pk
                 ORDER BY o.created_at DESC, r.sort_order, r.id
@@ -2773,7 +2775,10 @@ class LoadingOrderRecord:
                     'quantity': row_dict['quantity'],
                     'unit': row_dict['unit'],
                     'remark': row_dict['remark'],
-                    'created_at': row_dict['r_created_at']
+                    'created_at': row_dict['r_created_at'],
+                    # 2026-10-25: 整行"已核查"标记 —— 出货/入库走 get_groups 的 SELECT *,
+                    # 装柜这里手写列名,之前漏了 verified,导致模板的「✓ 已核查」徽章永远不显示。
+                    'verified': row_dict.get('r_verified') or 0
                 })
         
         # 按创建时间倒序返回
