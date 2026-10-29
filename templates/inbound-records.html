@@ -1201,6 +1201,10 @@
             <h3 id="noteModalTitle">📝 订单备注</h3>
             <p id="noteModalOrderInfo" class="order-info"></p>
             <div style="margin-bottom:0.6rem;">
+                <label style="display:block; font-size:0.85rem; color:#636e72; margin-bottom:0.25rem; font-weight:600;">入库日期</label>
+                <input type="date" id="noteDateInput" style="width:100%; padding:0.5rem; border:1px solid #dfe6e9; border-radius:6px; font-size:0.9rem; box-sizing:border-box;">
+            </div>
+            <div style="margin-bottom:0.6rem;">
                 <label style="display:block; font-size:0.85rem; color:#636e72; margin-bottom:0.25rem; font-weight:600;">供应商</label>
                 <input type="text" id="noteCustomerInput" placeholder="供应商名称" style="width:100%; padding:0.5rem; border:1px solid #dfe6e9; border-radius:6px; font-size:0.9rem; box-sizing:border-box;">
             </div>
@@ -1533,9 +1537,12 @@ var currentNoteOrderPk = null;
 
 function openNoteModal(orderPk, orderDate, orderCustomer, currentNote) {
     currentNoteOrderPk = orderPk;
+    // orderDate 取自 group-date 文本, 去掉可能的前缀只留 YYYY-MM-DD
+    var dateOnly = (orderDate || '').replace(/^📅\s*/, '').trim();
     document.getElementById('noteModal').classList.add('show');
     document.getElementById('noteTextarea').value = currentNote || '';
     document.getElementById('noteCustomerInput').value = orderCustomer || '';
+    document.getElementById('noteDateInput').value = dateOnly || '';
     document.getElementById('noteModalOrderInfo').textContent = '📦 ' + (orderDate || '') + ' ' + (orderCustomer || '');
     document.getElementById('noteModalTitle').textContent = currentNote ? '✏️ 修改订单' : '📝 订单详情';
     setTimeout(function() { document.getElementById('noteCustomerInput').focus(); }, 50);
@@ -1546,6 +1553,7 @@ function closeNoteModal() {
     currentNoteOrderPk = null;
     document.getElementById('noteTextarea').value = '';
     document.getElementById('noteCustomerInput').value = '';
+    document.getElementById('noteDateInput').value = '';
 }
 
 function clearNote() {
@@ -1556,9 +1564,11 @@ function saveNote() {
     if (!currentNoteOrderPk) return;
     var noteText = document.getElementById('noteTextarea').value.trim();
     var customerText = document.getElementById('noteCustomerInput').value.trim();
+    var dateText = document.getElementById('noteDateInput').value.trim();
+    if (!customerText) { alert('供应商不能为空'); return; }
+    if (!dateText) { alert('入库日期不能为空'); return; }
 
-    var payload = {order_note: noteText};
-    if (customerText) payload.supplier = customerText;
+    var payload = {order_note: noteText, supplier: customerText, date: dateText};
 
     fetch('/api/v1/inbound-orders/' + currentNoteOrderPk, {
         method: 'PATCH',
@@ -1573,6 +1583,9 @@ function saveNote() {
             if (data.supplier) {
                 updateCustomerRow(currentNoteOrderPk, data.supplier);
             }
+            if (data.date) {
+                updateDateRow(currentNoteOrderPk, data.date);
+            }
             if (data.order_num) {
                 updateOrderNumRow(currentNoteOrderPk, data.order_num);
             }
@@ -1582,6 +1595,16 @@ function saveNote() {
         }
     })
     .catch(function(err) { alert('请求失败：' + err); });
+}
+
+// 局部更新入库日期（订单头部 .group-date）
+function updateDateRow(orderPk, newDate) {
+    var dateGroup = document.querySelector('.date-group[data-order-id="' + orderPk + '"]');
+    if (!dateGroup) { location.reload(); return; }
+    var dateEl = dateGroup.querySelector('.group-date');
+    if (dateEl) {
+        dateEl.textContent = newDate;
+    }
 }
 
 function updateCustomerRow(orderPk, newSupplier) {

@@ -368,6 +368,48 @@ def api_v1_inbound_orders_update(order_id):
             InboundOrder.unlock(order_id)
             AuditLog.log('unlock_order', 'inbound_order', order_id)
         return jsonify({'success': True, 'is_locked': bool(data['is_locked'])})
+    # 同时改备注 + 供应商 + 日期（弹框一次保存三个字段）—— 原子更新，避免半状态
+    # 顺序很重要：本分支必须排在下面「只改备注+供应商」分支之前
+    if 'order_note' in data and 'supplier' in data and 'date' in data:
+        if order.get('is_locked'):
+            return jsonify({'success': False, 'error': '订单已锁定，无法修改'}), 403
+        new_supplier = str(data['supplier']).strip()
+        new_date = str(data['date']).strip()
+        note = str(data['order_note']).strip()
+        if not new_supplier:
+            return jsonify({'success': False, 'error': '供应商不能为空'}), 400
+        if not new_date:
+            return jsonify({'success': False, 'error': '日期不能为空'}), 400
+        from models import get_db
+        conn = get_db()
+        cursor = conn.cursor()
+        try:
+            # 只有「换组」(日期或供应商变了)才需要重排单号:
+            # 同组内只改备注时若照样取 MAX+1, 本单单号会被顶到组尾(改个备注单号就跳了)
+            if new_date == (order.get('date') or '') and new_supplier == (order.get('supplier') or ''):
+                new_order_num = order.get('order_num')
+            else:
+                cursor.execute(
+                    'SELECT COALESCE(MAX(order_num), 0) + 1 FROM inbound_orders WHERE date = ? AND supplier = ?',
+                    (new_date, new_supplier)
+                )
+                new_order_num = cursor.fetchone()[0]
+            cursor.execute(
+                'UPDATE inbound_orders SET date = ?, supplier = ?, order_num = ?, order_note = ? WHERE id = ?',
+                (new_date, new_supplier, new_order_num, note, order_id)
+            )
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            conn.close()
+            current_app.logger.exception('inbound PATCH 复合字段失败: order_id=%s', order_id)
+            return jsonify({'success': False, 'error': '服务异常，请稍后重试'}), 400
+        conn.close()
+        AuditLog.log('update_supplier_date_and_note', 'inbound_order', order_id,
+                     detail={'supplier': new_supplier, 'date': new_date})
+        return jsonify({'success': True, 'date': new_date, 'supplier': new_supplier,
+                        'order_num': new_order_num, 'order_note': note})
+
     # 同时改备注 + 供应商（弹框一次保存两个字段）—— 必须先判断
     if 'order_note' in data and 'supplier' in data:
         if order.get('is_locked'):
