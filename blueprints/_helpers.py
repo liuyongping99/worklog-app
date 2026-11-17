@@ -6,6 +6,8 @@ import os
 import re
 import uuid
 import base64
+import shutil
+import logging
 import sqlite3
 from datetime import datetime
 from flask import request
@@ -14,6 +16,11 @@ from rapidfuzz import fuzz
 
 # 仓库根目录
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# 备份根目录：上传图片同步备份到此（best-effort，失败不阻塞上传）
+EBAK_UPLOAD_ROOT = r'E:\BAK\upload'
+
+_logger = logging.getLogger(__name__)
 
 
 # =====================================================================
@@ -34,6 +41,30 @@ def get_upload_dir(month_str=None):
     upload_dir = os.path.join(BASE_DIR, 'upload', month_str)
     os.makedirs(upload_dir, exist_ok=True)
     return upload_dir, month_str
+
+
+def backup_to_ebak(filepath):
+    """把上传落盘的图片同步备份一份到 E:\\BAK\\upload\\<YYYY-MM>\\<同名>。
+
+    设计要点：
+    - best-effort：E 盘不存在/不可写/空间不足时，仅记 warning 日志，不抛异常，
+      上传业务不受影响（备份是附加能力，不能让备份盘故障阻断业务）。
+    - 目录结构与原 upload 目录同构（YYYY-MM 带横杠，与 get_upload_dir 一致），
+      便于原/备一一核对与恢复。month_str 从 filepath 父目录名推算，不重新取当月，
+      避免跨月边界（月末 23:59 上传、月初 00:00 备份时目录错位）。
+    - 备份的是上传时的原始文件（rotation 之前）；衍生版本（旋转后）不单独备份。
+    - 同名已存在则跳过（uuid 碰撞极罕见；重复调用安全，幂等）。
+    """
+    try:
+        parent_name = os.path.basename(os.path.dirname(filepath))
+        bak_dir = os.path.join(EBAK_UPLOAD_ROOT, parent_name)
+        os.makedirs(bak_dir, exist_ok=True)
+        bak_path = os.path.join(bak_dir, os.path.basename(filepath))
+        if os.path.exists(bak_path):
+            return  # 幂等：已备份过
+        shutil.copy2(filepath, bak_path)
+    except Exception as e:
+        _logger.warning('backup_to_ebak 失败(忽略,不阻塞上传): %s | err=%s', filepath, e)
 
 
 def save_base64_image(data_url, ext='png'):

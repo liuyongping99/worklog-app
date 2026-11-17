@@ -62,8 +62,9 @@ function setRowMatchBadge(recordId, status, reason, source) {
 function _ensureMatchColumn(table, targetRow, badgeHtml) {
     if (!table || !targetRow) return;
     var theadRow = table.querySelector('thead tr');
-    // 表头宽容:smart-add modal 可能没有 spec-cell class,fallback th:nth-child(4)
-    var specTh = theadRow && theadRow.querySelector('th.spec-cell, th:nth-child(4)');
+    // 表头宽容:优先按 class 找规格 th(入库/出货页规格都是第 5 列),找不到再 fallback th:nth-child(4)(装柜页规格仍是第 4 列)
+    // 注意:不能用逗号选择器 —— querySelector 按 DOM 顺序返回首个匹配,会把第 4 个 th 当成规格。
+    var specTh = theadRow && (theadRow.querySelector('th.spec-cell') || theadRow.querySelector('th:nth-child(4)'));
     var specTd = targetRow.querySelector('td.spec-cell');
     var insertAfter = function (parent, ref, newEl) {
         if (ref && ref.nextElementSibling) parent.insertBefore(newEl, ref.nextElementSibling);

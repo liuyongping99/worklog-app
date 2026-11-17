@@ -121,7 +121,23 @@
 .loading-page { margin: 0 -0.5rem; }
 
 /* 2026-08-15: 装柜页 摆放图(点数)功能 — 与出货页对齐 */
-.loading-page .record-table .actions-cell { white-space: nowrap; }
+/* 2026-10-30: 操作列按钮间距压缩 ——「点数」按钮右侧被裁掉一截(用户反馈 2026-10-30)
+   成因:table-layout:fixed 下操作列固定 230px,但按钮之间是 HTML 空白(每个 ~4px),
+   再叠上 inline margin-right(0.3/0.4rem),一行按钮合计超出 ~12px,
+   又被 .date-group{overflow:hidden} 从右边裁掉 →「点数」按钮只剩一半。
+   修法:
+     1) font-size:0 —— 按钮之间的空白折叠成 0 宽(每个子元素都自带 font-size,不受影响)
+     2) 间距统一交给 .actions-cell > * 的 margin-right:0.1rem,不再 inline 各写各的
+     3) white-space:normal ——「✓点数」「✓已核查」徽章放不下时换行,而不是被裁掉 */
+.loading-page .record-table .actions-cell {
+    white-space: normal;
+    font-size: 0;
+}
+.loading-page .record-table .actions-cell > * {
+    margin-right: 0.1rem;
+    white-space: nowrap;
+}
+.loading-page .record-table .actions-cell > *:last-child { margin-right: 0; }
 .loading-page .record-table .edit-record-btn,
 .loading-page .record-table .del-record-btn,
 .loading-page .record-table .record-image-btn,
@@ -183,7 +199,8 @@
     border: 1px solid #27ae60;
 }
 .loading-page .placement-add-btn {
-    margin: 0 0 0 0.25rem; padding: 0.18rem 0.5rem; font-size: 0.72rem; vertical-align: middle;
+    /* 2026-10-30: 间距改由 .actions-cell > * 的 margin-right 统一控制,这里不再单独加左边距 */
+    margin: 0; padding: 0.18rem 0.5rem; font-size: 0.72rem; vertical-align: middle;
     background: #fdcb6e; color: #2d3436; border: 2px solid #b9770e; border-radius: 5px; cursor: pointer;
     font-weight: 700;
     box-shadow: 0 0 0 1px rgba(185, 119, 14, 0.25);
@@ -552,9 +569,9 @@
                         <td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;" data-page-node-id="OXOGFC7aROG2PTY3qQ54v8">{{ record.unit_hint or '—' }}{% if record.piece_hint %}<br data-page-node-id="HKBu3X2I0CURplVdDNPFiy"><span style="color:#0984e3;" data-page-node-id="GItSu7Ju5vnjtnzFdyNrYz">{{ record.piece_hint }}</span>{% endif %}</td>
                         <td class="actions-cell" data-page-node-id="JJZN1eR1Bu1yIw2kcvLEK5">
                             <button type="button" class="move-up-btn lock-hide" data-id="{{ record.id }}" onclick="moveRecord({{ record.id }}, 'up', this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.75rem;padding:0.1rem 0.35rem;border-radius:4px;" title="上移" data-page-node-id="tsfwfXMJ8jt2g35rhV1UY3">▲</button>
-                            <button type="button" class="move-down-btn lock-hide" data-id="{{ record.id }}" onclick="moveRecord({{ record.id }}, 'down', this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.75rem;padding:0.1rem 0.35rem;border-radius:4px;margin-right:0.3rem;" title="下移" data-page-node-id="tmlfJVyomVjHelJeOAk2fQ">▼</button>
-                            <button type="button" class="edit-record-btn lock-hide" data-id="{{ record.id }}" onclick="editRecord({{ record.id }}, this)" style="background:none;border:none;color:#00b894;cursor:pointer;font-size:0.85rem;margin-right:0.4rem;" title="修改" data-page-node-id="fQHVgBHjLcxAZ5uCB6XQiQ">✏️</button>
-                            <button type="button" class="del-record-btn lock-hide" data-id="{{ record.id }}" onclick="deleteRecord({{ record.id }}, this)" style="background:none;border:none;color:#ff7675;cursor:pointer;font-size:0.85rem;" title="删除" data-page-node-id="oaH34LVtHTfsHVAdWA3lRR">🗑️</button>
+                            <button type="button" class="move-down-btn lock-hide" data-id="{{ record.id }}" onclick="moveRecord({{ record.id }}, 'down', this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.75rem;padding:0.1rem 0.35rem;border-radius:4px;" title="下移" data-page-node-id="tmlfJVyomVjHelJeOAk2fQ">▼</button>
+                            <button type="button" class="edit-record-btn lock-hide" data-id="{{ record.id }}" onclick="editRecord({{ record.id }}, this)" style="background:none;border:none;color:#00b894;cursor:pointer;" title="修改" data-page-node-id="fQHVgBHjLcxAZ5uCB6XQiQ">✏️</button>
+                            <button type="button" class="del-record-btn lock-hide" data-id="{{ record.id }}" onclick="deleteRecord({{ record.id }}, this)" style="background:none;border:none;color:#ff7675;cursor:pointer;" title="删除" data-page-node-id="oaH34LVtHTfsHVAdWA3lRR">🗑️</button>
                             {# 2026-10-15: 装柜对齐出货 — 拷贝纸/日本纸/快巴纸/蜡光纸(0105-0108)行唯一图片入口,
                                 落 source='copy_paper_label' 不做 OCR。普通 🖼️ 走 /images 端点对这类行已被 loading.py:924 硬拦截 400 #}
                             {% if record.is_no_ai_match %}
@@ -1233,11 +1250,11 @@ document.addEventListener('DOMContentLoaded', function() {
                     '<td><span class="unit-badge">' + escHtml(r.unit) + '</span></td>' +
                     '<td class="' + remarkClass + '">' + escHtml(r.remark || '-') + '</td>' +
                     '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">' + escHtml(unitHint) + (pieceHint ? '<br><span style="color:#0984e3;">' + escHtml(pieceHint) + '</span>' : '') + '</td>' +
-                    '<td style="white-space:nowrap;">' +
+                    '<td class="actions-cell">' +
                         '<button type="button" class="move-up-btn lock-hide" data-id="' + r.id + '" onclick="moveRecord(' + r.id + ',\'up\',this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;" title="上移">▲</button>' +
-                        '<button type="button" class="move-down-btn lock-hide" data-id="' + r.id + '" onclick="moveRecord(' + r.id + ',\'down\',this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;margin-right:0.3rem;" title="下移">▼</button>' +
-                        '<button type="button" class="edit-record-btn lock-hide" data-id="' + r.id + '" onclick="editRecord(' + r.id + ', this)" style="background:none;border:none;color:#00b894;cursor:pointer;font-size:0.85rem;margin-right:0.4rem;" title="修改">✏️</button>' +
-                        '<button type="button" class="del-record-btn lock-hide" data-id="' + r.id + '" onclick="deleteRecord(' + r.id + ', this)" style="background:none;border:none;color:#ff7675;cursor:pointer;font-size:0.85rem;" title="删除">🗑️</button>' +
+                        '<button type="button" class="move-down-btn lock-hide" data-id="' + r.id + '" onclick="moveRecord(' + r.id + ',\'down\',this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;" title="下移">▼</button>' +
+                        '<button type="button" class="edit-record-btn lock-hide" data-id="' + r.id + '" onclick="editRecord(' + r.id + ', this)" style="background:none;border:none;color:#00b894;cursor:pointer;" title="修改">✏️</button>' +
+                        '<button type="button" class="del-record-btn lock-hide" data-id="' + r.id + '" onclick="deleteRecord(' + r.id + ', this)" style="background:none;border:none;color:#ff7675;cursor:pointer;" title="删除">🗑️</button>' +
                         '<button type="button" class="btn btn-sm record-image-btn lock-hide" data-record-id="' + r.id + '">🖼️</button>' +
                         '<input type="file" class="record-image-input" data-record-id="' + r.id + '" accept="image/*" multiple style="display:none;">' +
                     '</td>';
@@ -1291,11 +1308,11 @@ document.addEventListener('DOMContentLoaded', function() {
             '<td>'+escHtml(orig.unit)+'</td>' +
             '<td class="remark-cell '+(orig.remark ? 'has-content' : '')+'">'+escHtml(orig.remark)+'</td>' +
             '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">'+escHtml(unitHint)+(pieceHint ? '<br><span style="color:#0984e3;">'+escHtml(pieceHint)+'</span>' : '')+'</td>' +
-            '<td class="lock-hide" style="white-space:nowrap;">' +
+            '<td class="lock-hide actions-cell">' +
                 "<button type='button' class='move-up-btn lock-hide' data-id='"+tr.dataset.editId+"' onclick='moveRecord("+tr.dataset.editId+",\"up\",this)' style='background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;' title='上移'>▲</button>" +
-                "<button type='button' class='move-down-btn lock-hide' data-id='"+tr.dataset.editId+"' onclick='moveRecord("+tr.dataset.editId+",\"down\",this)' style='background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;margin-right:0.3rem;' title='下移'>▼</button>" +
-                "<button type='button' class='edit-record-btn lock-hide' data-id='"+tr.dataset.editId+"' onclick='editRecord("+tr.dataset.editId+", this)' style='background:none;border:none;color:#00b894;cursor:pointer;font-size:0.85rem;margin-right:0.4rem;' title='修改'>✏️</button>" +
-                "<button type='button' class='del-record-btn lock-hide' data-id='"+tr.dataset.editId+"' onclick='deleteRecord("+tr.dataset.editId+", this)' style='background:none;border:none;color:#ff7675;cursor:pointer;font-size:0.85rem;' title='删除'>🗑️</button>" +
+                "<button type='button' class='move-down-btn lock-hide' data-id='"+tr.dataset.editId+"' onclick='moveRecord("+tr.dataset.editId+",\"down\",this)' style='background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;' title='下移'>▼</button>" +
+                "<button type='button' class='edit-record-btn lock-hide' data-id='"+tr.dataset.editId+"' onclick='editRecord("+tr.dataset.editId+", this)' style='background:none;border:none;color:#00b894;cursor:pointer;' title='修改'>✏️</button>" +
+                "<button type='button' class='del-record-btn lock-hide' data-id='"+tr.dataset.editId+"' onclick='deleteRecord("+tr.dataset.editId+", this)' style='background:none;border:none;color:#ff7675;cursor:pointer;' title='删除'>🗑️</button>" +
                 "<button type='button' class='btn btn-sm record-image-btn lock-hide' data-record-id='"+tr.dataset.editId+"' title='上传图片到此商品' style='background:#74b9ff;color:#fff;'>🖼️</button>" +
                 "<input type='file' class='record-image-input' data-record-id='"+tr.dataset.editId+"' accept='image/*' multiple style='display:none;'>" +
             '</td>';
@@ -1467,11 +1484,11 @@ document.addEventListener('DOMContentLoaded', function() {
             '<td class="unit-cell"><span class="unit-badge">' + escHtml(rec.unit) + '</span></td>' +
             '<td class="remark-cell' + (rec.remark ? ' has-content' : '') + '">' + escHtml(rec.remark || '-') + '</td>' +
             '<td class="unit-hint-cell" style="font-size:0.82rem;color:#e17055;">' + escHtml(unitHint) + (pieceHint ? '<br><span style="color:#0984e3;">' + escHtml(pieceHint) + '</span>' : '') + '</td>' +
-            '<td style="white-space:nowrap;">' +
+            '<td class="actions-cell">' +
                 '<button type="button" class="move-up-btn lock-hide" data-id="' + rec.id + '" onclick="moveRecord(' + rec.id + ",'" + 'up' + "'" + ',this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;" title="上移">▲</button>' +
-                '<button type="button" class="move-down-btn lock-hide" data-id="' + rec.id + '" onclick="moveRecord(' + rec.id + ",'" + 'down' + "'" + ',this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;margin-right:0.3rem;" title="下移">▼</button>' +
-                '<button type="button" class="edit-record-btn lock-hide" data-id="' + rec.id + '" onclick="editRecord(' + rec.id + ', this)" style="background:none;border:none;color:#00b894;cursor:pointer;font-size:0.85rem;margin-right:0.4rem;" title="修改">✏️</button>' +
-                '<button type="button" class="del-record-btn lock-hide" data-id="' + rec.id + '" onclick="deleteRecord(' + rec.id + ', this)" style="background:none;border:none;color:#ff7675;cursor:pointer;font-size:0.85rem;" title="删除">🗑️</button>' +
+                '<button type="button" class="move-down-btn lock-hide" data-id="' + rec.id + '" onclick="moveRecord(' + rec.id + ",'" + 'down' + "'" + ',this)" style="background:#f0f0f0;color:#555;border:1px solid #ccc;cursor:pointer;font-size:0.85rem;padding:0.15rem 0.4rem;border-radius:4px;" title="下移">▼</button>' +
+                '<button type="button" class="edit-record-btn lock-hide" data-id="' + rec.id + '" onclick="editRecord(' + rec.id + ', this)" style="background:none;border:none;color:#00b894;cursor:pointer;" title="修改">✏️</button>' +
+                '<button type="button" class="del-record-btn lock-hide" data-id="' + rec.id + '" onclick="deleteRecord(' + rec.id + ', this)" style="background:none;border:none;color:#ff7675;cursor:pointer;" title="删除">🗑️</button>' +
             '</td>';
         if (flags.qtyInvalid) tr.classList.add('row-out-of-stock');
         else if (flags.combined === 'warn') tr.classList.add('row-warn');

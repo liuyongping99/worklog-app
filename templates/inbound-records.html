@@ -37,6 +37,21 @@
 .inbound-page .group-supplier { color: var(--page-accent); background: var(--page-accent-bg); }
 .inbound-page .record-table { table-layout: fixed; }
 .inbound-page .record-table tr:hover td { background: var(--page-accent-light-bg); }
+/* 2026-11-14:商品编号独立成列(在「商品名称」之前),不再挂在规格 cell 的 ::after 上。
+   编号与规格分属两个 td,.spec-cell 的 textContent 依然只有规格本身,
+   全站按 class 读规格的校验/图片叠加/行内编辑都不受影响。*/
+.inbound-page .record-table .product-code-cell { font-size: 0.82rem; white-space: nowrap; }
+.inbound-page .record-table .product-code-badge {
+    display: inline-block;
+    padding: 0 0.35rem;
+    background: #eef1ff;
+    color: #5c6bc0;
+    border: 1px solid #d5dbff;
+    border-radius: 4px;
+    font-size: 0.72rem;
+    line-height: 1.5;
+    white-space: nowrap;
+}
 /* 订单备注弹框 */
 .note-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1020; justify-content: center; align-items: center; }
 .note-modal.show { display: flex; }
@@ -812,9 +827,12 @@
             var kw = this.value.trim().toLowerCase();
             document.querySelectorAll('.inbound-page .date-group').forEach(function(g) {
                 var supplier = (g.querySelector('.group-supplier') || {}).textContent || '';
-                var productNames = Array.from(g.querySelectorAll('.record-table td:nth-child(1)')).map(function(td) { return td.textContent; }).join(' ');
-                var specs = Array.from(g.querySelectorAll('.record-table td:nth-child(2)')).map(function(td) { return td.textContent; }).join(' ');
-                var match = !kw || supplier.toLowerCase().includes(kw) || productNames.toLowerCase().includes(kw) || specs.toLowerCase().includes(kw);
+                // 2026-11-14:改按 class 取(原 nth-child(1)/(2) 实际读的是序号/重点列),
+                //   并把新增的商品编号列一并纳入搜索。
+                var productNames = Array.from(g.querySelectorAll('.record-table td.product-name-cell')).map(function(td) { return td.textContent; }).join(' ');
+                var specs = Array.from(g.querySelectorAll('.record-table td.spec-cell')).map(function(td) { return td.textContent; }).join(' ');
+                var codes = Array.from(g.querySelectorAll('.record-table td.product-code-cell')).map(function(td) { return td.textContent; }).join(' ');
+                var match = !kw || supplier.toLowerCase().includes(kw) || productNames.toLowerCase().includes(kw) || specs.toLowerCase().includes(kw) || codes.toLowerCase().includes(kw);
                 g.style.display = match ? '' : 'none';
             });
         });
@@ -975,12 +993,13 @@
                 <tr>
                     <th style="width:35px;">序号</th>
                     <th class="eco-col" style="width:35px;">重点</th>
-                    <th style="width:22%;">商品名称</th>
-                    <th style="width:18%;">规格</th>
+                    <th class="product-code-col" style="width:8%;">商品编号</th>
+                    <th style="width:19%;">商品名称</th>
+                    <th class="spec-cell" style="width:16%;">规格</th>
                     <th style="width:12%;">数量</th>
                     <th style="width:8%;">单位</th>
-                    <th style="width:15%;">备注</th>
-                    <th style="width:12%;">辅助单位提示</th>
+                    <th style="width:13%;">备注</th>
+                    <th style="width:11%;">辅助单位提示</th>
                     <th style="width:240px;">操作</th>
                 </tr>
             </thead>
@@ -995,6 +1014,8 @@
                     data-verified-warnings="{{ record.verified_warnings or '{}' }}">
                     <td style="text-align:center; color:#868e96; font-size:0.85rem;">{% if record.qty_invalid %}<span class="stock-icon" title="数量异常">❌</span>{% elif record.mismatch == 'warn' or record.piece_mismatch == 'warn' %}❌ {% elif record.mismatch == 'info' or record.piece_mismatch == 'info' %}💡 {% endif %}{{ loop.index }}</td>
                     <td class="eco-col">{% if '环保' in record.product_name %}<span class="eco-icon" title="环保产品">🌿</span>{% endif %}{% if '杂胶' in record.product_name and '加面' in (record.specification or '') %}<svg class="jia-mian-icon" viewBox="0 0 16 16" width="14" height="14" title="加面工艺"><defs><pattern id="mesh-{{ record.id }}" width="2" height="2" patternUnits="userSpaceOnUse"><path d="M 2 0 L 0 0 0 2" fill="none" stroke="currentColor" stroke-width="0.5"/></pattern></defs><rect width="16" height="16" fill="url(#mesh-{{ record.id }})"/><line x1="0" y1="8" x2="16" y2="8" stroke="currentColor" stroke-width="1"/></svg>{% endif %}</td>
+                    {# 2026-11-14:商品编号独立成列,置于「商品名称」之前;未匹配到编号显示 — #}
+                    <td class="product-code-cell">{% if record.product_code %}<span class="product-code-badge">{{ record.product_code }}</span>{% else %}—{% endif %}</td>
                     <td class="product-name-cell" data-record-id-cell="{{ record.id }}" title="{{ record.product_name }}">{{ record.product_name }}</td>
                     <td class="spec-cell">{{ record.specification }}</td>
                     <td class="qty-cell"><span class="qty-badge">{{ record.quantity }}</span></td>
@@ -1776,14 +1797,16 @@ setTimeout(() => {
                         var newMismatch = checkInboundMismatch(r.remark || '', r.quantity, r.product_name, r.specification || '');
                         // tds[0] = 索引列: 保留行号, 只更新 mismatchIcon
                         tds[0].textContent = mismatchIcon(newMismatch) + (tds[0].lastChild ? tds[0].lastChild.textContent : '');
-                        tds[2].textContent = r.product_name;
-                        tds[3].textContent = r.specification;
-                        tds[4].innerHTML = '<span class="qty-badge">' + escHtml(r.quantity) + '</span>';
-                        tds[5].innerHTML = '<span class="unit-badge">' + escHtml(r.unit) + '</span>';
-                        tds[6].textContent = r.remark || '-';
-                        tds[6].className = 'remark-cell' + (r.remark ? ' has-content' : '');
+                        // 2026-11-14:列序 [0]序号 [1]重点 [2]商品编号 [3]商品名称 [4]规格 [5]数量 [6]单位 [7]备注 [8]辅助提示 [9]操作
+                        tds[2].innerHTML = productCodeInnerHtml(r.product_code);
+                        tds[3].textContent = r.product_name;
+                        tds[4].textContent = r.specification;
+                        tds[5].innerHTML = '<span class="qty-badge">' + escHtml(r.quantity) + '</span>';
+                        tds[6].innerHTML = '<span class="unit-badge">' + escHtml(r.unit) + '</span>';
+                        tds[7].textContent = r.remark || '-';
+                        tds[7].className = 'remark-cell' + (r.remark ? ' has-content' : '');
                         var newPieceHint = getPieceHint(r.product_name, r.specification || '');
-                        tds[7].innerHTML = (getInboundUnitHint(r.product_name, r.specification || '', r.quantity, r.unit, r.remark) || '—') + (newPieceHint ? '<br><span style="color:#0984e3;">' + escHtml(newPieceHint) + '</span>' : '');
+                        tds[8].innerHTML = (getInboundUnitHint(r.product_name, r.specification || '', r.quantity, r.unit, r.remark) || '—') + (newPieceHint ? '<br><span style="color:#0984e3;">' + escHtml(newPieceHint) + '</span>' : '');
                         var newPieceMismatch = checkPieceMismatch(r.remark || '', r.quantity, r.product_name, r.specification || '');
                         if (newMismatch === 'warn' || newPieceMismatch === 'warn') { applyInboundMismatch(tr, 'warn'); }
                         else if (newMismatch === 'info' || newPieceMismatch === 'info') { applyInboundMismatch(tr, 'info'); }
@@ -1825,20 +1848,20 @@ setTimeout(() => {
             }
 
             // 进入编辑状态：把 td 内容替换为 input
-            // 2026-08-15: tds[0]=索引,tds[1]=重点,跳过这两列;可编辑列从 tds[2] 起
+            // 2026-11-14: tds[0]=索引, tds[1]=重点, tds[2]=商品编号(只读,不可编辑);可编辑列从 tds[3] 起
             var vals = [
-                tds[2].textContent.trim(),       // product_name
-                tds[3].textContent.trim(),       // specification
-                tds[4].textContent.trim(),       // quantity
-                tds[5].textContent.trim(),       // unit
-                tds[6].textContent.trim() === '-' ? '' : tds[6].textContent.trim()  // remark
+                tds[3].textContent.trim(),       // product_name
+                tds[4].textContent.trim(),       // specification
+                tds[5].textContent.trim(),       // quantity
+                tds[6].textContent.trim(),       // unit
+                tds[7].textContent.trim() === '-' ? '' : tds[7].textContent.trim()  // remark
             ];
             // 商品名称
-            tds[2].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:80px;" value="' + vals[0].replace(/"/g, '&quot;') + '">';
+            tds[3].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:80px;" value="' + vals[0].replace(/"/g, '&quot;') + '">';
             // 规格
-            tds[3].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + vals[1].replace(/"/g, '&quot;') + '">';
+            tds[4].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + vals[1].replace(/"/g, '&quot;') + '">';
             // 数量
-            tds[4].innerHTML = '<input type="number" name="qty" class="form-control form-control-sm edit-input" style="width:100px;" value="' + vals[2] + '">';
+            tds[5].innerHTML = '<input type="number" name="qty" class="form-control form-control-sm edit-input" style="width:100px;" value="' + vals[2] + '">';
             // 单位（下拉框）
             var unitOpts = ['支','kg','y','桶','张','件','箱','卷','块','令','斤'];
             var unitHtml = '<select class="form-control form-control-sm edit-input" style="width:70px;">';
@@ -1846,9 +1869,9 @@ setTimeout(() => {
                 unitHtml += '<option value="' + u + '"' + (u === vals[3] ? ' selected' : '') + '>' + u + '</option>';
             });
             unitHtml += '</select>';
-            tds[5].innerHTML = unitHtml;
+            tds[6].innerHTML = unitHtml;
             // 备注
-            tds[6].innerHTML = '<input type="text" name="remark" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + vals[4].replace(/"/g, '&quot;') + '" oninput="autoFillQtyFromRemark(this)">';
+            tds[7].innerHTML = '<input type="text" name="remark" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + vals[4].replace(/"/g, '&quot;') + '" oninput="autoFillQtyFromRemark(this)">';
             // 按钮变为保存
             btn.textContent = '💾';
             btn.classList.remove('btn-primary');
@@ -2042,6 +2065,14 @@ setTimeout(() => {
     });
 
 
+    // ── 商品编号列(2026-11-14):服务端渲染 / JS 建行 / 行内编辑保存三处共用同一段 HTML ──
+    function productCodeInnerHtml(code) {
+        return code ? '<span class="product-code-badge">' + escHtml(code) + '</span>' : '—';
+    }
+    function productCodeCellHtml(code) {
+        return '<td class="product-code-cell">' + productCodeInnerHtml(code) + '</td>';
+    }
+
     // ── 构建入库明细行 ──
     function buildInboundRecordRow(rec, orderPk, tbody) {
         var tr = document.createElement('tr');
@@ -2084,6 +2115,7 @@ setTimeout(() => {
         tr.innerHTML =
             '<td style="text-align:center; color:#868e96; font-size:0.85rem;"' + (flagTitle ? ' title="' + escAttr(flagTitle) + '"' : '') + '>' + prefixHtml + (existingRows + 1) + '</td>' +
             ecoTd +
+            productCodeCellHtml(rec.product_code) +
             '<td class="product-name product-name-cell" style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapedName + '">' + escHtml(rec.product_name) + '</td>' +
             '<td class="spec spec-cell">' + escHtml(rec.specification || '') + '</td>' +
             '<td class="qty-cell"><span class="qty-badge">' + escHtml(rec.quantity) + '</span></td>' +
@@ -2163,17 +2195,18 @@ setTimeout(() => {
                     if (result.success) {
                         var r = result.record;
                         var newMismatch = checkInboundMismatch(r.remark || '', r.quantity, r.product_name, r.specification || '');
-                        // 2026-08-15: tds[0]=索引列,保留行号文本; 可编辑列从 tds[2] 起
+                        // 2026-11-14: tds[0]=索引列;可编辑列从 tds[3] 起(tds[2] 是只读的商品编号)
                         tds[0].textContent = mismatchIcon(newMismatch) + (tds[0].lastChild ? tds[0].lastChild.textContent : '');
-                        tds[2].textContent = r.product_name;
-                        tds[2].title = r.product_name;
-                        tds[3].textContent = r.specification || '';
-                        tds[4].innerHTML = '<span class="qty-badge">' + escHtml(r.quantity) + '</span>';
-                        tds[5].innerHTML = '<span class="unit-badge">' + escHtml(r.unit) + '</span>';
-                        tds[6].textContent = r.remark || '-';
-                        tds[6].className = 'remark-cell' + (r.remark ? ' has-content' : '');
+                        tds[2].innerHTML = productCodeInnerHtml(r.product_code);
+                        tds[3].textContent = r.product_name;
+                        tds[3].title = r.product_name;
+                        tds[4].textContent = r.specification || '';
+                        tds[5].innerHTML = '<span class="qty-badge">' + escHtml(r.quantity) + '</span>';
+                        tds[6].innerHTML = '<span class="unit-badge">' + escHtml(r.unit) + '</span>';
+                        tds[7].textContent = r.remark || '-';
+                        tds[7].className = 'remark-cell' + (r.remark ? ' has-content' : '');
                         var newPieceHint = getPieceHint(r.product_name, r.specification || '');
-                        tds[7].innerHTML = (getInboundUnitHint(r.product_name, r.specification || '', r.quantity, r.unit, r.remark) || '—') + (newPieceHint ? '<br><span style="color:#0984e3;">' + escHtml(newPieceHint) + '</span>' : '');
+                        tds[8].innerHTML = (getInboundUnitHint(r.product_name, r.specification || '', r.quantity, r.unit, r.remark) || '—') + (newPieceHint ? '<br><span style="color:#0984e3;">' + escHtml(newPieceHint) + '</span>' : '');
                         var newPieceMismatch = checkPieceMismatch(r.remark || '', r.quantity, r.product_name, r.specification || '');
                         if (newMismatch === 'warn' || newPieceMismatch === 'warn') { applyInboundMismatch(tr, 'warn'); }
                         else if (newMismatch === 'info' || newPieceMismatch === 'info') { applyInboundMismatch(tr, 'info'); }
@@ -2207,23 +2240,23 @@ setTimeout(() => {
                         }
                 });
             } else {
-                // 进入编辑模式
+                // 进入编辑模式 (2026-11-14: tds[2] 商品编号只读,可编辑列从 tds[3] 起)
                 var vals = [
-                    tds[2].textContent.trim(),       // product_name (2026-08-15: 跳过索引+重点列)
-                    tds[3].textContent.trim(),
+                    tds[3].textContent.trim(),       // product_name
                     tds[4].textContent.trim(),
                     tds[5].textContent.trim(),
-                    tds[6].textContent.trim() === '-' ? '' : tds[6].textContent.trim()
+                    tds[6].textContent.trim(),
+                    tds[7].textContent.trim() === '-' ? '' : tds[7].textContent.trim()
                 ];
-                tds[2].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:80px;" value="' + escAttr(vals[0]) + '">';
-                tds[3].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + escAttr(vals[1]) + '">';
-                tds[4].innerHTML = '<input type="number" name="qty" class="form-control form-control-sm edit-input" style="width:100px;" value="' + escAttr(vals[2]) + '">';
+                tds[3].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:80px;" value="' + escAttr(vals[0]) + '">';
+                tds[4].innerHTML = '<input type="text" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + escAttr(vals[1]) + '">';
+                tds[5].innerHTML = '<input type="number" name="qty" class="form-control form-control-sm edit-input" style="width:100px;" value="' + escAttr(vals[2]) + '">';
                 var unitOpts = ['支','kg','y','桶','张','件','箱','卷','块','令','斤'];
                 var unitHtml = '<select class="form-control form-control-sm edit-input" style="width:70px;">';
                 unitOpts.forEach(function(u) { unitHtml += '<option value="' + u + '"' + (u === vals[3] ? ' selected' : '') + '>' + u + '</option>'; });
                 unitHtml += '</select>';
-                tds[5].innerHTML = unitHtml;
-                tds[6].innerHTML = '<input type="text" name="remark" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + escAttr(vals[4]) + '" oninput="autoFillQtyFromRemark(this)">';
+                tds[6].innerHTML = unitHtml;
+                tds[7].innerHTML = '<input type="text" name="remark" class="form-control form-control-sm edit-input" style="min-width:60px;" value="' + escAttr(vals[4]) + '" oninput="autoFillQtyFromRemark(this)">';
                 btn.textContent = '💾';
                 btn.classList.remove('btn-primary');
                 btn.classList.add('btn-success');

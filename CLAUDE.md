@@ -2,7 +2,11 @@
 
 此文件为 Claude Code (claude.ai/code) 在本仓库中工作时提供指导。
 
-> **数据快照 = 2026-10-28**。本文件所有行数 / 文件数 / 数据行数均为该日实测值。
+> **数据快照 = 2026-11-06**。本文件所有行数 / 文件数 / 数据行数均为该日实测值。
+>
+> **局部更新 = 2026-11-02**：车辆维护记录改字段 + 挂图片一节（§26）涉及的条目已重新实测并同步（表数 38、路由 250/252、`models/basic.py` / `blueprints/basic_records.py` / `templates/vehicle-maintenance.html` 行数、测试与工具脚本计数）。**其余条目仍是 2026-10-28 的快照**，与当前代码已有漂移（出货/入库/装柜侧的在改内容未纳入本次对账）。
+>
+> **局部更新 = 2026-11-08**：消防检查记录挂图片一节（§27）涉及的条目已重新实测并同步（表数 40、`models/fire_check.py` 197 行 / `FireCheckImage`、`blueprints/basic_records.py` 298 行 + 2 个端点、`templates/fire-checks.html` 612 行、测试 `tests/test_fire_check_images.py` 12 用例）。
 >
 > **工作目录 = `D:\worklog-app`**（唯一真实目录）。数据库备份统一走 `D:\BAK\`，不再用项目内的 `_safe-snapshot`。
 >
@@ -77,12 +81,13 @@ python -m pytest tests/ -v
 ```
 worklog-app/
 ├── app.py                  # 应用入口（204 行，工厂模式 + 登录闸门 + 19 个 Blueprint 实例注册）
-├── models/                 # 数据模型包（17 个 .py，37 张业务表）
-│   ├── __init__.py         # 统一 re-export（43 行）
+├── models/                 # 数据模型包（18 个 .py，39 张业务表）
+│   ├── __init__.py         # 统一 re-export（46 行）
 │   ├── _db.py              # get_db() + DB_PATH（22 行）
-│   ├── _init.py            # init_db() 建表 + 迁移（1,046 行）
+│   ├── _init.py            # init_db() 建表 + 迁移（1,092 行）
 │   ├── _permissions.py     # 权限系统：Action 枚举（13 个）+ can() 集中校验（100 行）
 │   ├── basic.py            # WorkLog / ErrorLog / TodoItem / VehicleMaintenance（134 行）
+│   ├── fire_check.py       # FireCheck 消防检查记录 + FireCheckImage 记录图片：日期/部位/检查事项/遗留事项/状态（197 行）★
 │   ├── notice.py           # Notice / NoticeImage（144 行）
 │   ├── orders.py           # 三套订单 9 模型 + UnifiedSearch + OcrMatchEvent + PlacementImage / InboundPlacementImage / LoadingPlacementImage（3,096 行，最大文件）
 │   ├── stock.py            # StockOutItem（40 行）
@@ -94,6 +99,7 @@ worklog-app/
 │   ├── audit.py            # AuditLog（58 行）
 │   ├── audit_query.py      # OcrEventAudit：OCR 事件审计只读查询（273 行）
 │   ├── category_prompt.py  # CategoryPrompt + classify_record：自适应提示词（647 行）
+│   ├── inventory.py        # ⭐ 库存 7 模型：Warehouse / ProductStock / StockLedger / StockPosting / StockPostingSkip / StockCount / StockCountItem（648 行，2026-11-16）
 │   └── daily_check.py      # DailyOrderCheck 日终盘点（手填当日单据总量）（95 行）★
 ├── blueprints/             # 27 个文件（18 个蓝图文件 → 19 个 Blueprint 实例 + 8 个辅助模块 + 包标记），共 15,845 行
 │   ├── __init__.py         # 包标记（1 行）
@@ -101,10 +107,11 @@ worklog-app/
 │   ├── ocr_engine.py       # 辅助：OCR 引擎抽象层五引擎（4,065 行，全项目最大文件；含 _wrinkle_ocr / KIND_FORM_NOLINES / KIND_GLARE / KIND_REDSTAMP / _to_grayscale）
 │   ├── ocr_pipeline.py     # 辅助：行级图 OCR pipeline 共享层（RecordImageProcessor，三订单共用，437 行）
 │   ├── ocr_log.py          # 辅助：业务日志上下文（set_log_context / clear_log_context，242 行）
+│   ├── inventory_engine.py # 辅助：库存折算/SKU 匹配引擎（纯函数，无 DB 依赖；L0~L5 级联 + 单位折算 + 重复键作废，259 行）★ 2026-11-16 新增
 │   ├── voice_pipeline.py / voice_llm.py / voice_fuzzy.py / voice_baidu.py  # 辅助：语音三档管线（150 / 176 / 135 / 90 行）★
 │   ├── auth.py             # 蓝图：登录/登出（67 行）
 │   ├── upload.py           # 蓝图：/upload/<path> 静态文件（17 行）
-│   ├── basic_records.py    # 蓝图：经验/错误/待办/车辆维护（126 行）
+│   ├── basic_records.py    # 蓝图：经验/错误/待办/车辆维护/消防检查 + 改记录/维护记录图片/消防检查图片（298 行）
 │   ├── info_pages.py       # 蓝图：首页/价格板/通知/流程/仓库/要点/缺货（87 行）
 │   ├── notice.py           # 蓝图：/notice + REST API（220 行）
 │   ├── products.py         # 蓝图：商品管理（326 行）
@@ -120,7 +127,7 @@ worklog-app/
 │   ├── mobile_shipping.py  # 蓝图：/m/* 移动端当天出货（231 行）★
 │   ├── point_count.py      # 蓝图：/tools/point-count 独立点数 + REST（408 行，含 bp+bp_api 两个 Blueprint）★
 │   └── audit.py            # 蓝图：OCR 事件审计页 + 聚合/钻取/CSV（132 行）★
-├── templates/              # 51 个 Jinja2 模板（43 主目录 + 8 mobile/），共 20,647 行
+├── templates/              # 52 个 Jinja2 模板（44 主目录 + 8 mobile/），共 21,436 行
 │   ├── base.html           # 公共布局 + 导航 + Tailwind + 顶栏头像（444 行）
 │   ├── _record_image_script.html # 共享行级图片 JS（1,185 行，31 具名 function + 5 箭头函数 + 3 个 window 导出，三订单共用）
 │   ├── _smart_add_modal.html    # 共享智能添加弹框（1,741 行）
@@ -132,7 +139,7 @@ worklog-app/
 │   ├── 商品管理: product-units.html（273）/ product-categories.html（449）/ products.html（478）/ piece-conversions.html（125）
 │   ├── 信息页: notice.html（428）/ notice-color.html（477）/ priceboard.html（523）/ workflow.html（71）/ warehouse.html（46）
 │   ├── 操作要点: count-tips.html（741） / huandan-guide.html（642） / billing-tips.html（569）
-│   ├── 基础记录: experience.html（48）/ errorlog.html（72）/ todolist.html（50）/ vehicle-maintenance.html（174）/ stockout.html（220）
+│   ├── 基础记录: experience.html（48）/ errorlog.html（72）/ todolist.html（50）/ vehicle-maintenance.html（174）/ fire-checks.html（612）/ stockout.html（220）
 │   ├── 任务流: tasks.html（220）/ tasks-new.html（346）/ task-detail.html（301）/ coding-pool.html（101）
 │   ├── 管理: staff.html（309）/ vehicles.html（255）/ unified-search.html（235）/ audit-ocr-events.html（233）/ manage-category-prompts.html（817）
 │   ├── 独立点数: point-count.html（157） / point-count-session.html（124）
@@ -158,8 +165,8 @@ worklog-app/
 │                            # ⚠️ 铁律：只增不删。任何脚本/命令都不许删这里面的文件(见「踩坑点 11」)
 ├── log/                     # 业务日志（log/YYYYMM/ 按天分文件，OCR/AI 落盘）
 ├── logging_setup.py        # 日志初始化（166 行）：trace_id ContextVar + 线程上下文传播 + 日志格式
-├── tests/                  # 测试套件（115 个 .py = 顶层 112 + tests/regression/ 3，18,734 行）
-├── tools/                  # 工具脚本（35 个 .py，含路径迁移/校验/OCR fixture/回归验证/CLAUDE.md 审计/红章白名单覆盖率审计）
+├── tests/                  # 测试套件（116 个 .py = 顶层 113 + tests/regression/ 3，19,012 行）
+├── tools/                  # 工具脚本（39 个 .py + 2 个 .js，含路径迁移/校验/OCR fixture/回归验证/CLAUDE.md 审计/红章白名单覆盖率审计/前端逻辑验证）
 ├── docs/superpowers/       # 设计文档：specs/（20）+ plans/（19）+ e2e/ + regression/（截图）
 ├── sql/                    # SQL 脚本（15 个 = 13 .sql + 1 .json + 1 .txt；new.sql 为商品分类标准源 / new_sqlite.sql 为 SQLite 导入脚本，其余为历史导出与转换产物）
 ├── pyrightconfig.json      # Pyright 类型检查配置（仅覆盖 app.py + models/_db.py + models/__init__.py + models/_init.py）
@@ -173,11 +180,11 @@ worklog-app/
 └── scratchpad.md           # 空占位文件
 ```
 
-## 路由结构（249 个端点方法 / 247 条 rule，按 19 个 Blueprint 实例分布，2026-10-28 盘点）
+## 路由结构（267 个端点方法 / 265 条 rule，按 21 个 Blueprint 实例分布，2026-11-17 更新）
 
-> **口径**：249 = **端点方法数**（同一 rule 支持 GET/POST 两个方法时计 2）；247 = **rule 数**。两者都由 `create_app().url_map` 统计：19 个 Blueprint 实例共 **246 条 rule / 248 个方法**（`auth` 的 `/logout` 与 `info_pages` 的 `/` 各含 2 个方法），加上 Flask 自动注册的 `/static/<path:filename>`（GET）→ **247 条 rule / 249 个方法**。早期版本的 243 是 `@bp.route(...)` 装饰器文本计数，口径不同，现统一以审计脚本为准。
+> **口径**：264 = **端点方法数**（同一 rule 支持 GET/POST 两个方法时计 2）；262 = **rule 数**。两者都由 `create_app().url_map` 统计：21 个 Blueprint 实例共 **261 条 rule / 263 个方法**（`auth` 的 `/logout` 与 `info_pages` 的 `/` 各含 2 个方法），加上 Flask 自动注册的 `/static/<path:filename>`（GET）→ **262 条 rule / 264 个方法**。早期版本的 243 是 `@bp.route(...)` 装饰器文本计数，口径不同，现统一以审计脚本为准。
 
-所有端点已拆分到 `blueprints/` 目录下的 18 个蓝图文件（`point_count.py` 内含 `bp` + `bp_api` 两个 Blueprint → 共 **19 个 Blueprint 实例**）+ 8 个辅助模块 + 1 个包标记 = 27 个 .py，主 `app.py` 只保留工厂、上下文、缓存、登录闸门、蓝图注册。
+所有端点已拆分到 `blueprints/` 目录下的 19 个蓝图文件（`point_count.py` 与 `stock.py` 各内含 `bp` + `bp_api` 两个 Blueprint → 共 **21 个 Blueprint 实例**）+ 9 个辅助模块 + 1 个包标记 = 29 个 .py，主 `app.py` 只保留工厂、上下文、缓存、登录闸门、蓝图注册。
 
 > 复核命令：`python tools/_audit_claude_md.py`（打印全量 url_map 分组 + 各表行数，用于本文件对账）。
 >
@@ -189,9 +196,24 @@ worklog-app/
 
 - `GET /login` 登录页（选身份，无密码）· `POST /login` 设 session · `GET|POST /logout` 清 session
 
-### `blueprints/basic_records.py` — 基础记录（13 个）
+### `blueprints/basic_records.py` — 基础记录（22 个）
 
 - `/experience` 工作经验 · `/errorlog` 错误经验 · `/todolist` 待办 · `/vehicle-maintenance` 车辆维护
+- **车辆维护记录修改（2026-11-02 新增）**：
+  - `POST /vehicle-maintenance/edit/<id>` 改记录（弹框提交 → 表单 POST → flash + redirect，与本页其它表单同风格）
+- **车辆维护图片（2026-11-02 新增）**：
+  - `POST /api/v1/vehicle-maintenance/<id>/images` 上传（multipart，字段名 `image`，`request.files.getlist` 收多张）
+  - `DELETE /api/v1/vehicle-maintenance/images/<image_id>` 删图（DB 行 + 物理文件）
+- **消防检查记录（2026-11-06 新增）**：
+  - `GET /fire-checks` 台账页（顶部「共 N 次 / 待整改 / 已闭环」汇总 + 「只看待整改」筛选）
+  - `POST /fire-checks/add` 新增（日期 + 检查事项必填，部位/遗留事项/备注选填）
+  - `POST /fire-checks/edit/<id>` 修改（弹框提交 → 表单 POST → flash + redirect）
+  - `POST /fire-checks/delete/<id>` 删除
+  - 状态 `status` 由 `models/fire_check.py` 按「遗留事项是否为空」自动推导（有遗留=open / 无遗留=closed），
+    修改时可手选覆盖；避免出现「填了遗留事项却标成已闭环」的自相矛盾记录
+- **消防检查图片（2026-11-08 新增）**：
+  - `POST /api/v1/fire-checks/<id>/images` 上传（multipart，字段名 `image`，`request.files.getlist` 收多张）
+  - `DELETE /api/v1/fire-checks/images/<image_id>` 删图（DB 行 + 物理文件）
 
 ### `blueprints/info_pages.py` — 信息展示 + stockout（11 个）
 
@@ -323,7 +345,7 @@ worklog-app/
 
 - `/product-units` 商品单位（83 条数据）
 - `/product-categories` 商品类型（`product_categories` 表，205 条 = 1 根 + 9 大类 + 分类树，以 `sql/new.sql` 为最终标准源）
-- `/products` 产品管理（`product` 表，1,287 条）
+- `/products` 产品管理（`product` 表，2026-11-17 为 1,605 条）；商品信息区表头 **10 列**：`序号 | 商品编号 | 品名 | 规格 | 型号 | 主单位 | 辅单位 | 库存 | 辅数量 | 操作`（2026-11-15：「编号」改名「商品编号」、最前加序号列从 1 计数）。序号是**显示态**、不落库：`templates/products.html` 的 `renumberProductRows()` 按 tbody 内 `tr[data-pid]` 当前顺序重排，加载(2)/编辑替换(1)/新增(1)/删除(1) 共 **5 处调用**，`buildProductRow()` 首格为 `<td class="rowno-cell"></td>` 占位，骨架屏同步 `colspan=10` + 10 个占位格。验证：`node tools/_verify_products_rowno.js`（静态列数 + jsdom 增删改序号）、`python tools/_verify_products_render.py`（真实 Jinja 渲染）。
 - `/piece-conversions` 件数换算规则（16 条）
 - `/api/v1/products` REST API（GET/POST/PUT/DELETE）
 - `GET /api/v1/product-categories/<id>/children` 分类树子节点懒加载
@@ -422,29 +444,79 @@ PC 端的 `/m/inbound` + `/m/inbound/order/<oid>` / `/m/loading` + `/m/loading/o
 
 用于"独立点数"场景：临时开会话 → 连续拍照 → 标记支/散码 → 导出 CSV。不挂订单/明细，纯独立工具。
 
+### `blueprints/stock.py` — 库存查询 + 入库过账（bp + bp_api 两个 Blueprint，9 个端点，2026-11-17）★
+
+**阶段 2 · 只读**：不写任何库存数据。
+**阶段 3 · 写库**：过账 / 冲销 —— **事务与写入契约在 `blueprints/stock_posting.py`（服务层）**，
+本文件只做 HTTP 层（参数校验 → 调服务 → 返回 JSON）。
+
+`bp`（页面路由）：
+- `GET /stock` 库存查询页（服务端渲染：仓库标签 + 分类树 + 搜索 + 统计格 + 表格 + 行展开看流水）
+
+`bp_api`（REST 前缀 `/api/v1`）：
+- `GET /warehouses` 仓库列表（当前只有芙蓉仓）
+- `GET /stock` 库存列表（`warehouse_id` / `category_id` / `q` / `page` / `page_size` / `only_tracking`）
+- `GET /stock/<int:product_id>` 单 SKU：基本信息 + 各仓库存 + 最近 20 条流水
+- `GET /stock/ledger` 流水明细（`product_id` / `biz_type` / `date_from` / `date_to`；日期筛的是 `occurred_at`）
+- `GET /stock/export.csv` 导出 CSV（**带 `=+-@` 公式注入防护**，照抄 `blueprints/audit.py`）
+- `POST /inbound-orders/<int:order_id>/post` 📥 **入库过账**（阶段 3）
+- `POST /inbound-orders/<int:order_id>/reverse` ↩ **红字冲销**（阶段 3）
+- `GET /inbound-orders/<int:order_id>/stock-status` 过账状态 + 跳过清单 + 未启用提示（阶段 4 徽章数据源）
+
+⚠️ `/api/*` 不在登录闸门白名单 → 这套 API **自己判 session**，没登录返回 401 + JSON。
+⭐ **改账类端点**（post / reverse）额外走 `_require_operator()`：session 里没有 `operator_id` 直接 401
+（A7：改账必须留痕，`audit_log.user_id` 不允许为 NULL）。
+
+### `blueprints/stock_posting.py` — 入库过账服务层（2026-11-17 新增）★
+
+阶段 3 的**核心**。过账要跨 4 张表写在**同一个事务**里，这活儿不该塞在 HTTP 层。
+
+- `post_inbound_order(order_id, operator_id, operator_name)` → 入库过账
+- `reverse_inbound_order(order_id, operator_id, operator_name)` → 红字冲销
+- `get_stock_status(order_id)` → 过账状态 / 跳过清单 / 未启用提示
+- `PostingError(message, status)` → 带 HTTP 状态码的业务异常，蓝图直接转 JSON
+
+⭐ **A2 事务边界**：`_tx_conn()` 把 `conn.isolation_level = None`（Python sqlite3 默认会隐式管事务，
+跟显式 `BEGIN IMMEDIATE` 打架），然后 `BEGIN IMMEDIATE` → 四表共用一个连接 → `COMMIT` / `ROLLBACK`。
+模型层方法一律传 `conn=conn`（传了就不 commit / 不 close）。
+
+⭐ **三道幂等防线**：① `uniq_key` 明细行级（`inbound:{record_id}`）② `BEGIN IMMEDIATE` 写锁串行化
+③ `UNIQUE(uniq_key)` 兜底（IntegrityError → 转成「已过账」跳过，不是 500）。
+
+⭐ **A3 幂等写入契约**：`stock_ledger` 一律**普通 INSERT**；幂等靠**先查后写**
+（`StockLedger.get_by_uniq_key()` 查到就跳过），**禁用** `OR REPLACE` / `OR IGNORE` / `ON CONFLICT`。
+
+⭐ **A1 / A4 写入契约**：每条流水写 `occurred_at`（**取订单头 `date`**，不是系统时间）
++ `balance_after`（本笔记账后该 (仓, SKU) 的余额快照）。
+
+⭐ **过账不改变启用状态**：`is_tracking=0` 的商品 —— 流水照记、内部累计照加、**对外显示仍是 0**，
+结果里单列 `not_tracking` 清单。
+⚠️ `not_tracking` **不进** `stock_posting_skips`（那是「没入账」的待处理清单），
+它是「已入账但未启用」的提示清单 —— 两者语义完全不同。
+
 ### `blueprints/upload.py` — 静态文件
 
 - `/upload/<path>` 访问 upload 目录下的文件
 
 ### 主 `app.py` — 应用入口（204 行，2026-10-28 盘点）
 
-- `create_app()` 工厂函数，**注册 19 个 Blueprint 实例**（18 个蓝图文件；`point_count.py` 一个文件里 `bp` + `bp_api` 两个，含 audit / voice / category_prompts_manage / mobile_shipping）
+- `create_app()` 工厂函数，**注册 21 个 Blueprint 实例**（19 个蓝图文件；`point_count.py` 与 `stock.py` 各含 `bp` + `bp_api` 两个，含 audit / voice / category_prompts_manage / mobile_shipping）
 - `inject_notices` 全局上下文（注入 all_notices 到所有模板）
 - `inject_current_operator` 全局上下文（注入当前操作员 Staff dict 到模板；session 失效时主动 `session.pop('operator_id', None)` 避免"什么都没了"假象）
 - `_require_login` before_request 闸门（白名单 `_AUTH_PUBLIC_PREFIXES = ("/static", "/api/", `/m/`, "/upload/")` + `_AUTH_PUBLIC_PATHS = ("/login", "/logout", "/favicon.ico")`）
 - `add_cache_control_headers` 禁用 HTML 缓存
 - `_reset_log_context` after_request 清业务上下文 + `_TRACE_ID`，避免请求间串味
 - `init_logging(app)` 在 `init_db()` 之前（建表失败也能落盘到 `log/`）
-- `init_db()` 数据库初始化（37 张业务表 DDL + 48 条 try/except ALTER 增量迁移）
+- `init_db()` 数据库初始化（38 张业务表 DDL + 48 条 try/except ALTER 增量迁移）
 - 上传超限 413 友好返回（API 走 JSON，页面走纯文本）
 
-## 数据库（37 张业务表，2026-10-28 实测）
+## 数据库（40 张业务表，2026-11-08 更新）
 
-> 库内共 **39 张表** = 37 张业务表 + `sqlite_sequence`（系统自增序列）+ `_cleanup_safety_2026_07_30`（2026-07-30 数据清洗临时表，非业务表，可清理）。
+> 库内共 **42 张表** = 40 张业务表 + `sqlite_sequence`（系统自增序列）+ `_cleanup_safety_2026_07_30`（2026-07-30 数据清洗临时表，非业务表，可清理）。
 >
 > 早期存在的 `product_units_new`（迁移残留）与 `copy_paper_images`（2026-09-09 废弃）**均已删除**。
 >
-> 另有 46 个索引（36 个手写 + 10 个 `sqlite_autoindex` 隐式）、0 个视图。
+> 另有 48 个索引（38 个手写 + 10 个 `sqlite_autoindex` 隐式）、0 个视图。
 
 ### 核心业务表
 
@@ -454,7 +526,10 @@ PC 端的 `/m/inbound` + `/m/inbound/order/<oid>` / `/m/loading` + `/m/loading/o
 | `error_logs`                | 错误经验        | 9      |
 | `todo_items`                | 待办事项        | 3      |
 | `notices` + `notice_images` | 公司通知        | 26 + 5 |
-| `vehicle_maintenance`       | 车辆维护        | 3      |
+| `vehicle_maintenance`       | 车辆维护        | 4      |
+| `vehicle_maintenance_images` | 车辆维护图片（2026-11-02 新增） | 0 |
+| `fire_checks` | 消防检查记录（2026-11-06 新增） | 0 |
+| `fire_check_images` | 消防检查图片（2026-11-08 新增） | 0 |
 | `stock_out_items`           | 缺货登记        | 1      |
 | `voice_phrase_mapping`      | 语音短语映射（自学习） | 0      |
 
@@ -512,7 +587,7 @@ PC 端的 `/m/inbound` + `/m/inbound/order/<oid>` / `/m/loading` + `/m/loading/o
 
 | 表             | 用途                                     | 行数                                                                                     |
 | ------------- | -------------------------------------- | -------------------------------------------------------------------------------------- |
-| `staff`       | 人员档案（姓名/角色/电话/绑定车辆）                    | 49（**含大量测试残留**：test/verify/smoke-tester/portal-tester/veh-tester，id 6220+；真实员工为低 id 段） |
+| `staff`       | 人员档案（姓名/角色/电话/绑定车辆）                    | 54 = 5 真实员工（阿海/阿祥/刘会/阿荒/调试员，id 2471-2475，2026-11-07 从 7/18 备份恢复）+ 49 测试残留（test/verify/smoke-tester/portal-tester/veh-tester，id 6220+） |
 | `vehicles`    | 车辆档案（车牌/吨位/长宽高/年检日期）                   | 1                                                                                      |
 | `tasks`       | 任务（task_no/状态/客户/地址/司机/车辆/打码状态）        | 0                                                                                      |
 | `task_items`  | 任务明细行（品名/规格/数量/单位/备注）                  | 0                                                                                      |
@@ -534,6 +609,32 @@ PC 端的 `/m/inbound` + `/m/inbound/order/<oid>` / `/m/loading` + `/m/loading/o
 | `audit_log`        | 操作审计日志                                                  | 13,693 |
 | `ocr_match_event`  | OCR 标签匹配事件记录（record_ocr / ai_match / human_verify 三类事件） | 2,941  |
 | `category_prompts` | 自适应提示词（scope=category/spec，注入 AI 比对）                    | 214    |
+
+### 库存（多仓 + 入库过账）★ 2026-11-16 阶段 1 新建
+
+| 表                    | 用途                                             | 行数 |
+| --------------------- | ------------------------------------------------ | ---- |
+| `warehouses`          | 仓库（当前只有 'FR' 芙蓉仓，架构已支持多仓）      | 1    |
+| `product_stock`       | 当前库存（仓库 × SKU），`UNIQUE(warehouse_id, product_id)` | 0 |
+| `stock_ledger`        | **库存流水，一切的唯一来源**，`UNIQUE(uniq_key)` 幂等全靠它<br>⭐ 阶段 1.5 加：`occurred_at`(业务日期) / `balance_after`(余额快照) / `unit_cost` / `amount`(成本预留,可空) | 0 |
+| `stock_postings`      | 过账批次（一次点「过账」= 一个批次，status: posted/reversed） | 0 |
+| `stock_posting_skips` | 过账跳过明细（待处理清单，5 种 reason_code） | 0    |
+| `stock_counts`        | 盘点单（status: open/closed；⭐ 阶段 1.5 加 `as_of` 基准时点） | 0    |
+| `stock_count_items`   | 盘点明细，`UNIQUE(count_id, product_id)`          | 0    |
+
+**⭐A3 只追加：3 个守卫触发器**（`stock_ledger`）：
+`trg_stock_ledger_no_update`（BEFORE UPDATE）· `trg_stock_ledger_no_delete`（BEFORE DELETE）·
+`trg_stock_ledger_no_reuse`（BEFORE INSERT + `WHEN EXISTS(uniq_key=NEW.uniq_key)`）
+→ 全部只 `SELECT` + `RAISE(ABORT)`，**禁止承载业务计算**（体检脚本扫 `sqlite_master.sql` 自动判）。
+⚠️ **第 3 条不能省**：SQLite 默认 `recursive_triggers=0` 时 `INSERT OR REPLACE` **不触发** DELETE 触发器
+→ 能无声把流水数量从 10 改成 999。代价是**幂等必须「先查后写」**（`StockLedger.create_if_absent()`）。
+
+**三张订单表加了 `warehouse_id`**（`INTEGER NOT NULL DEFAULT 1` = 芙蓉仓）：
+`inbound_orders` / `shipping_orders` / `loading_orders`。
+
+⭐ **阶段 3 过账落地后，这 7 张表在生产库仍是 0 行** —— 过账 API 已就绪但**前端按钮在阶段 4**，
+目前还没有任何真实单据被过账。`product_stock` / `stock_ledger` 等从空表起步，库存靠「盘点」起算
+（期初数不导入；`product.stock_quantity` 是建档时抄的目录图数字，不是实时库存）。
 
 **`ocr_match_event` 关键字段**：`event_type`（record_ocr / ai_match / human_verify）、`ocr_text`（PaddleOCR 原文）、`prompt_payload`（完整比对 prompt）、`ai_match_status/score/reason`、`ai_raw_response`（DeepSeek 原始返回）、`ai_engine`、`prompt_version`（按提示词版本聚合用）、`human_status/reason/verified_by`（人工裁决）。
 
@@ -994,6 +1095,203 @@ DELETE /api/v1/<page>-orders/placement-images/<id>/marks/last
 
 **扩展性**：表有 `scope` 列（`shipping` / `inbound` / `loading`），后续入库 / 装柜页要接时**零改表**，只需加端点 + 前端（模型层 `DailyOrderCheck` 已按 scope 隔离）。
 
+### 26. 车辆维护记录：改记录 + 挂图片（2026-11-02 新增）
+
+`/vehicle-maintenance` 页每条维护记录可**修改字段**、可挂**多张图片**，**图片显示在该记录下方**（表格里的「图片子行」，跨 7 列）。
+
+**页面结构**
+
+```
+操作列: [✏️ 修改] [🗑️ 删除]        ← ✏️ 弹框改字段，🗑️ 删记录（连带删图）
+  └─ 图片子行: 📷 图片 N 张 | 缩略图网格 | [📷 添加图片] 磁贴
+       └─ 点磁贴 → 「添加图片」弹框（粘贴区 + 选文件 + 待上传队列）
+```
+
+**修改记录**：沿用本页其它表单的经典风格（POST + flash + redirect），不是 REST。✏️ 按钮把行内字段写进 `data-*` 属性 → JS 填弹框 → 表单 `action` 改成 `/vehicle-maintenance/edit/<id>` → 提交。后端 `VehicleMaintenance.update()` 逐字段 UPDATE。改记录**不动图片**。
+
+**添加图片弹框（支持直接粘贴）**
+
+| 能力 | 实现 |
+|---|---|
+| 粘贴截图 | `document` 上的 `paste` 监听（函数名 `vmHandlePaste`，单独命名便于单测）→ 从 `clipboardData.items` 取 `kind=='file'` 且 `type` 以 `image/` 开头的项 → `getAsFile()` 进待上传队列 |
+| 粘贴兜底 | `clipboardData.items` 为空时读 `clipboardData.files` |
+| 选文件 | 隐藏 `<input type=file multiple>`，队列去重按「同名 + 同大小」 |
+| 队列 | 每项渲染缩略图 + 文件名 + `×` 移除；队列空时「上传」按钮禁用 |
+| 上传 | 「上传」按钮 → `POST /api/v1/vehicle-maintenance/<id>/images`（multipart，字段名 `image`）→ 成功后缩略图就地追加（不整页刷新） |
+
+> 粘贴监听挂在 `document` 上（不是粘贴区上），所以用户不必先点一下粘贴区也能粘；弹框关闭时不处理粘贴。
+>
+> ⚠️ 原生 `confirm()` 会阻塞页面，删图时用 `vmDeleteBusy` 全局锁挡住连点 —— 否则第一次删除完成、网格左移之后，第二下会落到「下一张图」的 × 上，误删两张。
+
+**存储设计**
+
+| 项 | 取值 | 理由 |
+|---|---|---|
+| 文件落点 | `upload/<YYYY-MM>/<uuid>.ext` | 项目统一图片目录；被 `tools/backup_upload_dir.py`（每日快照到 `E:\BAK_upload`）+ `backup_to_ebak()` 覆盖备份 |
+| DB 存路径 | **相对路径**（`month_dir` + `file_name` 两列） | 规避**踩坑点 9**（`*_images.file_path` 存绝对盘符路径 → 换盘要跑迁移脚本改写全库）。`notice_images` 同款做法 |
+| URL | `/upload/<month_dir>/<file_name>` | `blueprints/upload.py` 提供；`/upload/` 在免登录白名单内 |
+| 索引 | `idx_vehicle_maint_images_record_pk` | 沿用 `idx_<table>_<fkcol>` 惯例（`notice_images` 当年漏建，这次补上） |
+
+**校验链**（比 `notice.py` 的通知图片端点严，与订单行级图一致）：扩展名白名单 + 10MB 上限 + magic bytes → 落盘后 Pillow 真实解码。**任一张不合法 → 整体 400**，并把本次已落盘的半成品文件回滚清理。
+
+**删除语义**（符合「upload 只增不删」铁律：只走应用内删除通道，DB 行与物理文件同时清）
+
+- 删单张图 → `VehicleMaintenanceImage.delete()` → `models/orders._safe_remove_file(path, UPLOAD_ROOT)`（路径白名单 + `mavis-trash` 回收站可恢复）
+- 删维护记录 → `VehicleMaintenance.delete()` **级联**清其全部图片（DB 行 + 文件）
+
+**测试**：`tests/test_vehicle_maintenance_images.py`（16 项）+ `tools/verify_vehicle_maint_upload_js.js`（24 项前端逻辑断言）。
+
+> ⚠️ **上传目录隔离**（测试铁律）：测试把 `_helpers.BASE_DIR` / `_helpers.EBAK_UPLOAD_ROOT` / `models.basic.UPLOAD_ROOT` / `blueprints.upload.BASE_DIR` 全指向项目内 `tests/.tmp_vm_img_upload/`，跑完逐文件清理 —— 生产 `upload/` 一个字节都不动。`_safe_remove_file` 的白名单也按 `UPLOAD_ROOT` 判定，补丁后即使代码有 bug 指向生产目录也会被挡下。
+
+### 27. 消防检查记录：挂图片（2026-11-08 新增）
+
+`/fire-checks` 台账页每条检查记录可挂**多张图片**，**图片显示在该记录下方**（表格里的「图片子行」，跨 7 列），与 §26 车辆维护页同一套交互。
+
+**页面结构**
+
+```
+操作列: [✏️ 修改] [🗑️ 删除]        ← 🗑️ 删记录（连带删图）
+  └─ 图片子行: 📷 图片 N 张 | 缩略图网格 | [📷 添加图片] 磁贴
+       └─ 点磁贴 → 「添加图片」弹框（粘贴区 + 选文件 + 待上传队列）
+```
+
+**前端**：`templates/fire-checks.html` 内 `fc-*` 前缀的一套（`fc-img-grid` / `fc-img-item` / `fc-img-del` / `fc-img-add` / `fcPasteZone` / `fcHandlePaste` / `fcOpenUpload`），与车辆维护页 `vm-*` 同构但**不复用同一套类名**（两页各自内联 CSS/JS，互不耦合）。
+
+| 能力 | 实现 |
+|---|---|
+| 粘贴截图 | `document` 上的 `paste` 监听（`fcHandlePaste`）→ 从 `clipboardData.items` 取 `kind=='file'` 且 `type` 以 `image/` 开头的项 → `getAsFile()` 进待上传队列 |
+| 选文件 | 隐藏 `<input type=file multiple>`，队列去重按「同名 + 同大小」 |
+| 上传 | `POST /api/v1/fire-checks/<id>/images`（multipart，字段名 `image`）→ 成功后缩略图就地追加（不整页刷新） |
+| 放大 | 点缩略图 → 全局 `showImgPreview(src)`（`static/js/common.js` + `base.html` 的 `#imgPreviewModal`，带旋转按钮） |
+| 删图 | 缩略图右上角 `×` → `DELETE /api/v1/fire-checks/images/<image_id>` → 移除 DOM + 刷新「N 张」计数 |
+
+⚠️ 两个坑（与车辆维护页同款，别重复踩）：
+> 1. 原生 `confirm()` 会阻塞页面，连点会误删「下一张图」→ 用 `fcDeleteBusy` 全局锁挡住。
+> 2. 「只看待整改」筛选按 `#fcTable tbody tr` 隐藏行 —— 图片子行也是 `tr`，会被一起藏掉 → 选择器改成 `tr[data-status]`，且子行也带上 `data-status`。
+
+**存储设计**
+
+| 项 | 取值 | 理由 |
+|---|---|---|
+| 文件落点 | `upload/<YYYY-MM>/<uuid>.ext` | 项目统一图片目录；被 `tools/backup_upload_dir.py` + `backup_to_ebak()` 覆盖备份 |
+| DB 存路径 | **相对路径**（`month_dir` + `file_name` 两列） | 规避**踩坑点 9**；`vehicle_maintenance_images` / `notice_images` 同款做法 |
+| 表 | `fire_check_images`（`record_pk` / `file_name` / `month_dir` / `original_name` / `created_at`） | 与 `vehicle_maintenance_images` 同构 |
+| 索引 | `idx_fire_check_images_record_pk` | 沿用 `idx_<table>_<fkcol>` 惯例 |
+
+**校验链**：与 §26 一致 —— 扩展名白名单 + 10MB 上限 + magic bytes → 落盘后 Pillow 真实解码。**任一张不合法 → 整体 400**，并把本次已落盘的半成品文件回滚清理。
+
+**删除语义**：删单张图 → `FireCheckImage.delete()`（DB 行 + 物理文件，文件进回收站可恢复）；删检查记录 → `FireCheck.delete()` **级联**清其全部图片。改记录**不动图片**。
+
+**测试**：`tests/test_fire_check_images.py`（12 用例，含上传/回滚/页面渲染/删图/级联）。浏览器实测走真实 UI（选文件 → 上传 → 点开放大 → 删图），实测记录与图片用完即删，生产 `upload/` 无残留。
+
+> ⚠️ **上传目录隔离**（测试铁律）：测试把 `_helpers.BASE_DIR` / `_helpers.EBAK_UPLOAD_ROOT` / `models.fire_check.UPLOAD_ROOT` / `blueprints.upload.BASE_DIR` 全指向项目内 `tests/.tmp_fc_img_upload/`，跑完逐文件清理 —— 生产 `upload/` 一个字节都不动。
+
+### 28. 商品明细行显示商品编号（入库 2026-11-13 / 出货 2026-11-14）
+
+入库页（`/inbound-records`）商品明细区域：**商品编号（`product.product_code`）独立成列，显示在「商品名称」之前**（2026-11-13 接入时是「规格后 `::after` 徽章」，2026-11-14 改为独立列），方便当场核对录的是哪个商品。
+
+**出货页（`/shipping-records`）2026-11-14 已对齐**，同为 10 列、编号在品名前。唯一差异是**未匹配占位**：入库页显示 `—`，出货页显示红色「未匹配」（`.product-code-missing`，`#d63031`）。实现靠页面级钩子 `window.productCodeMissingHtml` —— 共享弹窗 `buildShippingRecordRow` 读它，未定义则回退 `—`，所以装柜页零改动。出货页规格 `th` 也加了 `class="spec-cell"`，否则 `_ensureMatchColumn` 的 `nth-child(4)` fallback 会把 AI 比对列插错位置。
+
+**匹配口径**（`models/products.py` 新增 `Product.get_code_lookup()` / `Product.match_code()`）
+
+- 一次查表 + 内存匹配（不逐行查库），优先级与 `Product.find_by_name_and_spec` 一致：商品名+规格精确 → 同名空规格默认行 → 名称去空格后命中
+- **刻意不做「同名任一行」兜底** —— 规格对不上时给编号会误导用户（例：「白磅布三文治 0.6软」在 product 表里只有 0.4中性 / 0.6中性 / 0.8中性…，兜底会显示 02120101「0.4中性」）
+- 实测：入库 1,139 条明细按此口径命中 634 条，其余**不显示编号**（宁可空着也不给错编号）
+
+**渲染方式（独立列，为什么不再用 `::after`）**
+
+编号是独立 `<td class="product-code-cell"><span class="product-code-badge">02100131</span></td>`，位于「商品名称」td 之前；匹配不到时显示 `—`。列宽 8%（商品名称 22→19%、规格 18→16%、备注 15→13%、辅助提示 12→11%，百分比合计仍 87%）。编号与规格分属两个 td，`.spec-cell` 的 `textContent` 依然只有规格本身 —— 全站 9 处按 class 读规格的逻辑（YPP/件数换算校验、图片叠加文字、行内编辑取值、placement 身份条、smart-add 重复检测…）不受污染。早期用 `data-product-code` + `::after` 正是为了避开「内嵌 `<span>` 污染文本」，独立列后该约束自然消失。
+
+**列序（改动后，任何按索引取 td 的 JS 都以此为准）**
+
+| 索引 | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 列 | 序号 | 重点 | 商品编号 | 商品名称 | 规格 | 数量 | 单位 | 备注 | 辅助单位提示 | 操作 |
+
+行内编辑的可编辑列从 `tds[3]` 起（旧版 `tds[2]`）；保存后用 API 回传的 `r.product_code` 刷新只读的 `tds[2]`。`addRowWarning` 的 colspan 走 `targetTr.children.length` 动态计算，无需改。
+
+| 位置 | 作用 |
+|---|---|
+| `models/products.py` | `Product.get_code_lookup()`（批量载入映射）+ `Product.match_code()`（按品名+规格取编号） |
+| `blueprints/inbound.py` | 列表渲染回填 `record['product_code']`；新增 / 批量新增 / 修改明细的 API 回传 `product_code` |
+| `templates/inbound-records.html` | 表头 + 服务端行 + `buildInboundRecordRow` 三处渲染编号列；CSS `.product-code-badge`；两处行内编辑按新列序取值、保存后刷新 `tds[2]`；搜索改按 class 取品名/规格/编号（原 `nth-child(1)/(2)` 实际读的是序号/重点列） |
+| `templates/_smart_add_modal.html` | `doBatchAdd` → `buildShippingRecordRow` 三页共用，按目标表头 `th.product-code-col` 决定要不要补编号 td（出货/装柜不受影响） |
+| `templates/_record_image_script.html` | `_ensureMatchColumn` 表头定位改为「优先 `th.spec-cell`，再 fallback `th:nth-child(4)`」—— 逗号选择器按 DOM 顺序返回首个匹配，入库规格变第 5 列后会插错位置 |
+
+**测试**：`tests/test_inbound_product_code.py`（11 用例：页面渲染命中/未命中、spec 文本不被污染、三个 API 回传编号、`match_code` 四种匹配口径）。
+
+> ⚠️ 本次**只做入库页**；出货 / 装柜页没有编号显示。共享的 `buildShippingRecordRow` 改动对那两页无副作用（那两页 API 不返回 `product_code` → 属性不会出现）。移动端 `templates/mobile/inbound-order.html` 也未接。
+
+### 29. 入库过账（阶段 3 · 2026-11-17）
+
+`blueprints/stock_posting.py`（服务层）+ `blueprints/stock.py`（HTTP 层）。前端在阶段 4。
+
+**过账流程**（`POST /api/v1/inbound-orders/<id>/post`）
+
+```
+闸门① 订单必须 is_locked=1          → 否则 409「请先核查并锁定该订单」
+闸门② 订单 warehouse_id 必须有效     → 否则 400「仓库不存在(id=N)」
+   ↓
+BEGIN IMMEDIATE（单一连接）
+  逐明细行:
+    ① 先查后写:stock_ledger 有 uniq_key(=inbound:{record_id}) → 幂等跳过
+    ② 匹配 SKU:inventory_engine.resolve_product(品名, 规格) → 匹配不到 = no_product
+    ③ 数量:非数字 / ≤0 → bad_qty
+    ④ 折算:inventory_engine.convert_to_base_unit → 失败按 no_conversion / bad_base_unit
+    ⑤ 写流水(普通 INSERT)+ 更新 product_stock 内部累计(不改 is_tracking)
+    ⑥ balance_after = 本笔后的 (仓,SKU) 余额;occurred_at = 订单头 date
+  写 stock_postings 批次 + stock_posting_skips 待处理清单
+COMMIT / ROLLBACK(任何异常 → 四表全回滚)
+```
+
+**A1~A8 在本阶段的落点**
+
+| 条 | 本阶段怎么落地 |
+|---|---|
+| **A1** | 每条流水记 `balance_after`；`tools/verify_stock_balance.py` 对账 0 差异；余额比较一律容差 `1e-6`，**禁止 `== 0`** |
+| **A2** | `models/inventory.py` 全部写方法加 `conn=None`（传了就不 commit / 不 close）；过账服务持唯一 `BEGIN IMMEDIATE` 事务 |
+| **A3** | `stock_ledger` 一律**普通 INSERT**；幂等走**先查后写**；禁用 `OR REPLACE` / `OR IGNORE` / `ON CONFLICT`（第 3 条触发器会 RAISE） |
+| **A4** | `occurred_at` = **订单头 `date`**（补录上周的单归上周）；`created_at` 是记账时刻，只用于「同日先后」判定 |
+| **A6** | `blueprints/inbound.py` 的 `is_locked=False` 分支先查 `stock_postings`（status='posted'）→ 有则 **403「该订单已过账,请先红字冲销后再解锁」** |
+| **A7** | `models/audit.py` 的 `AuditLog.log()` **自动从 session 注入 `operator_id`**；改账端点走 `_require_operator()`，没登录 401 |
+
+**过账不改变启用状态**（关键约定）
+
+`is_tracking=0` 的商品 → 流水照记、内部累计照加、**对外显示仍是 0** → 结果里单列 `not_tracking` 清单提示「去盘点 / 归零后生效」。
+⚠️ `not_tracking` **不进** `stock_posting_skips`（那是「没入账」的待处理清单）。
+
+**跳过行分两类**（处置完全不同）
+
+| reason_code | 修好数据后能否补过账 |
+|---|---|
+| `no_product` / `no_conversion` / `bad_base_unit` / `bad_qty` | ✅ **能** —— 再点一次过账，只补这些行，已入账的幂等跳过 |
+| `not_tracking`（未启用） | ❌ **不能** —— 盘点的实际库存已含这批货，补了重复计算 |
+
+**红字冲销**（`POST /api/v1/inbound-orders/<id>/reverse`）
+
+写一条 `quantity` 取负、`is_reversal=1`、`uniq_key` 加 `:rev` 的流水；原流水**永不删改**；批次 `status='reversed'`。
+⚠️ 冲销过的行**不能再正向过账**（正向 uniq_key 仍被原流水占着）—— 要改单据请改源头再重新建单。
+
+**测试**：`tests/test_stock_posting.py`（21 条，覆盖开发计划 §阶段 3 的 11 条完成判据）。
+
+### 30. ⚠️ 生产库 `product` 表的悬空外键（2026-11-17 阶段 3 发现，待修）
+
+生产库 `product` 表带一条外键 `weight_category_id → product_weight_categories(id)`，
+而 `product_weight_categories` **在整个代码库里根本不存在**（grep 全库零命中，当前 `models/_init.py` 的 DDL 里也没有）。
+→ `PRAGMA foreign_keys=ON` 下 `INSERT INTO product` 直接报 `no such table: main.product_weight_categories`
+→ **「产品管理」页新增商品这条路径当前是坏的**。
+
+**根因与阶段 1.6 那三个 bug 同一类**：存量库结构与当前 DDL 漂移。阶段 1.6 是「全新库缺列」，
+这次反过来 —— 老库**多**了一条指向空表的 FK。`CREATE TABLE IF NOT EXISTS` 对已存在的表**不会重建**，
+所以这条 FK 一直躺着，只有真往 `product` 插行才会炸。
+
+**修法**：`tools/fix_product_dangling_fk.py`（默认**演练**，`--apply` 才落库）
+—— 重建 `product` 表，逐列逐行原样搬运，只把「父表不存在」的 FK 子句摘掉；
+索引 / 触发器 / 行数 / AUTOINCREMENT 计数全部复原，**列本身保留**（`weight_category_id` 全代码库零引用，
+但删列是另一件事，不在本次范围）。
+
+⚠️ 落库前先备份：`python D:\BAK\_backup_now.py pre_fix_product_dangling_fk`
+
 ## 出货页面功能流程
 
 ### 页面结构
@@ -1184,19 +1482,23 @@ DELETE /api/v1/<page>-orders/placement-images/<id>/marks/last
 - `app.py` — 204 行（`create_app()` 工厂 + 缓存控制 + 登录闸门 + 19 个 Blueprint 实例注册 + 操作员上下文 + 日志初始化 + log context 清理）
 
 
-### 蓝图（18 个蓝图文件 → 19 个 Blueprint 实例 + 8 个辅助模块 + 1 包标记 = 27 个 .py，共 15,845 行，按行数排序，2026-10-28 实测）
+### 蓝图（30 个 .py 文件 → 21 个 Blueprint 实例，15,470 行，按行数排序，2026-11-17 实测）
 
 | 文件                                      | 行数    | 关键内容                                                                                                                                                                     |
 | --------------------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `blueprints/ocr_engine.py`              | 4,065 | 五引擎（Moonshot/PaddleOCR/DeepSeek/MiniMax/PaddleOCR+MiniMax）+ 后处理安全网 + COMPARE_PROMPT + \_wrinkle_ocr + KIND_FORM_NOLINES/KIND_GLARE/KIND_REDSTAMP 三档预处理 + `_to_grayscale` |
-| `blueprints/shipping.py`                | 2,508 | 出货 REST + AI 识别 + OCR 匹配 + 行级图片 + 加面 + 自适应提示词 + placement + copy-paper + `_is_no_ai_match_item` + `/re-ocr` + `/shipping-ypp-review` + YPP scan + 日终盘点 daily-check                          |
-| `blueprints/inbound.py`                 | 1,891 | 入库 REST + 行级图片 + placement（11 端点）+ 移动端 /m/* + 日本纸件数换算 + align 复制至出货                                                                                                      |
-| `blueprints/loading.py`                 | 1,737 | 装柜 REST + 行级图片 + placement + copy-paper（复用 shipping `_is_no_ai_match_item` 硬拦截）+ img_cols + 移动端 /m/*                                                                     |
-| `blueprints/_helpers.py`                | 1,451 | 共享：图片上传校验、YPP 匹配、支数换算、备注校验、导入即校验（annotate_import_validation / summarize_import_validation）、compute_placement_expected_zhi、compute_daily_check_status、apply_user_rotation                                                       |
-| `blueprints/task_flow.py`               | 617   | 任务流 REST + 状态机 + 证据闸门 + 建单/推进/退单/退货                                                                                                                                      |
-| `blueprints/ocr_pipeline.py`            | 437   | 行级图 OCR pipeline 共享层：RecordImageProcessor（三套订单共用）+ 糊图标记 + 模块级 \_OCR_LOCK/\_ASYNC_JOBS ★                                                                                  |
-| `blueprints/point_count.py`             | 408   | 独立点数（bp + bp_api 两个 Blueprint）★                                                                                                                                          |
-| `blueprints/products.py`                | 326   | 商品管理                                                                                                                                                                     |
+| `blueprints/ocr_engine.py`              | 3,686 | 五引擎（Moonshot/PaddleOCR/DeepSeek/MiniMax/PaddleOCR+MiniMax）+ 后处理安全网 + COMPARE_PROMPT + \_wrinkle_ocr + KIND_FORM_NOLINES/KIND_GLARE/KIND_REDSTAMP 三档预处理 + `_to_grayscale` |
+| `blueprints/shipping.py`                | 2,250 | 出货 REST + AI 识别 + OCR 匹配 + 行级图片 + 加面 + 自适应提示词 + placement + copy-paper + `_is_no_ai_match_item` + `/re-ocr` + `/shipping-ypp-review` + YPP scan + 日终盘点 daily-check                          |
+| `blueprints/inbound.py`                 | 1,774 | 入库 REST + 行级图片 + placement（11 端点）+ 移动端 /m/* + 日本纸件数换算 + align 复制至出货 + ⭐A6 解锁守卫                                                 |
+| `blueprints/loading.py`                 | 1,551 | 装柜 REST + 行级图片 + placement + copy-paper（复用 shipping `_is_no_ai_match_item` 硬拦截）+ img_cols + 移动端 /m/*                                                                     |
+| `blueprints/_helpers.py`                | 1,269 | 共享：图片上传校验、YPP 匹配、支数换算、备注校验、导入即校验（annotate_import_validation / summarize_import_validation）、compute_placement_expected_zhi、compute_daily_check_status、apply_user_rotation                                                       |
+| `blueprints/task_flow.py`               | 516   | 任务流 REST + 状态机 + 证据闸门 + 建单/推进/退单/退货                                                                                                                                      |
+| `blueprints/stock_posting.py`           | 494   | ⭐**入库过账服务层**（阶段 3）：`post_inbound_order` / `reverse_inbound_order` / `get_stock_status` + `PostingError`；A2 单事务 BEGIN IMMEDIATE + A1/A4 写入契约 + 三道幂等防线 ★ 2026-11-17 新增 |
+| `blueprints/stock.py`                   | 452   | 库存查询页 + 只读 API + ⭐入库过账/冲销/状态 3 个写端点（阶段 2+3）★                                                                                                                 |
+| `blueprints/ocr_pipeline.py`            | 389   | 行级图 OCR pipeline 共享层：RecordImageProcessor（三套订单共用）+ 糊图标记 + 模块级 \_OCR_LOCK/\_ASYNC_JOBS ★                                                                                  |
+| `blueprints/point_count.py`             | 353   | 独立点数（bp + bp_api 两个 Blueprint）★                                                                                                                                          |
+| `blueprints/inventory_engine.py`        | 259   | 库存折算/SKU 匹配引擎（纯函数，无 Flask/无 DB）：`resolve_product` L0~L5 级联 + `convert_to_base_unit` 三级优先级折算 + 重复键作废 ★ 2026-11-16 新增                                              |
+| `blueprints/basic_records.py`           | 298   | 基础记录 + 车辆维护记录改字段/图片上传删除 + 消防检查图片上传删除（2026-11-08 新增）★                                                                                                  |
+| `blueprints/products.py`                | 293   | 商品管理                                                                                                                                                                     |
 | `blueprints/ocr_log.py`                 | 242   | 业务日志上下文 set_log_context / clear_log_context（订单/记录/操作员）                                                                                                                   |
 | `blueprints/mobile_shipping.py`         | 231   | 移动端 /m/* 出货（today/order/placement）+ copy-paper 富化 ★                                                                                                                      |
 | `blueprints/notice.py`                  | 220   | 通知 CRUD                                                                                                                                                                  |
@@ -1207,7 +1509,7 @@ DELETE /api/v1/<page>-orders/placement-images/<id>/marks/last
 | `blueprints/vehicles.py`                | 140   | 车辆档案                                                                                                                                                                     |
 | `blueprints/voice_fuzzy.py`             | 135   | 语音辅助：本地 RapidFuzz 兜底 ★                                                                                                                                                   |
 | `blueprints/audit.py`                   | 132   | OCR 事件审计：聚合/钻取/CSV 导出 ★                                                                                                                                                  |
-| `blueprints/basic_records.py`           | 126   | 基础记录                                                                                                                                                                     |
+| `blueprints/basic_records.py`           | 298   | 基础记录 + 车辆维护记录改字段/图片上传删除 + 消防检查图片上传删除（2026-11-08 新增）★                                                                                                  |
 | `blueprints/category_prompts_manage.py` | 117   | 分类提示词管理页 + REST ★                                                                                                                                                        |
 | `blueprints/voice_baidu.py`             | 90    | 语音辅助：百度语音 API ★                                                                                                                                                          |
 | `blueprints/info_pages.py`              | 87    | 信息展示页                                                                                                                                                                    |
@@ -1216,12 +1518,12 @@ DELETE /api/v1/<page>-orders/placement-images/<id>/marks/last
 | `blueprints/upload.py`                  | 17    | 静态文件服务                                                                                                                                                                   |
 | `blueprints/__init__.py`                | 1     | 包标记                                                                                                                                                                      |
 
-### 数据库层（17 个模块，2026-10-28 实测）
+### 数据库层（18 个模块，2026-11-06 实测）
 
 | 文件                           | 行数    | 模型数 | 关键类                                                                                                                                                                                                                                                   |
 | ---------------------------- | ----- | --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `models/orders.py`           | 3,096 | 14  | ShippingOrder / ShippingRecord / InboundOrder / InboundRecord / InboundImage / ShippingImage / PlacementImage / LoadingPlacementImage / InboundPlacementImage / OcrMatchEvent / LoadingOrder / LoadingOrderRecord / LoadingOrderImage / UnifiedSearch |
-| `models/_init.py`            | 1,046 | —   | 37 张业务表 DDL（40 段 `CREATE TABLE` 含已废弃留档）+ 48 段 try/except ALTER 增量迁移                                                                                                                                                                                   |
+| `models/_init.py`            | 1,067 | —   | 38 张业务表 DDL（41 段 `CREATE TABLE` 含已废弃留档）+ 48 段 try/except ALTER 增量迁移                                                                                                                                                                                   |
 | `models/category_prompt.py`  | 647   | 1   | CategoryPrompt + compose_for_record + classify_record：自适应提示词★                                                                                                                                                                                         |
 | `models/tasks_flow.py`       | 492   | 11  | Staff/StaffDB/Task/TaskItem/TaskImage/TaskEvent 等                                                                                                                                                                                                     |
 | `models/point_count.py`      | 416   | 2   | PointCountSession / PointCountImage / PointCountMark + `_safe_remove_file` 白名单删除★                                                                                                                                                                     |
@@ -1230,15 +1532,16 @@ DELETE /api/v1/<page>-orders/placement-images/<id>/marks/last
 | `models/notice.py`           | 144   | 2   | Notice / NoticeImage                                                                                                                                                                                                                                  |
 | `models/voice_mapping.py`    | 139   | 1   | VoicePhraseMapping 语音短语自学习★                                                                                                                                                                                                                           |
 | `models/daily_check.py`      | 95    | 1   | DailyOrderCheck 日终盘点（手填当日单据总量）★                                                                                                                                                                                                            |
-| `models/basic.py`            | 134   | 4   | WorkLog / ErrorLog / TodoItem / VehicleMaintenance                                                                                                                                                                                                    |
+| `models/basic.py`            | 277   | 5   | WorkLog / ErrorLog / TodoItem / VehicleMaintenance（+update）/ VehicleMaintenanceImage（车辆维护图片）★                                                                                                                                                 |
 | `models/piece_conversion.py` | 101   | 1   | PieceConversion                                                                                                                                                                                                                                       |
 | `models/_permissions.py`     | 100   | —   | Action 枚举 + can() 函数                                                                                                                                                                                                                                  |
 | `models/audit.py`            | 58    | 1   | AuditLog                                                                                                                                                                                                                                              |
 | `models/__init__.py`         | 44    | —   | re-export                                                                                                                                                                                                                                             |
 | `models/stock.py`            | 40    | 1   | StockOutItem                                                                                                                                                                                                                                          |
+| `models/fire_check.py`       | 197   | 2   | FireCheck 消防检查记录（状态按遗留事项自动推导）+ FireCheckImage 记录图片 ★ |
 | `models/_db.py`              | 22    | —   | get_db() + DB_PATH                                                                                                                                                                                                                                    |
 
-### 模板（51 个文件 = 43 主目录 + 8 mobile/，共 20,647 行，按行数排序，2026-10-28 实测）
+### 模板（52 个文件 = 44 主目录 + 8 mobile/，共 21,436 行，按行数排序，2026-11-06 实测）
 
 | 文件                             | 行数    | 说明                                                                         |
 | ------------------------------ | ----- | -------------------------------------------------------------------------- |
@@ -1267,7 +1570,7 @@ DELETE /api/v1/<page>-orders/placement-images/<id>/marks/last
 | `product-units.html`           | 273   | 商品单位                                                                       |
 | `stockout.html`                | 220   | 当前缺货                                                                       |
 | `tasks.html`                   | 220   | 任务列表                                                                       |
-| `vehicle-maintenance.html`     | 174   | 车辆维护                                                                       |
+| `vehicle-maintenance.html`     | 639   | 车辆维护（✏️ 改记录 + 记录下方挂多张图片 + 添加图片弹框可粘贴，2026-11-02 新增）★ |
 | `_ypp_review_include.html`     | 166   | 共享 YPP 核查逻辑 + 样式（三页共用）★                                                    |
 | `point-count.html`             | 157   | 独立点数会话列表 ★                                                                 |
 | `_voice_input_modal.html`      | 129   | 共享语音录入弹框（仅出货页引入）                                                           |
@@ -1314,20 +1617,34 @@ DELETE /api/v1/<page>-orders/placement-images/<id>/marks/last
 - [x] ~~CLAUDE.md 三次全量对账（路由 246/244、JS 4,720、tests 110、tools 25、ocr_engine 3,991、新增五引擎与 `_is_no_ai_match_item` 章节）~~ — 已完成（2026-10-08）
 - [x] ~~CLAUDE.md 四次全量对账（路由 249/247、模板 20,647、JS 4,752、tests 115、tools 35、sql 15、upload 10,941、
       订单 1,144/331/25、标记 5,971、`no_ai_label.js` 改名、装柜标签图入口已落地）~~ — 已完成（2026-10-28）
+- [x] ~~**消防检查记录（新功能，2026-11-06）**~~ — 已完成：导航「⌨️ 快速录入」下新增「🚨 消防检查记录」（`/fire-checks`）；
+      新表 `fire_checks`（39 张业务表）+ `models/fire_check.py`；要素 = 日期 / 部位 / 检查事项 / 遗留事项 / 状态 / 备注；
+      **状态由「遗留事项是否为空」自动推导**（有遗留=open 待整改，无遗留=closed 已闭环），修改时可手选覆盖，
+      从根上避免「填了遗留事项却标成已闭环」的自相矛盾记录。回归测试 `tests/test_fire_check.py`（9 用例全绿）
+- [x] ~~**消防检查记录挂图片（2026-11-08）**~~ — 已完成：`/fire-checks` 每条记录下方加「图片子行」（缩略图网格 + 添加图片磁贴 + 删除按钮）；
+      点缩略图走全局 `showImgPreview` 放大（带旋转），点 `×` 删图；新表 `fire_check_images`（40 张业务表）+ `models/fire_check.py` 的 `FireCheckImage`；
+      端点 `POST /api/v1/fire-checks/<id>/images` / `DELETE /api/v1/fire-checks/images/<image_id>`；删记录级联删图。
+      回归测试 `tests/test_fire_check_images.py`（12 用例全绿）+ 浏览器实测（上传 → 放大 → 删图 → 级联清理，零残留）
 - [x] ~~**腊光纸（0108）行没有行级图片入口**~~ — 已完成（2026-10-08）：`_is_copy_paper_item` 并入 `_is_no_ai_match_item`（0105-0108 单一谓词），PC 标签 🖼️ 按钮按 `is_no_ai_match` 渲染、移动端隐藏拍照识别改出「📷 标签」+ 徽章「标签图」
 - [x] ~~**`_is_no_ai_match_item` 与 `_is_copy_paper_item` 重复查库**~~ — 已完成（2026-10-08）：两个谓词合并为 `_is_no_ai_match_item` 单一入口（0105-0108），`_is_copy_paper_item` 已彻底移除（代码/文档 0 引用），`classify_record` 调用次数从每行 2 次降到 1 次
 - [x] ~~**明细导入接口不返回 mismatch 标志（概述 §f 的"导入即校验"闭环）**~~ — 已完成（2026-10-09）：`_helpers.annotate_import_validation()` + `summarize_import_validation()` 新增，三页 `records/batch` 端点在插入后调用并回传 `mismatch`/`piece_mismatch`/`qty_invalid`/`unit_hint`/`piece_hint`/`mismatch_detail` + 顶层 `validation`；前端三页 build 函数改走 `readImportFlags()`（**服务端优先**）+ `notifyImportValidation()` 弹汇总。**拍板不落库**（mismatch 由备注+数量完全决定，刷新现算）。验证：`tools/verify_import_validation.py`（14 用例 + 零漂移）+ `_http.py`（三页端到端全绿，临时数据零残留）+ `_js.js`（前端 29/29）
-- [ ] **upload 目录纳入每日备份**（2026-10-28 事故的直接补救）：脚本 `tools/backup_upload_dir.py` 已就位（增量 + 每日快照 + 旧快照清理 + `--verify` 体检），首份快照已生成 `E:\BAK_upload\upload_20261028`（7,141 文件 / 2.2 GB）。**待办：给脚本加一条 Windows 计划任务**（脚本本身不会自动注册，见「数据库备份约定」章节说明）
+- [x] ~~**upload 目录纳入每日备份**~~ — 已完成（2026-10-28 上线，2026-11-06 复核）：脚本 `tools/backup_upload_dir.py` + Windows 计划任务 **`FengYuan_Upload_Daily_Backup`**（每天 23:45，SYSTEM / StartWhenAvailable，120 分钟超时）。11/05 23:45 实跑：7,249 文件 / 2,233 MB / 0 错误 / `RESULT: OK`，`LastTaskResult=0`
+- [ ] **`E:\BAK_upload` 的 `--keep 7` 已把事故基线 `upload_20261028` 裁掉**（2026-11-06 复核）：`prune()` 用 `shutil.rmtree` **硬删**（不可恢复），E 盘现只剩 `upload_20261102`～`upload_20261105` 四个快照。**基线数据未丢**：`D:\BAK\upload_20261028_1120` 仍有 7,141 文件 / 2.2 GB。E 盘剩余 315 GB，按 ~2.2 GB/天 × 满 7 份 ≈ 15 GB，空间安全；要不要把 `--keep` 调大留更长历史，由用户拍板
+- [ ] **`D:\worklog-app` 根目录散落 3 个库文件**（2026-11-06 复核）：`worklog.db.bak_20260926_112321`、`worklog.db.bak_20260926_141116`、`worklog_20261028_2330.db`，与真库 `worklog.db` 同目录 → 恢复时容易拿错。属破坏性操作，待用户点头后移到 `D:\BAK\`
+- [ ] **pytest 全量基线水位**（2026-11-06 实测，`487 s`）：`37 failed / 858 passed / 4 skipped / 8 errors`。**全是存量欠账，与 2026-11-06 新增的消防检查功能无关**（该功能专项 9/9 全绿）。根因分组：① `ocr_engine` 无 `_enhance_wrinkle_label` 方法而测试在等它（`test_clahe_preprocessing` 7 + `test_paddleocr_wrinkle_param` 6）② CLAHE 性能预算 P95 14.5 s ≫ 300 ms（`test_compare_rows_wrinkle`）③ 测试与模板/前端实现漂移（`test_product_row_alignment` 4 + `test_inbound_verify_warning` 1 + `test_shipping_row_cell_count` 1）④ 页面请求没带 session → 拿到 302 登录跳转（`test_mobile_*` 8）⑤ fixture 缺失导致 ERROR（`test_compare_prompt_order575` 4 + `test_validation_rules` 4）。要治得按组来，不是一把梭
+
 - [ ] **DB 里"引用但文件已丢"的断链图要治本**（2026-10-28 体检发现 **3,142 张**：2026-10 1,655 + **2026-09 1,480** + 2026-07/06 各若干）。九月那批**不是本次事故造成的**，说明历史上也丢过 —— 需查清是"删明细只删文件不删行"还是别的路径导致，并补上自动清理/自愈逻辑
 - [ ] **引擎白名单 4 处重复**：`ocr_engine._VALID_ENGINES` 已是唯一真源，但 shipping / inbound / loading 三个 `ai-recognize` 端点各自硬编码了一份 5 元组 → 下次加引擎要改 4 处。建议蓝图改 `from blueprints.ocr_engine import _VALID_ENGINES`（或把 `_` 前缀去掉暴露成 `VALID_ENGINES`）
 - [ ] **`PaddleOCRMiniMaxEngine` 靠私有方法 + 第二份 PaddleOCR 模型**：`DeepSeekEngine.__init__` 里 `self._ocr_engine = PaddleOCREngine()` 是新建实例而非 `get_ocr_engine('paddleocr')` 单例，复合引擎复用它的 `_ocr_image` 后，`paddleocr` + `paddleocr_minimax` 同进程会加载两份 PaddleOCR 模型。建议把 `DeepSeekEngine.__init__` 改成取单例
 - [ ] **整单 `ai-match` 全单被过滤时返回误导性 400**：`records` 过滤后为空 → `ocr_text` 空 → 返回「没有可识别的行级图片」，实际语义是「本单全部明细都跳过 AI 比对」。建议在过滤后加早退分支给明确文案
-- [ ] **`staff` 表 49 行里绝大部分是测试残留**（`test` / `verify` / `verify2` / `smoke-tester` ×5 / `portal-tester` ×2 / `veh-tester` / `portal-*`，id 段 6220+，全部 `is_active=1`）→ 建议精确 id 删除，**先备份 `D:\BAK\`**
+- [x] ~~**恢复 5 位真实人员**~~ — 已完成（2026-11-07）：从 `D:\BAK\worklog_20260718_1432_M1_complete_final.db` 恢复 阿海(2471/司机/男/1998-02-18) / 阿祥(2472/调度/男/1988-10-06) / 刘会(2473/文员/女/2000-05-10) / 阿荒(2474/打码/男/1997-04-05) / 调试员(2475/调度)。**沿用备份里的原始 id**（2471-2475 当前无人引用，插入不动 `sqlite_sequence`=6269，保留原始 created_at）；阿海原 `vehicle_id=405` 指向的车在 7 月就已删除 → **置 NULL**，避免悬空外键。恢复前已备份 `D:\BAK\worklog_20261107_0828_before_restore_staff.db`。登录页 `/login` 已能选到这 5 人，`/staff` 档案页正常显示
+- [ ] **`staff` 表 49 行测试残留待清理**（id 6220-6268：`test`×2 / `verify` / `verify2` / `smoke-tester`×42 / `portal-tester`×2 / `veh-tester`，全部 `is_active=1`）→ 建议精确 id 软删（`is_active=0`）或物理删，**先备份 `D:\BAK\`**。注意：`veh-tester`(6220) 是当前浏览器会话的操作员，删前先换登录身份
 - [ ] **入库 placement 已投入使用但覆盖面很小**（`inbound_images(source='placement')` 17 张图 / `inbound_placement_marks` 仅 15 行、覆盖 2 张图）→ 建议真机再走一遍上传+点数验收
 - [x] ~~**装柜拷贝纸/腊光纸前端无入口**~~ — 已完成（2026-10-15）：`loading_orders()` + `mobile_loading_order()` 调 `_enrich_no_ai_label_for_item` 富化 `is_no_ai_match` / `has_label_image` / `label_images`（预注入 `record_imgs_cache` 绕开 helper 内部 fallback 到 `ShippingImage` 的坑）；`templates/loading-orders.html` 操作列加普通 �️ 守卫 `not is_no_ai_match` + 新增 🖼️ 标签按钮（图区追加 `source='copy_paper_label'` 二级循环渲染）；`templates/mobile/loading-order.html` 加 `is_no_ai_match` 分支（徽章「标签图」/ 隐藏拍照识别 / 新增「📷 标签」按钮 + 缩略图 + fetch 脚本）；引入 `static/js/no_ai_label.js`，并修 `_image_upload_modal.html` `_copyPaperUploadSource` → `_noAiLabelUploadSource` 变量名错位(2026-10-09 rename 漏改,导致出货页此前也是半通)
 - [ ] **2026-10-09 `copy_paper` → `no_ai_label` rename 残留二次扫尾**（2026-10-17）：上一条修过一波（变量名/后端逻辑），但 CSS 选择器 + 模板水印文案没扫干净，直到 2026-10-17 用户报出货页「日本纸标签图上传后没红框」才暴露：① `templates/shipping-records.html:210` 红框 CSS 选择器仍写 `.copy-paper-label-btn` → 改成 `.no-ai-label-btn`（漏改导致出货页上传标签图后红框不生效）② 两页「统一按钮尺寸」CSS 选择器列表漏 `.no-ai-label-btn`（漏改导致免 AI 比对标签图按钮比普通图按钮大）③ 两页「标签图水印」硬编码 "拷贝纸标签" / "标签图"，而不是显示该 record 的 `品名 · 规格`（漏改导致 0105-0108 行上传后看不出是哪条明细）。三处都已修，但**入库页**没接免 AI 比对入口（`copy-paper-images` 端点都缺，见上一条），意味着上述三类残留一旦入库页接入口，还会再出现一次；扫尾时一并核对入库页 CSS 选择器 / 水印文案是否同步改对
 - [ ] **入库页对齐出货/装柜免 AI 比对标签图**：`inbound.py` 缺 `POST /api/v1/inbound-orders/records/<rid>/copy-paper-images` 端点 + `inbound-records.html` 普通 �️ 无 `is_no_ai_match` 守卫 + `mobile/inbound-order.html` 缺标签按钮/缩略图/fetch 脚本;工作量可沿用本次装柜改完归纳的标准模式(后端 copy-paper-images 端点 + 前端双按钮 + mobile handler + enrich helper,单页对齐)
 - [ ] **`product_row_utils.js` 只被装柜页引用**（出货/入库内联复制了同名函数）→ 要么给三页都挂上，要么明确放弃共享
+- [x] ~~**车辆维护记录只能增删、不能改；也没有图片**~~ — 已完成（2026-11-02）：新增 `vehicle_maintenance_images` 表 + 2 个图片端点（上传多张 / 删图）+ `POST /vehicle-maintenance/edit/<id>` 改记录；页面每条记录下方加「图片子行」（缩略图网格 + 计数 + 「📷 添加图片」磁贴），点磁贴开「添加图片」弹框（**支持 Ctrl+V 直接粘贴截图** + 多选文件 + 待上传队列）；删记录级联删图。详见 §26
 - [ ] 推送本地 commits 到 GitHub（需先开梯子，见 [[GitHub 需要梯子]]）
 - [x] ~~D 盘数据库备份~~ — 常态执行，脚本 `D:\BAK\_backup_now.py` + `D:\BAK\_verify_backup.py`（最近一份 `worklog_20260927_1927.db`，校验 MATCH）
 - [ ] task_flow.py 中 `coding-claim`/`coding-done`/`coding-release` 三个端点 501 占位 → M2 实现
@@ -1335,6 +1652,7 @@ DELETE /api/v1/<page>-orders/placement-images/<id>/marks/last
 - [ ] 入库 align 复制至出货：核对入库对齐逻辑能否让出货也用上（2026-08-13 在 inbound.py 加，未在 shipping.py 同步）
 - [ ] 入库/装柜**缺 `/re-ocr` 端点**（出货页独占）→ 若需三页一致可补
 - [ ] 入库页**缺 copy-paper 上传端点**（出货/装柜已有）
+- [ ] **商品编号已接 入库 + 出货 两页**（入库 2026-11-13 / 出货 2026-11-14，均改独立列，见 §28）；**装柜页 `/loading-orders` 与移动端 `templates/mobile/inbound-order.html` 仍未接**。接的时候复用 `Product.get_code_lookup()` + `Product.match_code()`，渲染走独立 `<td class="product-code-cell">`（别内嵌进 `.spec-cell`，会污染其 `textContent`）；目标页若用 `buildShippingRecordRow` 插行，按表头 `th.product-code-col` 补 td，同时同步所有 `tds[n]` 索引与规格 `th.spec-cell`；未匹配占位按页面需求选 `—` 或钩子 `window.productCodeMissingHtml`
 - [ ] 重复代码：`placement_count.js`(744) 与 `loading_placement_count.js`(768) 早期称约 90% 重复，但后者已反超 → 需重新评估哪些差异是有意为之，再决定是否参数化成单文件
 - [x] ~~蓝图数量命名口径统一~~ — 已完成（2026-09-29）：全文统一为「18 个蓝图文件 / 19 个 Blueprint 实例 / 27 个 .py」
 
@@ -1421,6 +1739,145 @@ DELETE /api/v1/<page>-orders/placement-images/<id>/marks/last
 - 单人能放宽的（无认证、外网风险）也要为多人用做铺垫，但**不要立刻上**重型的多用户架构
 - 业务便利性（效率/防错）和工程性（架构/复用/可扩展）两手都兼顾
 - 端起来（落地可用）优先于完美设计——快速出能跑的小工具，远胜长期空想
+
+---
+
+## 在建功能 · 库存管理（2026-11-16 启动）🚧
+
+**目标**：给 `product` 建**按仓库隔离**的库存；入库单**过账**把数量计入对应仓库存；
+库存**默认不启用**，盘点或归零后才开始计数（没盘过就没有可信基线）。
+
+**方案文档**（**动手前先读**）：
+- `docs/superpowers/plans/2026-11-15-库存管理-多仓过账.md` —— 主方案（数据模型 §三 / 口径 §二 / 决策 §十）
+- `docs/superpowers/plans/2026-11-16-库存管理-开发计划.md` —— **现行阶段划分（阶段 0~8）**
+- `docs/superpowers/plans/2026-11-16-库存管理-分批执行计划.md` —— ⚠️ **已作废**（B0~B7 排期被阶段划分取代）
+
+**已拍板（2026-11-16，用户）**：
+1. 订单明细表**不加** `product_code` 列 → 匹配永远靠「品名+规格」→ 引擎「重复键作废」兜底
+2. 盘点**两种都要**：PC 批量粘贴 + 手机现场录入（写同一张盘点单）
+3. 出货 / 装柜扣减**整体往后放** → V1 库存**只增不减**
+4. 盘点 / 归零**任何登录的人都能做**（不新增权限枚举）→ **但必须写 `audit_log`**
+
+**已落地**：
+- `tools/_verify_match_precision.py` —— 口径精度复验 + 重复 SKU 检查（**改级联或建完档后必跑**）
+- `D:\BAK\opening_snapshot_20261116.csv` —— 期初存档（1536 行）→ **DROP COLUMN 的唯一退路**
+
+**阶段 0 ✅ / 阶段 1 ✅**（2026-11-16）：
+- `blueprints/inventory_engine.py` —— 折算 / 匹配引擎（纯函数，259 行，35 条单测）
+- `models/_init.py` —— ⭐ `uk_product_name_spec` 唯一索引：`UNIQUE(product_name, COALESCE(specification,''))`
+  （挡「精确重复 + 规格留空重复」；**空格不参与**——业务要求空格原样保留，只差空格的两个 SKU 允许并存）
+- `models/products.py` —— `ProductConflictError` + `find_by_name_spec()`；`blueprints/products.py` API 返回 **400 + 中文提示**
+- `tools/stock_readiness_check.py` —— 过账就绪度体检（**直接 import 引擎** → 体检口径 = 上线口径）
+- `tools/_export_opening_snapshot.py` —— 期初存量存档（只读库，默认演练）
+- ⭐ `models/inventory.py` —— 库存 7 模型类（648 行）：`Warehouse` / `ProductStock` / `StockLedger` / `StockPosting` / `StockPostingSkip` / `StockCount` / `StockCountItem`
+- ⭐ `models/_init.py` 库存段 —— 7 张表 DDL + 索引 + `warehouses` 种子行（'FR' 芙蓉仓）+ 3 张订单表 `warehouse_id` ALTER 迁移
+- ⭐ `tools/stock_schema_check.py` —— 库存表结构体检（列定义 / UNIQUE / FK / 索引 / 种子行 / 存量 warehouse_id；`--idempotent` 在副本上验 init_db 幂等）
+- ⭐ `tests/test_inventory_models.py` —— 85 条单测
+
+**阶段 1.5 ✅（2026-11-16 19:45）** —— A 档地基补强（表还全空 → 零迁移成本）：
+- ⭐ `models/_init.py` —— `stock_ledger` 加 **4 列**（`occurred_at` / `balance_after` / `unit_cost` / `amount`）、`stock_counts` 加 `as_of`、**3 个守卫触发器**、幂等 ALTER 迁移
+- ⭐ `models/inventory.py` —— `StockLedger.create()` 接新列 + **`create_if_absent()`（先查后写的幂等入口，返回 `(ledger_id, created)`）**；`StockCount.create()` 建单即写 `as_of`
+- ⭐ `tools/verify_stock_balance.py` —— **新增**（A1 对账：缓存可重算 / `balance_after` 链连续 / `occurred_at` 非空）。**演练默认；`--apply` 只重算 `product_stock.quantity` 缓存，绝不改历史流水**
+- ⭐ `tools/stock_schema_check.py` —— 补 5 列预期 + 触发器检查 + **触发器体白名单扫描**
+- ⭐ `tests/test_inventory_models.py` —— **85 条全绿**
+- 备份：`D:\BAK\worklog_20261116_1940_pre_stage1.5_cost_columns.db`（**MATCH**，49 表）
+
+**阶段 1.5 踩到的 3 个坑（写代码前必读）**：
+1. ⚠️⚠️ **ALTER 加列必须排在 CREATE INDEX 之前** ——
+   存量表没有 `occurred_at` 时，`CREATE INDEX ... ON stock_ledger(occurred_at)` 直接报
+   `no such column` → **整个 `init_db()` 崩掉 → Flask 起不来**（服务直接挂）。
+   顺序必须是：CREATE TABLE → **ALTER 补列** → CREATE INDEX → CREATE TRIGGER。
+2. ⚠️ **`INSERT OR REPLACE` 绕得过 DELETE 触发器**（`recursive_triggers=0` 时）→ 第 3 条触发器不能省，幂等必须「先查后写」
+3. ⚠️ **触发器体白名单扫描要剥掉字符串字面量** —— 否则报错文案里的字会被当成写关键字误判
+4. ⚠️ **ALTER 加的列只能追加到表末尾** → 存量库列顺序与文档 CREATE 语句不一致（**无害**，SQLite 无「指定位置插列」语法；新建库逐字一致；体检脚本不校验列顺序）
+
+**成本字段现状（2026-11-16 用户拍板）**：
+- ⭐ **成本两列已落 DDL**：`stock_ledger.unit_cost` / `amount`（均可空、**V1 不写**）
+  → 理由：流水有禁改触发器，**历史成本单价永远无法回填** → 现在不加列，V2 只能从零起算、期初成本缺失
+- `unit_cost` 口径：**每个 `product.base_unit` 的成本**（不是原始单位的价）
+- **成本核算方法（移动加权 / FIFO）V2 再定**（V1 不预设）→ 要知道：FIFO 需连带做批次表，移动加权不需
+- ⚠️ `product.cost_price` 是**参考成本价**（现有字段，0 行有值），与将来的**实际加权成本**是两回事
+
+**阶段 1.6 ✅（2026-11-16 20:25 ~ 2026-11-17 08:45）** —— FK 一致性（B 方案，用户拍板）+ 修 3 个「全新库缺列」真 bug：
+- ⭐ `models/_init.py` —— 4 张库存表 DDL 改成 `{tbl}` 模板 + 各加 FK；
+  新增 `_fk_pairs()` / `_rebuild_table_for_fk()`（SQLite 加不了约束 → 只能 DROP + CREATE 重建表）
+- ⭐ `models/_init.py` —— `TRG_LEDGER` 触发器元组化（重建表要按原样建回，DROP 会连带删触发器和索引）
+- ⭐ `models/_init.py` —— 重建顺序 **stock_postings → stock_ledger → stock_posting_skips → stock_counts**（被引用方先建）
+- ⭐ `tools/stock_schema_check.py` —— FK 检查从 3 条补到 **8 条**（原来漏了 5 条，体检形同虚设）
+- ⭐ `tools/check_fresh_db_schema.py` —— **新增**：全新库 vs 生产库逐表逐列对比（专治「全新库缺列」这一类 bug）
+- ⭐ `tests/test_stage16_fk_rebuild.py` —— **新增 6 条**（全新库建库 / 幂等 / 重建保数据 / 补列回归）
+- 备份：`D:\BAK\worklog_20261116_2025_pre_stage1.6_fk_consistency.db`（**MATCH**，49 表）
+  ＋ 后置 `D:\BAK\worklog_20261117_0841_post_stage1.6_fk_consistency_and_freshdb_column_fixes.db`（**MATCH**，49 表）
+- ⭐ `tools/check_rowcount_stable.py` —— **新增**：改库前后逐表行数比对（证明「这次改动没动数据」）
+
+**阶段 1.6 踩到的坑（写代码前必读）**：
+1. ⚠️⚠️ **ALTER 补列语句必须排在目标表的 `CREATE TABLE` 之后** ——
+   排在前面的后果：存量库没事（表早建好了），**全新库静默失败**（表还不存在）→ 全新库缺列、生产库正常 →
+   只在「换机重建 / 新人 clone 下来」时才炸，**现场极难复现**。
+   本阶段实测踩中 3 处：`shipping_images` 缺 `manual_count`/`is_unload`、
+   `loading_order_images` **缺 15 列**（全新库只有 5 列）、`shipping_orders` 缺 `doc_number`。
+2. ⚠️⚠️ **SQLite 的 `ALTER TABLE` 加不了外键约束** → 只能 DROP + CREATE 重建表，而重建要过 4 道坎：
+   ① `PRAGMA foreign_keys` **在事务内是 no-op**（必须先 commit 再关）
+   ② DROP 一个还被别的表引用的父表 → 必须 `PRAGMA legacy_alter_table=ON`，否则 RENAME 时重解析 schema 遇悬空 FK 直接报错
+   ③ **DROP TABLE 会连带删掉该表的索引和触发器** → 重建后必须按原样建回（且要在 RENAME 之后建）
+   ④ 数据搬运**必须按列名**（不能用 `SELECT *`）—— 新旧列顺序可能不同（ALTER 追加的列在末尾）
+3. ⚠️ **改表结构后，观察方的连接必须重开** —— 重建表是**另一个连接**做的，旧连接还持着旧 schema 的读快照，
+   `PRAGMA foreign_key_list` 会读到**重建前**的信息（看起来像「重建没生效」）。**这是 schema 缓存，不是重建逻辑的锅。**
+4. ⚠️ **DDL 模板用 `.replace('{tbl}', ...)` 不用 `.format()`** —— DDL 注释里有 `{record_id}` 等花括号，format 会炸
+5. ⚠️ **FK 只当兜底，不当唯一防线** —— 阶段 3 的过账 API **仍要做应用层校验**
+   （`Warehouse.get_by_id()` 查不到 → 400 + 中文提示），否则 `IntegrityError` 变成用户看不懂的 500
+6. ⚠️ **FK 一上就暴露出旧测试的脏写法** —— `posting_id` 指向不存在的批次现在直接被 DB 挡下（原来能写进去）
+
+**阶段 2 ✅（2026-11-17 10:00）** —— 库存查询（**只读**，不写任何库存数据）：
+- ⭐ `blueprints/stock.py` —— **新增**（`bp` 页面 + `bp_api` API 双蓝图，`bp_api` 前缀 `/api/v1`）：
+  `GET /stock` · `GET /api/v1/warehouses` · `GET /api/v1/stock` · `GET /api/v1/stock/<pid>` ·
+  `GET /api/v1/stock/ledger` · `GET /api/v1/stock/export.csv`
+- ⭐ `templates/stock.html` —— **新增**：仓库静态标签「🏭 芙蓉仓」+ 分类树（左栏）+ 搜索 + 状态列 + 内部累计（可折叠）+ 导出 + 行展开看流水
+- ⭐ `models/inventory.py` —— `list_stock_view` / `count_stock_view` / `stats_by_warehouse` / `sum_by_warehouse` / `list_ledger` / `count_ledger`
+- ⭐ `models/products.py` —— `ProductCategory.descendant_ids()`（分类子树）；`ProductCategory.create()` 改成**返回新建 id**
+- `templates/base.html` —— 导航加「📦 库存」（在「商品管理」和「码数报价」之间）
+- `tests/test_stock_readonly.py` —— **28 条**
+
+**阶段 2 踩到的 3 个坑（写代码前必读）**：
+1. ⚠️⚠️ **库存页主查询必须以 `product` 为驱动表** —— `product_stock` 现在 **0 行**（只在盘点/归零后才有行）。
+   从 `product_stock` 出发 `INNER JOIN product` → **库存页上线当天一片空白**。
+   而完成判据要求「未启用的商品要显示出来（0 + 灰色未启用标签）」→
+   必须 `FROM product p LEFT JOIN product_stock ps ON ps.product_id = p.product_id AND ps.warehouse_id = ?`，
+   `ps` 字段用 `COALESCE(..., 0)` 兜底。
+2. ⚠️ **「内部累计」不能逐行查** —— `sum_by_product()` 是单 SKU 一次查询，1600 行 = 1600 次（N+1）→
+   新增 `sum_by_warehouse()` 按仓一次 `GROUP BY product_id` 聚合。
+3. ⚠️ **「CSV 与页面逐行一致」要靠结构保证，不是人工核对** —— 页面和导出**共用**同一个
+   `_parse_stock_query()` + `_fetch_stock_rows()`，导出只是不加分页。筛选口径一处定义，不会分叉。
+   ⚠️ 唯一差别是 **CSV 注入防护前缀**（品名 `=+-@` 开头会多一个 `'`）—— 传输层保护，不是数据变化。
+
+**阶段 2 顺带定的 2 个口径**：
+- **统计格跟随当前筛选**（分类 / 搜索 / 仅看已启用）—— 主流进销存通用做法：
+  用户筛了「灰板类」，统计格就该说这批有多少，不能还报全仓的数。旁边给「全仓共 N 个」对照行。
+- **分类筛选含子树** —— 选父分类要含所有后代（`ProductCategory.descendant_ids`），
+  否则用户点「白坯布」看不到三级子类，会以为货丢了。
+- **`/api/*` 不在登录闸门白名单里** → 库存 API **自己判 session**，没登录返回 401 + JSON（不是 500，也不是放行）。
+- **`ProductCategory.create()` 原来返回 None** → 改成返回新建的 id（现有调用方忽略返回值，不受影响）。
+
+**阶段 1 的 5 个坑（写代码前必读）**：
+1. ⚠️ **SQL 片段必须 `' '.join(sql)`，不能 `''.join(sql)`** —— `list_by_warehouse` 一开始写成 `''`，
+   `ORDER BY ... ASC` + `LIMIT ?` 粘成 `ASCLIMIT` → 所有库存列表 500
+2. **`stock_ledger.uniq_key` 全局唯一，不按仓分组** —— 一条明细一生只过账一次，换仓也不能再过（防双重计入）
+3. **`product_stock` FK → `product` 且 FK 开着** → **有库存行的商品不允许直接删**（阶段 4 做友好报错）
+4. **`stock_count_items` FK → `stock_counts` 无 ON DELETE** → 删盘点单必须先删明细
+5. **`models/stock.py` 已被「缺货登记 StockOutItem」占用** → 库存模型必须叫 `models/inventory.py`
+
+**关键口径**（2026-11-16 13:30 实测，**库是活的，数字会漂**）：
+入库明细 1162 行 / 365 张单 → 可过账 **1045 (89.9%)**，待人工 115，折算失败 1，数量非法 1。
+匹配分布：L1 精确 962 · L2 去空格 80 · L4b 规格前缀唯一解 5。
+
+**踩过的坑（写代码前必读）**：
+1. **没有「同名任一行」兜底** —— 那 130 行是猜的（候选 SKU 1~96 个），错配比不匹配隐蔽
+2. **折算规则按 `product` 表的品名查**，不能按入库单写的品名查（带空格 / 带 7P 前缀会落空）
+3. `yards_per_piece = 0` 视为「无规则」（当 0 系数入账会把库存清零）
+4. **同名同规格多 SKU → 该键作废**，不许取第一条（15P/21P 建档后必然出现）。
+   历史上出现过 3 组（规格串行 2 组 + 规格漏填 1 组），2026-11-16 已由用户清理 → 当前 0 组；
+   引擎这条规则是「不加 product_code」决策的**最后一道防线，别删**（数据库索引管不到「只差空格」的变体）
+5. 期初数**只存档不采用**（它是目录图抄下来的「期初数」，不是实时库存）；库存靠盘点起算
 
 ---
 
@@ -1645,3 +2102,67 @@ Get-Content "D:\BAK\logs\backup_$(Get-Date -Format 'yyyy-MM-dd').log" -Tail 20
 **保留策略**：D 盘容量充足，**不主动清理**——保留历史快照作为时间机器；用户主动说"清理旧的"才动手（必须用 `mavis-trash`，不许 `Remove-Item -Force`）。项目目录下的临时备份保留至少 1 份作近期参考即可，不需要全量同步到 D 盘。
 >
 > 当前 `D:\BAK` 已有 87 份备份（约 440 MB），按每天 19 MB 估算年增约 7 GB，D 盘余量 240 GB+，**暂不需要清理**。
+
+---
+
+## 商品档案批量维护 SOP（2026-11-14 沉淀 · 可复用）
+
+> 适用场景：从**外部台账 / 截图 / Excel** 往 `product`（或其它主数据表）批量灌数据、按分类节点批量删商品、或给明细表**增删列**。
+> 实战来源：2026-11-14「141 / RA弹力胶」27 条删除 → 29 条按截图回灌 → 入库页商品编号独立成列。脚本见 §F，既有踩坑点见「踩坑点 6 / 11」。
+
+### A. 动手前先把口径分歧摆到台面上（不要猜）
+
+外部源表和库内数据几乎必然不一致，先逐项对照并**让用户拍板**，再写第一行代码：
+
+| 分歧 | 本次实例 | 必须确认 |
+|---|---|---|
+| 编号规则 | 源表后 5 条 9 位 `0206004xx`，库里统一 8 位 `020604xx`（历史导入做过归一化） | 按源表原样 / 归一化成库内规则 |
+| 字段取值 | 截图库存 `02060401`=2409，删前备份库=2092；`预设售价1` 是 `****` 脱敏 | 按源表可见列 / 按备份库完整字段 / 只填核心列 |
+| 空值语义 | 源表基本条码列全空、部分库存为空 | 脱敏与空格一律 `NULL`，**不要填 `0` 或 `''`** |
+| 数量口径 | 「源表 29 条 vs 库里 27 条」不等于漏删 | 先查多出的行在**删前**库里是否存在（按编号 / 名称+规格 / 其它分类三路查） |
+
+判据：库里是「编号/品名/规格/型号/主单位/辅单位/库存/辅数量」，源表是「商品编号/商品全名/…/基本条码/预设售价1」——**列头不一致就说明不是本系统页面**，别拿系统模板去套。
+
+### B. 六步流程（删、插、改都走这一条）
+
+1. **只读定位**：`PRAGMA table_info` / `sqlite_master` + 分类树递归 CTE，确认节点**唯一性**（同名节点、level、父链、子节点数）、页面查询口径（`Product.get_by_category()` 用 `WHERE category_id = ?`，**不递归**；叶子节点两种口径才相等）。交叉验证至少三路：按 id / 按编码前缀 / 按名称模糊。
+2. **影响面预检**：分「DB 层强制约束」与「业务层软关联」两张表说清楚。前者查 `PRAGMA foreign_key_list`（入向 + 出向）、触发器、视图、`PRAGMA foreign_key_check`；后者查哪些表只存 `product_name`+`specification` 文本快照（**不存 product_id**），删主数据不破坏历史单据但会让 `Product.match_code()` / 语音 fuzzy「失明」。统计受影响的历史行数并明示。
+3. **备份**：用 `sqlite3.Connection.backup()` 做 **WAL 安全在线快照** → `D:\BAK\worklog_YYYYMMDD_HHMM.db`；逐表比对行数 + `integrity_check=ok`；把回滚方式写进回复（停 5050 → 覆盖 `worklog.db` → 清 `-wal`/`-shm` → 重启）。别用裸 `Copy-Item`（WAL 下可能拿到不一致快照）。
+4. **演练**：把备份载入 `:memory:`，先在副本上跑一遍目标 DELETE / INSERT，实测 FK 行为、rowcount、`integrity_check`、有无新增 FK 违规、分类节点是否仍在。**演练通过才碰生产库**。
+5. **写入**：一次性维护连接 + 显式 id / 编号清单 + 事务 + `rowcount` 断言 + 双保险 `WHERE`（如 `id IN (...) AND category_id=141`）；**禁止 `LIKE '%xx%'` 模糊删**。任何断言失败立即 `rollback`，脚本非 0 退出。
+6. **独立复核**：换一个进程、换一种查询方式读回**逐字段**比对；`integrity_check`；探活 5050；最后明示「遗留影响 / 未修项 / 完成-部分-未完成」三段状态。
+
+### C. 三个必须记住的硬约束（本次踩出来的）
+
+- ⚠️ **`product` 表有悬空外键**：`models/_init.py:1084-1088` 在 2026-10-14 `DROP TABLE product_weight_categories`，但 `product.weight_category_id` 列上的 `REFERENCES ... ON DELETE SET NULL` 子句留在 DDL 里（当时 SQLite 不支持 DROP COLUMN）。该列全表为 NULL，语义上永不触发，**但 `PRAGMA foreign_keys=ON` 时 SQLite 准备语句仍解析目标表 → 任何 INSERT / DELETE 都报 `no such table: main.product_weight_categories`**。应用 `get_db()` 显式开 FK（`models/_db.py:18`）⇒ **页面「新增商品」「删除商品」目前都是坏的**，`Product.delete()` / `DELETE /api/v1/products/<id>` 也一样。
+  - 本次处置：维护连接 `PRAGMA foreign_keys = OFF`，前置断言「`weight_category_id` 非 NULL 行数=0」+「`voice_phrase_mapping` 引用=0」+ 演练通过；**不改 schema、不改应用连接**。真正修要重建 `product` 表（去掉 FK 子句），须单独授权。
+- **外部 sqlite 工具默认 `foreign_keys=OFF`**：绕开应用手工删不会触发 `ON DELETE CASCADE`，以后 `voice_phrase_mapping` 有数据就会留孤儿。要删就走应用连接或手工 `PRAGMA foreign_keys=ON`。
+- **时间戳口径**：新行走实际库 DDL 的 `DEFAULT CURRENT_TIMESTAMP`（**UTC**），历史行是本地时间；`models/_init.py` 里写的是 `datetime('now','localtime')`，与实际库不一致。属既存 schema 差异，写入时不要擅自「修正」。
+
+### D. 从截图 / 台账导入的识读防错
+
+- **分块放大**：Pillow 按「行组 × 左右列块」裁成多张 3x LANCZOS 图逐行识读，再拼成**硬编码清单**（可核对、可复跑），不要凭整张图直接生成 SQL。
+- **找数据内在算术关系做断言**：本类商品满足 `库存数量 = 支数 × 每支码数 + 散码`（每支码数从 `aux_unit` 如 `1支=92码` 解析，支数/散码从 `aux_quantity` 如 `26支17码` 解析）。本次 17 行有数值全部通过（26×92+17=2409、49×100=4900）→ 能有效排除行错位 / 串行 / 数字看错。**以后同类导入必须复用这个校验思路**。
+- **编号位数、8/9 位混用、规格写法差异**逐条写进清单并对照库；「看起来差不多」不算核对。
+- **本次字段映射**（源表 → `product`）：`型号→model`、`基本单位→base_unit`、**`辅助单位→aux_unit`（值是 `1支=92码`，不是条码列！）**、`库存数量→stock_quantity`、`辅助数量→aux_quantity`；`barcode`/`cost_price`/`conversion_rate`/`preset_price` 留 NULL，`category_id=141`、`status=1`。
+- 写入后按 `(product_name, specification)` 反查三页历史单据的编号回填命中率（本次出货 82/93、入库 78/108、装柜 5/5），把「文本快照规格写法不一致」量化出来，别笼统说「不受影响」。
+
+### E. 明细表增删列的连带检查清单
+
+1. 表头 / 服务端渲染行 / JS `buildXxxRow` **三处**同步；列宽百分比合计保持不溢出。
+2. **全库 grep `tds[` / `cells[` / `nth-child(` / `children[`**：新增一列会让所有列索引整体 +1（本次行内编辑可编辑列从 `tds[3]` 起，保存后还要回写只读编号列 `tds[2]`）。顺带检查 `colspan` 警告行、搜索取值、行内编辑取值。
+3. **共享模板按表头自适应，别写死列数**：`_smart_add_modal.html::buildShippingRecordRow` 三页共用，按目标表 `th.product-code-col` 决定补不补 td → 入库/出货 10 列、装柜 9 列（零回归）。页面差异（如未匹配占位）走 `window.productCodeMissingHtml` 钩子，由目标页定义、共享模板 `typeof` 检测后回退默认值，**别把页面专属文案硬编码进共享模板**。
+4. **`_record_image_script.html::_ensureMatchColumn` 的逗号选择器按 DOM 顺序返回首个匹配**，列序变化后会把 AI 比对列插错位置 → 改成「先 `th.spec-cell`、再 fallback `nth-child`」。
+5. **锁定旧实现的测试必须同步重写**（本次 `tests/test_inbound_product_code.py` 原来断言 `data-product-code` + CSS `::after`），并补 jsdom 结构验证（各页 td 数、AI 比对列位置）。
+6. **改 `CLAUDE.md` 用「末尾追加 + 唯一命中」**，不要跨段落替换；改完跑 `tools/audit_claude_md_section_f.py` + grep 全量核对（见「踩坑点」与项目记忆里的 2026-10-09 事故）。
+
+### F. 可复用脚本（都在 `tools/`，下次直接照抄骨架）
+
+| 脚本 | 骨架 |
+|---|---|
+| `_delete_cat141_products.py` | 显式 id 列表 → WAL 在线备份 → FK=OFF → 断言链（前置 / rowcount / 行数 / integrity）→ 事务 → 独立复核说明 |
+| `_insert_cat141_from_image.py` | 硬编码清单 → **算术自检** → 唯一编号 + 零冲突断言 → 备份 → FK=OFF 单事务插入 → **逐字段读回比对** |
+| `_patch_inbound_code_column.py` | CRLF 模板多段替换，**每条替换断言命中次数 = 1**，避免静默漏改 |
+| `_verify_inbound_code_column.js` | jsdom 加载模板，验证表头 / JS 建行 / 共享弹窗三页 td 数与 AI 比对列位置 |
+
+**维护脚本通用写法**：二进制读写保 CRLF；`python -X utf8` 执行；含中文的脚本先落文件再跑；一次性脚本命名 `_` 前缀并留在 `tools/` 作审计凭证，不删除。

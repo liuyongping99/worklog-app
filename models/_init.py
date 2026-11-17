@@ -4,6 +4,66 @@ import os
 import sqlite3
 from datetime import datetime
 from ._db import get_db
+
+
+def _fk_pairs(conn, table):
+    """表的外键 (列, 父表) 集合。"""
+    return {(r['from'], r['table']) for r in conn.execute(f'PRAGMA foreign_key_list({table})')}
+
+
+def _rebuild_table_for_fk(conn, cursor, tbl, ddl_tpl, want_fks, indexes=(), triggers=()):
+    """给已存在的表补外键约束 —— SQLite 的 ALTER TABLE **加不了**约束,只能重建表。
+
+    重建要过 4 道坎(每一条都踩过坑,别简化):
+      ① `PRAGMA foreign_keys` 在**事务内是 no-op** → 必须在 BEGIN 之前关掉;
+         所以先 conn.commit() 确保不在事务里。
+      ② DROP 一个还被别的表引用的父表(如 stock_postings)→ 要 `PRAGMA legacy_alter_table=ON`,
+         否则后面 RENAME 时 SQLite 会重解析整个 schema,发现悬空 FK 直接报错。
+      ③ DROP TABLE 会连带删掉**该表的索引和触发器** → 重建后必须一并建回来;
+         且索引/触发器要在 RENAME **之后**再建,这样触发器体里的表名指向最终表名。
+      ④ 数据搬运要**按列名**写,不能用 SELECT * —— 新旧列顺序可能不同
+         (ALTER 追加的列在末尾),按位置对应会错位。
+
+    幂等:目标 FK 已经都在 → 直接跳过,什么都不做。
+    返回 True = 真的重建了。
+    """
+    have = _fk_pairs(conn, tbl)
+    if all(fk in have for fk in want_fks):
+        return False
+
+    conn.commit()                     # 确保不在事务里(PRAGMA 在事务内是 no-op)
+    conn.execute('PRAGMA foreign_keys = OFF')
+    conn.execute('PRAGMA legacy_alter_table = ON')
+    try:
+        tmp = f'{tbl}__fknew'
+        cursor.execute(f'DROP TABLE IF EXISTS {tmp}')
+        cursor.execute(ddl_tpl.replace('{tbl}', tmp))
+
+        old_cols = [r['name'] for r in conn.execute(f'PRAGMA table_info({tbl})')]
+        new_cols = [r['name'] for r in conn.execute(f'PRAGMA table_info({tmp})')]
+        lost = [c for c in old_cols if c not in new_cols]
+        if lost:
+            # 宁可不迁移,也不要静默丢列 → 直接炸,让人来处理
+            raise RuntimeError(
+                f'重建 {tbl} 会丢列 {lost}(新 DDL 里没有这些列)—— 已中止,请先对齐 DDL')
+        common = [c for c in old_cols if c in new_cols]
+        collist = ', '.join(common)
+        if common:
+            cursor.execute(f'INSERT INTO {tmp} ({collist}) SELECT {collist} FROM {tbl}')
+
+        cursor.execute(f'DROP TABLE {tbl}')
+        cursor.execute(f'ALTER TABLE {tmp} RENAME TO {tbl}')
+        for ix in indexes:
+            cursor.execute(ix)
+        for tg in triggers:
+            cursor.execute(tg)
+        conn.commit()
+    finally:
+        conn.execute('PRAGMA legacy_alter_table = OFF')
+        conn.execute('PRAGMA foreign_keys = ON')
+    return True
+
+
 def init_db():
     conn = get_db()
     cursor = conn.cursor()
@@ -73,6 +133,73 @@ def init_db():
         )
     ''')
 
+    # 车辆维护记录图片（2026-11-02 新增）
+    # 存相对路径(month_dir + file_name)而非绝对盘符路径 —— 规避踩坑点 9（换盘要跑迁移）
+    # 文件本体落在 upload/<YYYY-MM>/ 下，与出货/入库/装柜图片同目录，纳入 upload 备份脚本覆盖
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS vehicle_maintenance_images (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            record_pk INTEGER NOT NULL,
+            file_name TEXT NOT NULL,
+            month_dir TEXT NOT NULL DEFAULT '',
+            original_name TEXT,
+            created_at TEXT NOT NULL
+        )
+    ''')
+    try:
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_vehicle_maint_images_record_pk '
+            'ON vehicle_maintenance_images(record_pk)'
+        )
+    except sqlite3.OperationalError:
+        pass
+
+    # 消防检查记录（2026-11-06 新增）
+    # 例行消防设施检查台账：日期 / 部位 / 检查事项 / 遗留事项 / 状态 / 备注
+    # status 由 models/fire_check.py 按「遗留事项是否为空」推导，DB 侧只存不校验
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS fire_checks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT NOT NULL,
+            location TEXT DEFAULT '',
+            check_items TEXT NOT NULL,
+            outstanding_items TEXT DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'open',
+            remark TEXT DEFAULT '',
+            user_id INTEGER,
+            created_at TEXT NOT NULL,
+            updated_at TEXT
+        )
+    ''')
+    try:
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_fire_checks_date '
+            'ON fire_checks(date)'
+        )
+    except sqlite3.OperationalError:
+        pass
+
+    # 消防检查记录图片（2026-11-08 新增）
+    # 与 vehicle_maintenance_images 同款：存相对路径(month_dir + file_name) 而非绝对盘符路径
+    # —— 规避踩坑点 9（换盘要跑迁移脚本改写全库）
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS fire_check_images (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            record_pk INTEGER NOT NULL,
+            file_name TEXT NOT NULL,
+            month_dir TEXT NOT NULL DEFAULT '',
+            original_name TEXT,
+            created_at TEXT NOT NULL
+        )
+    ''')
+    try:
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_fire_check_images_record_pk '
+            'ON fire_check_images(record_pk)'
+        )
+    except sqlite3.OperationalError:
+        pass
+
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS shipping_orders (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -84,6 +211,8 @@ def init_db():
             img_cols INTEGER NOT NULL DEFAULT 1,
             order_note TEXT NOT NULL DEFAULT '',
             user_id INTEGER DEFAULT NULL,
+            doc_number TEXT NOT NULL DEFAULT '',   -- ⭐2026-11-16 单据编号(与生产库列序对齐)
+            warehouse_id INTEGER NOT NULL DEFAULT 1,
             UNIQUE(date, customer, order_num)
         )
     ''')
@@ -98,7 +227,10 @@ def init_db():
             created_at TEXT NOT NULL,
             is_locked INTEGER NOT NULL DEFAULT 0,
             order_note TEXT NOT NULL DEFAULT '',
-            user_id INTEGER DEFAULT NULL
+            user_id INTEGER DEFAULT NULL,
+            doc_number TEXT NOT NULL DEFAULT '',   -- ⭐2026-11-16 单据编号(与生产库列序对齐)
+            img_cols INTEGER NOT NULL DEFAULT 5,   -- ⭐2026-11-16 补进建表语句
+            warehouse_id INTEGER NOT NULL DEFAULT 1
         )
     ''')
 
@@ -118,13 +250,16 @@ def init_db():
             created_at TEXT NOT NULL,
             is_locked INTEGER NOT NULL DEFAULT 0,
             order_note TEXT NOT NULL DEFAULT '',
-            user_id INTEGER DEFAULT NULL
+            user_id INTEGER DEFAULT NULL,
+            doc_number TEXT NOT NULL DEFAULT '',   -- ⭐2026-11-16 单据编号(与生产库列序对齐)
+            img_cols INTEGER NOT NULL DEFAULT 5,   -- ⭐2026-11-16 默认值 3→5(与生产库一致)
+            warehouse_id INTEGER NOT NULL DEFAULT 1
         )
     ''')
 
     # 迁移：为已存在的 loading_orders 表添加 img_cols 列
     try:
-        cursor.execute('ALTER TABLE loading_orders ADD COLUMN img_cols INTEGER NOT NULL DEFAULT 3')
+        cursor.execute('ALTER TABLE loading_orders ADD COLUMN img_cols INTEGER NOT NULL DEFAULT 5')
     except Exception:
         pass  # 列已存在
 
@@ -158,8 +293,12 @@ def init_db():
     except Exception:
         pass
 
-    # 迁移：入库/装柜订单 doc_number 列（单据编号，例如出货单号）
-    for tbl in ('inbound_orders', 'loading_orders'):
+    # 迁移：三张订单表加 doc_number 列（单据编号，例如出货单号）
+    # ⭐2026-11-16 修 bug:原来只覆盖 inbound_orders / loading_orders,
+    #   **漏了 shipping_orders** → 全新库重建出来的 shipping_orders 没有这一列,
+    #   而 models/orders.py 的 ShippingOrder.set_doc_number() 会执行
+    #   `UPDATE shipping_orders SET doc_number = ?` → 全新库上直接报错。
+    for tbl in ('shipping_orders', 'inbound_orders', 'loading_orders'):
         try:
             cursor.execute(f"ALTER TABLE {tbl} ADD COLUMN doc_number TEXT NOT NULL DEFAULT ''")
         except Exception:
@@ -382,22 +521,14 @@ def init_db():
         cursor.execute("ALTER TABLE shipping_images ADD COLUMN loose_count INTEGER DEFAULT 0")
     except Exception:
         pass
-    # 2026-09-09: 补齐 loading_order_images 摆放图相关列(与 shipping_images 对齐),
-    # 若已存在则 skip。live DB 已含这些列,_init.py 仅用于全新库重建时补足。
-    for col, typ in (
-        ('source', 'TEXT DEFAULT NULL'),
-        ('record_pk', 'INTEGER DEFAULT NULL'),
-        ('sort_order', 'INTEGER DEFAULT NULL'),
-        ('mark_scale', 'REAL DEFAULT 1'),
-        ('loose_count', 'INTEGER DEFAULT 0'),
-        ('manual_count', 'INTEGER DEFAULT NULL'),
-        ('is_unload', 'INTEGER DEFAULT 0'),
-        ('source_tag', 'TEXT DEFAULT NULL'),
-    ):
-        try:
-            cursor.execute(f"ALTER TABLE loading_order_images ADD COLUMN {col} {typ}")
-        except Exception:
-            pass
+    # 2026-09-09: 补齐三张图片表的摆放图 / 标签匹配相关列。
+    # ⭐ 2026-11-16 阶段 1.6:这段补列**整体挪到了下面**(三张图片表 CREATE 之后)。
+    #    原因:ALTER 补列语句**必须排在目标表的 CREATE TABLE 之后**。
+    #    排在前面的后果是:存量库没事(表早建好了),**全新库静默失败**(表还不存在)
+    #    → 全新库缺列、生产库正常 → 只在「换机重建 / 新人 clone」时才炸,极难察觉。
+    #    本阶段实测踩中 3 处:shipping_images 缺 manual_count/is_unload、
+    #    loading_order_images 缺 15 列、shipping_orders 缺 doc_number。
+    #    统一放一处 → 见文件末尾「图片表列对齐安全网」,别再往这里加补列语句。
 
 
     # 2026-08-17: 独立点数工具 -- 独立建表 / 单独持久化(可追溯)
@@ -584,9 +715,59 @@ def init_db():
             file_path TEXT NOT NULL,
             original_name TEXT DEFAULT '',
             created_at TEXT NOT NULL,
+            -- ⭐2026-11-16 阶段 1.6:下面这批列原先**只靠 ALTER 补**,
+            --   而那些 ALTER 排在本 CREATE 之前 → 全新库建表时全部静默失败,
+            --   全新库的 loading_order_images 只有 5 列,装柜的行级标签图 /
+            --   摆放图计数 / 卸货取负全用不了(生产库正常,所以一直没人发现)。
+            --   现在直接写进建表语句,列序与生产库一致。
+            source TEXT DEFAULT 'upload',
+            record_pk INTEGER DEFAULT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            match_status TEXT DEFAULT NULL,
+            match_score REAL DEFAULT NULL,
+            reason TEXT DEFAULT NULL,
+            human_verified INTEGER DEFAULT 0,
+            match_source TEXT DEFAULT NULL,
+            bg_color TEXT DEFAULT NULL,
+            circles TEXT DEFAULT NULL,
+            mark_scale REAL DEFAULT 1,
+            loose_count INTEGER DEFAULT 0,
+            manual_count INTEGER DEFAULT NULL,
+            is_unload INTEGER DEFAULT 0,
+            source_tag TEXT DEFAULT NULL,
             FOREIGN KEY (order_pk) REFERENCES loading_orders(id)
         )
     ''')
+
+    # ── ⭐2026-11-16 阶段 1.6:三张图片表「列对齐安全网」────────────────
+    # ⚠️⚠️ 这块**必须放在三张图片表的 CREATE TABLE 之后**。
+    #    原因:ALTER 补列语句排在 CREATE 之前 → 存量库没事(表早建好了),
+    #    **全新库静默失败**(表还不存在)→ 全新库缺列、生产库正常,
+    #    只在「换机重建 / 新人 clone 下来」时才炸,现场极难复现。
+    #    本阶段实测踩中 3 处(见上方注释),所以把三张图片表的列集中声明一次。
+    # 语义:已有列 → skip;缺列 → ALTER 补上。存量库 / 全新库 行为一致。
+    # 验证工具:python tools/check_fresh_db_schema.py
+    for _img_tbl in ('shipping_images', 'inbound_images', 'loading_order_images'):
+        for _col, _ddl in (
+            ('source', "TEXT DEFAULT 'upload'"),
+            ('record_pk', 'INTEGER DEFAULT NULL'),
+            ('sort_order', 'INTEGER NOT NULL DEFAULT 0'),
+            ('match_status', 'TEXT DEFAULT NULL'),
+            ('match_score', 'REAL DEFAULT NULL'),
+            ('reason', 'TEXT DEFAULT NULL'),
+            ('human_verified', 'INTEGER DEFAULT 0'),
+            ('match_source', 'TEXT DEFAULT NULL'),
+            ('bg_color', 'TEXT DEFAULT NULL'),
+            ('source_tag', 'TEXT DEFAULT NULL'),
+            ('circles', 'TEXT DEFAULT NULL'),
+            ('mark_scale', 'REAL DEFAULT 1'),
+            ('loose_count', 'INTEGER DEFAULT 0'),
+            ('manual_count', 'INTEGER DEFAULT NULL'),
+            ('is_unload', 'INTEGER DEFAULT 0'),
+        ):
+            _have = {r['name'] for r in cursor.execute(f'PRAGMA table_info({_img_tbl})')}
+            if _col not in _have:
+                cursor.execute(f'ALTER TABLE {_img_tbl} ADD COLUMN {_col} {_ddl}')
 
     # ── product（产品管理） ──
     cursor.execute('''
@@ -613,6 +794,21 @@ def init_db():
     ''')
     cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS uk_product_code ON product(product_code)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_product_category ON product(category_id)')
+    # ── 「品名 + 规格」唯一约束(2026-11-16)────────────────────────────────
+    # 为什么要有:库存系统靠「品名+规格」认货(订单明细表没有 product_code 列),
+    #   同一个 (品名,规格) 指向两个 SKU 时,引擎只能拒绝匹配 → 落「待人工」,
+    #   库存永远对不上。数据库层面直接不让建,比事后发现强。
+    # 为什么用 COALESCE(specification,''):
+    #   SQLite 里 NULL 互不相同 → 普通 UNIQUE(name, spec) 拦不住「规格为空」的重复
+    #   (2026-11-16 清理掉的 3 组里就有 1 组正是这种)。COALESCE 把 NULL 归成 ''。
+    # 为什么品名不去空格:
+    #   空格在业务上有意义,必须原样保留(用户 2026-11-16 明确要求)。
+    #   'A1.5米 200g' 与 'A1.5米200g' 允许并存为两个 SKU;
+    #   引擎侧靠「L1 原始精确优先 + 归一键歧义作废」保证不会串货(宁可漏配不可错配)。
+    cursor.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uk_product_name_spec "
+        "ON product(product_name, COALESCE(specification, ''))"
+    )
 
     # 操作日志表（未来多用户用——"谁在什么时候改了什么"是刚需）
     cursor.execute('''
@@ -1023,6 +1219,277 @@ def init_db():
     # 2026-09-09: copy_paper_images 表已废弃(标签图迁入 shipping_images,
     # source='copy_paper_label';点数走 shipping_images(source='placement')),
     # 不再建表;本机迁移时旧表已 DROP,不影响运行。
+
+    # ══════════════════════════════════════════════════════════════════
+    # 库存管理(多仓 + 入库过账)—— 阶段 1:表结构 + 模型层地基
+    # 2026-11-16。设计文档:docs/superpowers/plans/2026-11-15-库存管理-多仓过账.md §三
+    # ══════════════════════════════════════════════════════════════════
+    # 几条不能忘的设计约束(改代码前先看这里):
+    #   · **仓库是数据不是结构** —— 用 warehouses 表,将来加「田心仓」不用改表结构
+    #   · **期初数不导入** —— product_stock 从空表起步,库存靠「盘点」起算
+    #     (product.stock_quantity 是目录图上抄的期初数,不是实时库存;
+    #      已存档到 D:\BAK\opening_snapshot_20261116.csv,B6 阶段才 DROP 那个列)
+    #   · **is_tracking 区分「真 0」和「未启用」** —— 默认 0(未启用,对外按 0 显示),
+    #     只有盘点 / 归零才置 1。过账**绝不**自动启用。
+    #   · **stock_ledger.UNIQUE(uniq_key)** 是幂等的唯一保障
+    #     (inbound:{record_id} / adjust:{seq} / {biz}:{record_id}:rev)
+    #   · **红字冲销,不删不改** —— 冲销写一条 quantity 为负的流水,原记录留着
+    #   · FK 是开的(get_db 里 PRAGMA foreign_keys = ON)→ product_stock 引用 product,
+    #     所以**有库存的商品不允许直接删**(删除会被 FK 拦下)
+
+    # ── 3.1 warehouses 仓库 ─────────────────────────────────────────
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS warehouses (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            code        TEXT    NOT NULL UNIQUE,      -- 'FR' / 'TX'
+            name        TEXT    NOT NULL,             -- '芙蓉仓' / '田心仓'
+            is_default  INTEGER NOT NULL DEFAULT 0,
+            sort_order  INTEGER NOT NULL DEFAULT 0,
+            status      INTEGER NOT NULL DEFAULT 1,
+            created_at  TEXT DEFAULT (datetime('now','localtime')),
+            updated_at  TEXT DEFAULT (datetime('now','localtime'))
+        )
+    ''')
+    # 唯一的种子行:芙蓉仓(id=1)。INSERT OR IGNORE → 幂等,重复跑不报错。
+    cursor.execute(
+        "INSERT OR IGNORE INTO warehouses (code, name, is_default, sort_order) "
+        "VALUES ('FR', '芙蓉仓', 1, 1)"
+    )
+
+    # ── 3.2 product_stock 当前库存(仓库 × SKU)──────────────────────
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS product_stock (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            warehouse_id  INTEGER NOT NULL,
+            product_id    INTEGER NOT NULL,
+            quantity      REAL    NOT NULL DEFAULT 0,   -- 折算到 product.base_unit;is_tracking=1 时才对外显示
+            is_tracking   INTEGER NOT NULL DEFAULT 0,   -- 1=已纳入库存计算;0=未纳入(对外按 0 处理)
+            tracking_started_at TEXT,                  -- 纳入库存计算的起始时刻
+            updated_at    TEXT DEFAULT (datetime('now','localtime')),
+            UNIQUE(warehouse_id, product_id),
+            FOREIGN KEY (warehouse_id) REFERENCES warehouses(id),
+            FOREIGN KEY (product_id)   REFERENCES product(product_id)
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_product_stock_wh ON product_stock(warehouse_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_product_stock_product ON product_stock(product_id)')
+
+    # ── 3.3 stock_ledger 库存流水(一切的唯一来源)──────────────────
+    # ⭐ 阶段 1.6:DDL 存成模板,「重建表加外键」时用 .replace('{tbl}', ...) 复用同一份定义
+    #    —— 避免建表语句和重建语句两处 truth 漂移。
+    #    ⚠️ 用 replace 不用 format:DDL 注释里有 `{record_id}` 等花括号,format 会炸。
+    DDL_LEDGER = '''
+        CREATE TABLE IF NOT EXISTS {tbl} (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            warehouse_id  INTEGER NOT NULL,
+            biz_type      TEXT    NOT NULL,   -- 'opening' | 'inbound' | 'adjust' | 'outbound' | 'loading'
+            uniq_key      TEXT    NOT NULL,   -- 幂等键: inbound:{record_id} / adjust:{seq} / {biz}:{record_id}:rev
+            order_pk      INTEGER NOT NULL DEFAULT 0,
+            record_id     INTEGER NOT NULL DEFAULT 0,
+            product_id    INTEGER NOT NULL,
+            quantity      REAL    NOT NULL,   -- 基本单位数量;红字为负
+            unit          TEXT    NOT NULL,   -- 折算后的基本单位
+            raw_quantity  REAL    NOT NULL DEFAULT 0,
+            raw_unit      TEXT    NOT NULL DEFAULT '',
+            factor        REAL    NOT NULL DEFAULT 1,
+            is_reversal   INTEGER NOT NULL DEFAULT 0,
+            posting_id    INTEGER,
+            operator_id   INTEGER,
+            memo          TEXT    NOT NULL DEFAULT '',
+            occurred_at   TEXT    NOT NULL DEFAULT '',   -- ⭐A4 业务日期(取订单 date);期间汇总/盘点切分一律用它
+            balance_after REAL,                         -- ⭐A1 本笔记账后该(仓,SKU)的余额快照
+            unit_cost     REAL,                         -- ⭐B档预留:每个基本单位的成本(可空,V1 不写)
+            amount        REAL,                         -- ⭐B档预留:本笔金额 = quantity × unit_cost(可空,V1 不写)
+            created_at    TEXT DEFAULT (datetime('now','localtime')),  -- 记账时刻(系统时间,不用于期间汇总)
+            UNIQUE(uniq_key),
+            FOREIGN KEY (warehouse_id) REFERENCES warehouses(id),
+            FOREIGN KEY (posting_id)   REFERENCES stock_postings(id)
+        )
+    '''
+    cursor.execute(DDL_LEDGER.replace('{tbl}', 'stock_ledger'))
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_stock_ledger_product ON stock_ledger(product_id, warehouse_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_stock_ledger_posting ON stock_ledger(posting_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_stock_ledger_created ON stock_ledger(created_at)')
+
+    # ── 幂等迁移:给已建好的 stock_ledger 补 A 档 / B 档新列 ──────────
+    # 2026-11-16 阶段 1.5。建表语句只对**新建**的库生效;存量库要靠这段 ALTER 补列。
+    # ALTER TABLE ADD COLUMN 是追加操作,不重写表、不锁表;表当时全 0 行 → 零数据风险。
+    # ⚠️ occurred_at 带 NOT NULL,所以 DEFAULT 必须是 '' 而不是 NULL(SQLite 的硬性要求)。
+    # ⚠️⚠️ **这段 ALTER 必须排在下面 CREATE INDEX 之前** ——
+    #    存量表还没有 occurred_at 列时,`CREATE INDEX ... ON stock_ledger(occurred_at)`
+    #    会直接报 `no such column: occurred_at`,整个 init_db() 崩掉 → Flask 起不来。
+    for _col, _ddl in (
+        ('occurred_at', "occurred_at TEXT NOT NULL DEFAULT ''"),
+        ('balance_after', 'balance_after REAL'),
+        ('unit_cost', 'unit_cost REAL'),
+        ('amount', 'amount REAL'),
+    ):
+        _cols = {r['name'] for r in cursor.execute('PRAGMA table_info(stock_ledger)').fetchall()}
+        if _col not in _cols:
+            cursor.execute(f'ALTER TABLE stock_ledger ADD COLUMN {_ddl}')
+
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_stock_ledger_occurred ON stock_ledger(occurred_at)')
+
+    # ── ⭐A3 只追加:数据库层禁止改 / 删流水(光靠应用层约定挡不住手工 SQL)──
+    # ⚠️ 加了这几个触发器后,流水**永远**不能 UPDATE / DELETE / REPLACE ——
+    #    改错只能走红字冲销(写一条 quantity 取负的流水),对账脚本也**不能**改历史流水。
+    #
+    # ⚠️⚠️ **为什么必须是 3 条**:实测 SQLite 3.45.3,前两条能挡 UPDATE / DELETE、
+    #    放行正常 INSERT,但 **`INSERT OR REPLACE` 在默认 `recursive_triggers=0` 下
+    #    不触发 DELETE 触发器** → 可无声把流水数量从 10 改成 999。
+    #    第 3 条 `BEFORE INSERT ... WHEN EXISTS(...)` 在冲突旧行被删之前触发,
+    #    故能同时拦住 INSERT OR REPLACE / ON CONFLICT DO UPDATE / DO NOTHING / OR IGNORE,
+    #    **无需开任何 PRAGMA**。代价:幂等写法必须「先查后写」(见 models/inventory.py)。
+    # 存成变量,阶段 1.6 重建表时(DROP 会连带删掉触发器)要原样建回来。
+    TRG_LEDGER = (
+        '''
+        CREATE TRIGGER IF NOT EXISTS trg_stock_ledger_no_update
+        BEFORE UPDATE ON stock_ledger
+        BEGIN SELECT RAISE(ABORT, 'stock_ledger 只可追加;改错请走红字冲销'); END;
+    ''',
+        '''
+        CREATE TRIGGER IF NOT EXISTS trg_stock_ledger_no_delete
+        BEFORE DELETE ON stock_ledger
+        BEGIN SELECT RAISE(ABORT, 'stock_ledger 只可追加;禁止删除'); END;
+    ''',
+        '''
+        CREATE TRIGGER IF NOT EXISTS trg_stock_ledger_no_reuse
+        BEFORE INSERT ON stock_ledger
+        WHEN EXISTS (SELECT 1 FROM stock_ledger WHERE uniq_key = NEW.uniq_key)
+        BEGIN SELECT RAISE(ABORT, 'uniq_key 不可复用;禁止 REPLACE / UPSERT 改账'); END;
+    ''',
+    )
+    for _t in TRG_LEDGER:
+        cursor.execute(_t)
+
+    # ── 3.4 stock_postings 过账批次 ───────────────────────────────
+    DDL_POSTINGS = '''
+        CREATE TABLE IF NOT EXISTS {tbl} (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            biz_type       TEXT    NOT NULL DEFAULT 'inbound',
+            order_pk       INTEGER NOT NULL,
+            warehouse_id   INTEGER NOT NULL,
+            posted_at      TEXT    NOT NULL,
+            operator_id    INTEGER,
+            operator_name  TEXT,
+            status         TEXT    NOT NULL DEFAULT 'posted',   -- 'posted' | 'reversed'
+            reversed_at    TEXT,
+            posted_count   INTEGER NOT NULL DEFAULT 0,
+            posted_qty     REAL    NOT NULL DEFAULT 0,
+            skipped_count  INTEGER NOT NULL DEFAULT 0,
+            note           TEXT    NOT NULL DEFAULT '',
+            FOREIGN KEY (warehouse_id) REFERENCES warehouses(id)
+        )
+    '''
+    cursor.execute(DDL_POSTINGS.replace('{tbl}', 'stock_postings'))
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_stock_postings_order ON stock_postings(biz_type, order_pk)')
+
+    # ── 3.5 stock_posting_skips 跳过明细(待处理清单)───────────────
+    DDL_SKIPS = '''
+        CREATE TABLE IF NOT EXISTS {tbl} (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            posting_id     INTEGER NOT NULL,
+            order_pk       INTEGER NOT NULL,
+            record_id      INTEGER NOT NULL,
+            product_name   TEXT,
+            specification  TEXT,
+            raw_quantity   TEXT,
+            raw_unit       TEXT,
+            reason_code    TEXT NOT NULL,   -- 'no_product' | 'no_conversion' | 'bad_base_unit' | 'bad_qty' | 'not_tracking'
+            reason_text    TEXT NOT NULL,
+            resolved       INTEGER NOT NULL DEFAULT 0,
+            created_at     TEXT DEFAULT (datetime('now','localtime')),
+            FOREIGN KEY (posting_id) REFERENCES stock_postings(id)
+        )
+    '''
+    cursor.execute(DDL_SKIPS.replace('{tbl}', 'stock_posting_skips'))
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_stock_skips_posting ON stock_posting_skips(posting_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_stock_skips_unresolved ON stock_posting_skips(resolved)')
+
+    # ── 3.7 stock_counts / stock_count_items 盘点单(对齐 point_count 会话模式)──
+    DDL_COUNTS = '''
+        CREATE TABLE IF NOT EXISTS {tbl} (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            warehouse_id  INTEGER NOT NULL DEFAULT 1,   -- 单仓设计:固定 1(芙蓉仓)
+            title         TEXT    NOT NULL,              -- '11月全仓盘点'
+            remark        TEXT    NOT NULL DEFAULT '',
+            status        TEXT    NOT NULL DEFAULT 'open',-- 'open' | 'closed'
+            total_items   INTEGER NOT NULL DEFAULT 0,   -- 应盘商品数
+            counted_items INTEGER NOT NULL DEFAULT 0,   -- 已录数
+            diff_items    INTEGER NOT NULL DEFAULT 0,   -- 有差异数
+            created_by    INTEGER,
+            created_at    TEXT    NOT NULL,
+            as_of         TEXT    NOT NULL DEFAULT '',   -- ⭐A5 盘点基准时点(建单时刻);提交时按它切分期间流水
+            closed_at     TEXT,
+            FOREIGN KEY (warehouse_id) REFERENCES warehouses(id)
+        )
+    '''
+    cursor.execute(DDL_COUNTS.replace('{tbl}', 'stock_counts'))
+    # 幂等迁移:存量库补 as_of(A5)
+    _cols = {r['name'] for r in cursor.execute('PRAGMA table_info(stock_counts)').fetchall()}
+    if 'as_of' not in _cols:
+        cursor.execute("ALTER TABLE stock_counts ADD COLUMN as_of TEXT NOT NULL DEFAULT ''")
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS stock_count_items (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            count_id        INTEGER NOT NULL,
+            product_id      INTEGER NOT NULL,
+            book_quantity   REAL    NOT NULL DEFAULT 0,  -- 账面数(建单时快照)
+            actual_quantity REAL,                        -- 实盘数;NULL = 待录
+            counted_at      TEXT,
+            UNIQUE(count_id, product_id),
+            FOREIGN KEY (count_id) REFERENCES stock_counts(id)
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_stock_count_items_count ON stock_count_items(count_id)')
+
+    # ── 3.8 ⭐阶段 1.6:给 4 张库存表补外键约束(B 方案)───────────────
+    # 为什么要补:全库 24 张表都建了 FK,库存这 4 张是唯一的例外 → 风格不统一,
+    # 而且「流水指向一个不存在的仓 / 跳过明细指向一个已删的批次」这类脏数据没人拦。
+    # 为什么能补:SQLite 的 ALTER TABLE 加不了外键约束 → 只能 DROP + CREATE 重建表。
+    #             但这 4 张表当时**全 0 行** → 重建零数据损失(窗口期)。
+    # 顺序:**被引用方先建**(stock_postings → stock_ledger → stock_posting_skips → stock_counts),
+    #       否则重建中间会出现悬空 FK。
+    # ⚠️ 仓库引用的 FK 会不会「挡住删仓」?—— 不会:
+    #    `product_stock.warehouse_id → warehouses(id)` 早就建了,只要该仓有过库存行就已经拦住了;
+    #    且 `warehouses.status` 的存在说明设计上是「停用代替删除」。
+    # ⚠️ 但 **FK 拦下来的错在 Flask 里是 500** → 阶段 3 的过账 API 仍要做应用层校验,
+    #    把「仓库不存在」翻译成 400 + 中文提示(FK 只当兜底)。
+    _rebuild_table_for_fk(
+        conn, cursor, 'stock_postings', DDL_POSTINGS,
+        want_fks=[('warehouse_id', 'warehouses')],
+        indexes=('CREATE INDEX IF NOT EXISTS idx_stock_postings_order '
+                 'ON stock_postings(biz_type, order_pk)',),
+    )
+    _rebuild_table_for_fk(
+        conn, cursor, 'stock_ledger', DDL_LEDGER,
+        want_fks=[('warehouse_id', 'warehouses'), ('posting_id', 'stock_postings')],
+        indexes=('CREATE INDEX IF NOT EXISTS idx_stock_ledger_product '
+                 'ON stock_ledger(product_id, warehouse_id)',
+                 'CREATE INDEX IF NOT EXISTS idx_stock_ledger_posting ON stock_ledger(posting_id)',
+                 'CREATE INDEX IF NOT EXISTS idx_stock_ledger_created ON stock_ledger(created_at)',
+                 'CREATE INDEX IF NOT EXISTS idx_stock_ledger_occurred ON stock_ledger(occurred_at)'),
+        triggers=TRG_LEDGER,
+    )
+    _rebuild_table_for_fk(
+        conn, cursor, 'stock_posting_skips', DDL_SKIPS,
+        want_fks=[('posting_id', 'stock_postings')],
+        indexes=('CREATE INDEX IF NOT EXISTS idx_stock_skips_posting ON stock_posting_skips(posting_id)',
+                 'CREATE INDEX IF NOT EXISTS idx_stock_skips_unresolved ON stock_posting_skips(resolved)'),
+    )
+    _rebuild_table_for_fk(
+        conn, cursor, 'stock_counts', DDL_COUNTS,
+        want_fks=[('warehouse_id', 'warehouses')],
+    )
+
+    # ── 3.6 现有表改动:三张订单表加 warehouse_id(默认 1 = 芙蓉仓)──
+    # 全新库走上面的 CREATE TABLE(列已直接写进去);
+    # 存量库靠这段 ALTER 补列(SQLite 的 ALTER 是追加操作,不重写表)。
+    for tbl in ('inbound_orders', 'shipping_orders', 'loading_orders'):
+        try:
+            cursor.execute(f'ALTER TABLE {tbl} ADD COLUMN warehouse_id INTEGER NOT NULL DEFAULT 1')
+        except Exception:
+            pass  # 列已存在
 
     # ── 启动 seed:为管理页要列出的分类节点占位空白提示词 ─────────
     # 2026-08-08 新增:不再依赖 classify_record 自动分类精度,

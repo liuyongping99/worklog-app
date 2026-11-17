@@ -8,6 +8,7 @@
 """
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
 from models import ProductUnit, ProductCategory, Product
+from models.products import ProductConflictError
 
 bp = Blueprint('products', __name__)
 
@@ -236,6 +237,9 @@ def api_v1_products_create():
         )
         product = Product.get_by_id(product_id)
         return jsonify({'success': True, 'id': product_id, 'product': product}), 201
+    except ProductConflictError as e:
+        # 「品名+规格」重复 / 编号重复 —— 400 + 人话,别把 sqlite 原文吐给用户
+        return jsonify({'success': False, 'error': e.message}), 400
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -249,7 +253,10 @@ def api_v1_products_update(product_id):
     data = request.get_json()
     if not data:
         return jsonify({'success': False, 'error': '请求体不能为空'}), 400
-    Product.update(product_id, data)
+    try:
+        Product.update(product_id, data)
+    except ProductConflictError as e:
+        return jsonify({'success': False, 'error': e.message}), 400
     updated = Product.get_by_id(product_id)
     return jsonify({'success': True, 'product': updated})
 

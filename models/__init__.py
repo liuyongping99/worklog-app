@@ -5,7 +5,8 @@
 """
 from ._db import get_db, DB_PATH
 from ._init import init_db
-from .basic import WorkLog, ErrorLog, TodoItem, VehicleMaintenance
+from .basic import WorkLog, ErrorLog, TodoItem, VehicleMaintenance, VehicleMaintenanceImage
+from .fire_check import FireCheck, FireCheckImage
 from .notice import Notice, NoticeImage
 from .orders import (
     ShippingOrder, ShippingRecord, ShippingImage, PlacementImage,
@@ -17,6 +18,10 @@ from .point_count import PointCountSession, PointCountImage
 from .stock import StockOutItem
 from .products import ProductUnit, ProductCategory, Product
 from .piece_conversion import PieceConversion
+from .inventory import (
+    Warehouse, ProductStock, StockLedger, StockPosting,
+    StockPostingSkip, StockCount, StockCountItem,
+)
 from .audit import AuditLog
 from .audit_query import OcrEventAudit
 from .category_prompt import CategoryPrompt, classify_record
@@ -25,7 +30,8 @@ from .daily_check import DailyOrderCheck
 
 __all__ = [
     'get_db', 'DB_PATH', 'init_db',
-    'WorkLog', 'ErrorLog', 'TodoItem', 'VehicleMaintenance',
+    'WorkLog', 'ErrorLog', 'TodoItem', 'VehicleMaintenance', 'VehicleMaintenanceImage',
+    'FireCheck', 'FireCheckImage',
     'Notice', 'NoticeImage',
     'ShippingOrder', 'ShippingRecord', 'ShippingImage', 'PlacementImage',
     'InboundOrder', 'InboundRecord', 'InboundImage', 'InboundPlacementImage',
@@ -35,6 +41,8 @@ __all__ = [
     'StockOutItem',
     'ProductUnit', 'ProductCategory', 'Product',
     'PieceConversion',
+    'Warehouse', 'ProductStock', 'StockLedger', 'StockPosting',
+    'StockPostingSkip', 'StockCount', 'StockCountItem',
     'AuditLog',
     'OcrEventAudit',
     'CategoryPrompt',

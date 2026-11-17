@@ -11,11 +11,13 @@ from ._db import get_db
 _MAVIS_TRASH = shutil.which('mavis-trash')
 
 
-def _safe_remove_file(file_path):
+def _safe_remove_file(file_path, upload_root=None):
     """删除图片物理文件,走 mavis-trash(进回收站,可恢复)+ 路径白名单(防误删其他文件)。
 
     Args:
         file_path: 文件绝对路径(从 DB file_path 字段读取)
+        upload_root: 允许删除的根目录(默认项目根下的 upload/)。
+            传参用于测试隔离 —— 测试把上传目录指向临时目录时,白名单也须跟着走。
 
     Returns:
         bool - True 表示文件已送入回收站(或本来就不存在),False 表示越界被拒或 mavis-trash 不可用
@@ -25,8 +27,10 @@ def _safe_remove_file(file_path):
     # 路径白名单:先校验路径在 upload/ 下(必须在 exists 检查之前,防攻击者用不存在的路径绕过)
     try:
         real = os.path.realpath(file_path)
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        upload_root = os.path.realpath(os.path.join(base_dir, 'upload'))
+        if upload_root is None:
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            upload_root = os.path.join(base_dir, 'upload')
+        upload_root = os.path.realpath(upload_root)
         if not real.startswith(upload_root + os.sep):
             # 路径越界,拒绝(攻击者构造 ../etc/passwd 之类的路径,即使文件不存在也不能放行)
             return False

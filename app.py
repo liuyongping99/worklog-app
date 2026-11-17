@@ -169,6 +169,8 @@ def create_app():
     from blueprints.category_prompts_manage import bp as cat_prompt_manage_bp
     from blueprints.mobile_shipping import bp as mobile_shipping_bp
     from blueprints.point_count import bp as point_count_bp, bp_api as point_count_api_bp
+    # 阶段 2:库存查询(只读)—— bp 走页面 /stock,bp_api 走 /api/v1/{warehouses,stock}
+    from blueprints.stock import bp as stock_bp, bp_api as stock_api_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(upload_bp)
@@ -189,6 +191,8 @@ def create_app():
     app.register_blueprint(mobile_shipping_bp)
     app.register_blueprint(point_count_bp)
     app.register_blueprint(point_count_api_bp)
+    app.register_blueprint(stock_bp)
+    app.register_blueprint(stock_api_bp)
 
     return app
 

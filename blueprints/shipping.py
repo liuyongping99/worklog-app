@@ -21,6 +21,7 @@ from models import (
     InboundRecord, LoadingOrderRecord,  # 2026-09-21: ypp-review scan 支持入库/装柜
     classify_record, CategoryPrompt,
     DailyOrderCheck,  # 2026-10-26: 日终盘点(手填当日单据总量)
+    Product,  # 2026-11-14: 明细行回填商品编号
 )
 from blueprints._helpers import (
     get_upload_dir as get_helpers_upload_dir,
@@ -451,8 +452,13 @@ def shipping_records():
     def _check_piece(remark, quantity_str, conv):
         return check_piece_mismatch(remark, quantity_str, conv)
 
+    # 2026-11-14:明细行回填商品编号 —— 商品名+规格命中 product 表的 product_code,
+    #   与入库页同一口径。一次查表 + 内存匹配(不逐行查库)。
+    code_lookup = Product.get_code_lookup()
     for group in groups:
         for item in group['records']:
+            item['product_code'] = Product.match_code(
+                item.get('product_name', ''), item.get('specification', ''), code_lookup)
             # 2026-09-29: 皮革/木板类不显示行级图片按钮 —— 模板守卫 `{% if not item.is_board %}`
             # 必须依赖此字段;若未设,模板里 item.is_board 为 undefined/falsy,按钮照旧显示。
             item['is_board'] = _is_board(item.get('product_name', ''))
@@ -951,6 +957,11 @@ def api_v1_shipping_orders_add_records_batch(order_id):
         return jsonify({'success': False, 'error': '批量添加失败,已整批回滚'}), 500
     records = result['records']
     skipped = result['skipped']
+    # 2026-11-14:回传商品编号供前端新建行显示(一次查表,批量共用同一份快照)
+    code_lookup = Product.get_code_lookup()
+    for rec in records:
+        rec['product_code'] = Product.match_code(
+            rec.get('product_name', ''), rec.get('specification', ''), code_lookup)
 
     # 一条都没成功 → 400:让前端知道这次提交完全无效,而不是收一个 201 空响应当成功
     if not records:
@@ -1024,6 +1035,9 @@ def api_v1_shipping_orders_update_record(record_id):
 
     ShippingRecord.update(record_id, data)
     updated = ShippingRecord.get_by_id(record_id)
+    # 2026-11-14:改品名/规格后商品编号要重算 —— 前端行内编辑保存后刷新编号列
+    updated['product_code'] = Product.match_code(
+        updated.get('product_name', ''), updated.get('specification', ''))
     AuditLog.log('update_record', 'shipping_order', updated['order_pk'], detail={'record_id': record_id})
     return jsonify({'success': True, 'record': updated})
 
@@ -1126,6 +1140,7 @@ def api_v1_shipping_orders_upload_image(order_id):
                 validate_image_content(filepath)
             except ValueError as e:
                 return jsonify({'success': False, 'error': str(e)}), 400
+            _helpers.backup_to_ebak(filepath)
             original_name = 'pasted_image'
         else:
             return jsonify({'success': False, 'error': '无效的图片数据'}), 400
@@ -1136,13 +1151,16 @@ def api_v1_shipping_orders_upload_image(order_id):
                 ext = check_uploaded_image(file)
             except ValueError as e:
                 return jsonify({'success': False, 'error': str(e)}), 400
-            filename = f"{uuid.uuid4().hex}.{ext}"
+            if not ext.startswith('.'):
+                ext = '.' + ext
+            filename = f"{uuid.uuid4().hex}{ext}"
             filepath = os.path.join(upload_dir, filename)
             file.save(filepath)
             try:
                 validate_image_content(filepath)
             except ValueError as e:
                 return jsonify({'success': False, 'error': str(e)}), 400
+            _helpers.backup_to_ebak(filepath)
             original_name = file.filename
         else:
             return jsonify({'success': False, 'error': '未选择文件'}), 400
@@ -1403,6 +1421,7 @@ def _save_one_uploaded_file(file, upload_dir):
     filepath = os.path.join(upload_dir, filename)
     file.save(filepath)
     validate_image_content(filepath)
+    _helpers.backup_to_ebak(filepath)
     return filepath, file.filename
 
 
@@ -1422,6 +1441,7 @@ def _save_one_base64_image(data_url, upload_dir):
     with open(filepath, 'wb') as f:
         f.write(img_bytes)
     validate_image_content(filepath)
+    _helpers.backup_to_ebak(filepath)
     return filepath, 'pasted_image'
 
 

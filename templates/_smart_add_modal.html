@@ -123,15 +123,29 @@ function buildShippingRecordRow(rec, tbody) {
     var placementBtn = (hint && hint.indexOf('支') !== -1) || (pieceHint && pieceHint.indexOf('支') !== -1)
         ? '<button type="button" class="placement-add-btn lock-hide" data-record-id="'+rec.id+'" data-order-id="'+_smartFillOrderPk+'" title="添加点数图(供清点支数)" onclick="openPlacementImageModal(\''+rec.id+'\',\''+_smartFillOrderPk+'\')">点数</button>'
         : '';
+    // 2026-11-14:入库 + 出货页把商品编号独立成列(在商品名称之前)。本函数三页共用,
+    //   按目标表格表头是否带 th.product-code-col 决定是否补 td,装柜页不受影响。
+    //   未匹配占位由页面级钩子决定:出货页是红色「未匹配」,入库页回退「—」。
+    var _codeTd = '';
+    var _tbl = tbody && tbody.closest ? tbody.closest('table.record-table') : null;
+    if (_tbl && _tbl.querySelector('thead th.product-code-col')) {
+        var _missing = (typeof window.productCodeMissingHtml === 'function')
+            ? window.productCodeMissingHtml() : '—';
+        _codeTd = '<td class="product-code-cell">'
+            + (rec.product_code ? '<span class="product-code-badge">'+escHtml(rec.product_code)+'</span>' : _missing)
+            + '</td>';
+    }
     tr.innerHTML =
         // 1. 序号(可能带 ❌/💡/❌ 前缀图标)
         '<td style="text-align:center;color:#868e96;font-size:0.85rem;">'+prefix+(tbody.children.length+1)+'</td>' +
         // 2. 重点(eco-col)— 永远占位,服务端按 has_eco 控制 .no-eco class 隐藏整列
         '<td class="eco-col"></td>' +
+        _codeTd +
         // 3. 商品名称
         '<td class="product-name-cell" style="font-size:0.9rem;">'+escHtml(rec.product_name)+'</td>' +
-        // 4. 规格
-        '<td class="spec-cell" style="color:#636e72;font-size:0.9rem;">'+escHtml(rec.specification||'')+'</td>' +
+        // 4. 规格(编号已独立成列,规格 cell 文本保持干净)
+        '<td class="spec-cell" style="color:#636e72;font-size:0.9rem;">'
+            + escHtml(rec.specification||'')+'</td>' +
         // 5. 数量(match-col 是虚拟列,首次有匹配结果时由 _ensureMatchColumn 动态补建)
         '<td class="qty-cell"><span class="qty-badge">'+escHtml(rec.quantity)+'</span></td>' +
         // 6. 单位
@@ -454,7 +468,7 @@ document.addEventListener('DOMContentLoaded', function() {
 // 「首屏扫描」和「点已核查后重渲」两条路径上算出的警告集合会不一致:
 //   1) [data-field=...]         行内编辑模式(input/select 里取 value)
 //   2) .product-name-cell/.spec-cell  出货页(第 1 列是序号,不能按列位置取)
-//   3) children[1] / children[2]      装柜页(序号/品名/规格);入库页沿用现状
+//   3) children[1] / children[2]      装柜页兜底(序号/品名/规格);出货/入库都有 class,走 2)
 // 返回 [pn, sp]。
 function readRowNameSpec(tr) {
     if (!tr) return ['', ''];

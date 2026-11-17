@@ -860,6 +860,7 @@ def api_v1_loading_orders_upload_image(order_id):
                 validate_image_content(filepath)
             except ValueError as e:
                 return jsonify({'success': False, 'error': str(e)}), 400
+            _helpers.backup_to_ebak(filepath)
             source = request.form.get('source', 'upload') if not request.is_json else data.get('source', 'upload')
             if source not in ('upload', 'ai'):
                 source = 'upload'
@@ -887,6 +888,7 @@ def api_v1_loading_orders_upload_image(order_id):
         validate_image_content(filepath)
     except ValueError as e:
         return jsonify({'success': False, 'error': str(e)}), 400
+    _helpers.backup_to_ebak(filepath)
 
     source = request.form.get('source', 'upload')
     if source not in ('upload', 'ai'):
@@ -918,10 +920,13 @@ def _save_one_uploaded_file(file, upload_dir):
     if not file or not file.filename:
         raise ValueError('未选择文件')
     ext = check_uploaded_image(file)
-    filename = f"{uuid.uuid4().hex}.{ext}"
+    if not ext.startswith('.'):
+        ext = '.' + ext
+    filename = f"{uuid.uuid4().hex}{ext}"
     filepath = os.path.join(upload_dir, filename)
     file.save(filepath)
     validate_image_content(filepath)
+    _helpers.backup_to_ebak(filepath)
     return filepath, file.filename
 
 
@@ -942,6 +947,7 @@ def _save_one_base64_image(data_url, upload_dir):
     with open(filepath, 'wb') as f:
         f.write(img_bytes)
     validate_image_content(filepath)
+    _helpers.backup_to_ebak(filepath)
     return filepath, 'pasted_image'
 
 

@@ -44,9 +44,9 @@ def _extract_js_block(template_path: str, function_name: str) -> str:
     raise RuntimeError(f'未匹配到 {function_name} 闭合大括号')
 
 
-# 服务端模板表头列数(shipping-records.html:712-720 9 个 <th>)。
+# 服务端模板表头列数(shipping-records.html 10 个 <th>,2026-11-14 加商品编号列)。
 # buildShippingRecordRow 生成的 td 数必须等于此值,否则列错位。
-EXPECTED_HEADER_COLUMNS = 9
+EXPECTED_HEADER_COLUMNS = 10
 
 
 # ── jsdom + 函数 stub 模板 ──────────────────────────────────────────
@@ -56,6 +56,7 @@ const dom = new JSDOM('<!DOCTYPE html><html><body><table class="record-table">' 
     '<thead><tr>' +
     '<th>序号</th>' +
     '<th class="eco-col">重点</th>' +
+    '<th class="product-code-col">商品编号</th>' +
     '<th>商品名称</th>' +
     '<th class="spec-cell">规格</th>' +
     '<th>数量</th>' +
@@ -67,6 +68,20 @@ const dom = new JSDOM('<!DOCTYPE html><html><body><table class="record-table">' 
 const document = dom.window.document;
 const window = dom.window;
 function escHtml(s) { return String(s == null ? '' : s); }
+// common.js 里 escAttr 就是 escHtml 的别名(写属性时语义更清晰),这里一并 stub
+function escAttr(s) { return escHtml(s); }
+// buildShippingRecordRow 的外部依赖(2026-11-14 补齐:此前 stub 缺失导致该用例
+// 直接 ReferenceError,列数断言形同虚设)。全部返回空值,只关心 td 数量。
+function readImportFlags(r) {
+    return {mismatch:'', pieceMismatch:'', qtyInvalid:false, combined:'',
+            detail:null, weightInvalid:false};
+}
+function importFlagPrefix() { return ''; }
+function importFlagTitle() { return ''; }
+function applyImportFlagClass() {}
+function mismatchIcon() { return ''; }
+function invalidQtyIcon() { return ''; }
+var _smartFillOrderPk = 1;
 '''
 
 
@@ -84,13 +99,13 @@ def _run_node(js_body: str) -> str:
 
 
 class TestShippingRowCellCount:
-    """AI→添加新建行 cell 数应等于 server 表头列数(9)。"""
+    """AI→添加新建行 cell 数应等于 server 表头列数(10)。"""
 
     def test_buildShippingRecordRow_cell_count_matches_header(self):
-        """buildShippingRecordRow 应生成 9 个 td,与 server 表头 9 列对齐。
+        """buildShippingRecordRow 应生成 10 个 td,与 server 表头 10 列对齐。
 
-        修复前(2026-08-22 前):硬塞 match-col → 10 cells → 数量及之后列错位。
-        修复后:_ensureMatchColumn 按需补建,新建行初始 9 cells。
+        修复前(2026-08-22 前):硬塞 match-col → 10 cells vs 当时 9 列表头 → 错位。
+        修复后:_ensureMatchColumn 按需补建;2026-11-14 表头加编号列后新建行 10 cells。
         """
         js = _extract_js_block(
             os.path.join(REPO_ROOT, 'templates', '_smart_add_modal.html'),
@@ -129,6 +144,7 @@ class TestEnsureMatchColumnSkipsWarnRow:
             const tbody = document.querySelector('tbody');
             const dataRow = document.createElement('tr');
             dataRow.innerHTML = '<td class="seq-cell"></td><td class="eco-col"></td>' +
+                '<td class="product-code-cell">—</td>' +
                 '<td class="product-name-cell">PVC桌布</td><td class="spec-cell">1.2x1.8m</td>' +
                 '<td class="qty-cell"><span class="qty-badge">50</span></td>' +
                 '<td class="unit-cell"><span class="unit-badge">支</span></td>' +
@@ -138,7 +154,7 @@ class TestEnsureMatchColumnSkipsWarnRow:
             tbody.appendChild(dataRow);
             const warnRow = document.createElement('tr');
             warnRow.className = 'record-warn-row';
-            warnRow.innerHTML = '<td colspan="9">⚠ 警告</td>';
+            warnRow.innerHTML = '<td colspan="10">⚠ 警告</td>';
             tbody.appendChild(warnRow);
             const table = document.querySelector('table.record-table');
             _ensureMatchColumn(table, dataRow, '');
@@ -157,5 +173,5 @@ class TestEnsureMatchColumnSkipsWarnRow:
         # 数据行应有 match-col(由 _ensureMatchColumn 在 spec-cell 后插入)
         assert data_n == EXPECTED_HEADER_COLUMNS + 1, (
             f'数据行 cell 数={data_n},预期 {EXPECTED_HEADER_COLUMNS + 1} '
-            f'(9 + match-col = 10)'
+            f'(10 + match-col = 11)'
         )

@@ -37,6 +37,26 @@
 .shipping-page .record-table.no-eco .eco-col { display: none; }
 /* AI 比对结果独立列:由 JS 动态插入,match-col 单元格基础样式 */
 .shipping-page .record-table .match-col { text-align: center; padding: 0.25rem; }
+/* 2026-11-14:商品编号独立成列(在「商品名称」之前)。编号与规格分属两个 td,
+   .spec-cell 的 textContent 保持干净;未匹配显示红色「未匹配」。*/
+.shipping-page .record-table .product-code-cell { font-size: 0.82rem; white-space: nowrap; }
+.shipping-page .record-table .product-code-badge {
+    display: inline-block;
+    padding: 0 0.35rem;
+    background: #eef1ff;
+    color: #5c6bc0;
+    border: 1px solid #d5dbff;
+    border-radius: 4px;
+    font-size: 0.72rem;
+    line-height: 1.5;
+    white-space: nowrap;
+}
+.shipping-page .record-table .product-code-missing {
+    color: #d63031;
+    font-size: 0.78rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
 .shipping-page .quick-add { display: grid; grid-template-columns: 1fr 90px 80px 70px auto; align-items: end; }
 .shipping-page .quick-add input:focus, .shipping-page .quick-add select:focus { border-color: var(--page-accent); }
 .shipping-page .form-grid { display: grid; grid-template-columns: 150px 1fr; gap: var(--space-md); align-items: end; }
@@ -816,6 +836,7 @@
     <h2 class="card-title">🚚 新建出货单</h2>
     {# 2026-09-21: 装车单扫描提示 + 同批外包装要求 —— 防止多批次混装 #}
     {# 2026-10-21: 环保中性杂胶已调整为软性 —— 防止选错商品规格 #}
+    {# 2026-11-12: 散码与第一批大货一起出到田心仓 —— 装运批次提示 #}
     <div style="background: linear-gradient(90deg, #fff5e1 0%, #ffeaa7 100%); border: 1px solid #fdcb6e; border-left: 4px solid #e17055; border-radius: 8px; padding: 0.55rem 1rem; margin: 0.6rem 0; display: flex; align-items: center; gap: 0.8rem; font-size: 0.88rem; color: #6c5d00; flex-wrap: wrap; line-height: 1.55;">
         <span style="font-weight: 600; flex: 0 0 auto;">📸 <strong>装车单扫描</strong></span>
         <span style="color:#b2bec3;">|</span>
@@ -826,6 +847,8 @@
         <span style="font-weight: 600; flex: 0 0 auto;">⚠️ <strong>商品规格提示</strong></span>
         <span style="color:#b2bec3;">|</span>
         <span><strong>注意</strong>,<strong>环保中性杂胶</strong>在系统中已调整为<strong>软性</strong>,注意选对商品规格</span>
+        <span style="color:#b2bec3;">|</span>
+        <span><strong>散码</strong>和<strong>第一批大货</strong>尽量一起出到<strong>田心仓</strong></span>
     </div>
     <p class="page-meta">📅 当前日期：<strong>{{ today }}</strong> ｜ 当天出货单数：<strong>{{ total_orders }}</strong> ｜ 当日已锁单：<strong>{{ locked_orders }}</strong></p>
     <form id="createOrderForm" action="/api/v1/shipping-orders" method="post">
@@ -936,7 +959,8 @@ document.getElementById('voiceInputBtn').addEventListener('click', function () {
             var tds = g.querySelectorAll('.record-table td');
             var productNames = Array.from(g.querySelectorAll('.record-table td.product-name-cell')).map(function(td) { return td.textContent; }).join(' ');
             var specs = Array.from(g.querySelectorAll('.record-table td.spec-cell')).map(function(td) { return td.textContent; }).join(' ');
-            var match = !kw || customer.toLowerCase().includes(kw) || productNames.toLowerCase().includes(kw) || specs.toLowerCase().includes(kw);
+            var codes = Array.from(g.querySelectorAll('.record-table td.product-code-cell')).map(function(td) { return td.textContent; }).join(' ');
+            var match = !kw || customer.toLowerCase().includes(kw) || productNames.toLowerCase().includes(kw) || specs.toLowerCase().includes(kw) || codes.toLowerCase().includes(kw);
             g.style.display = match ? '' : 'none';
         });
     });
@@ -1113,12 +1137,14 @@ document.getElementById('voiceInputBtn').addEventListener('click', function () {
                     <tr>
                         <th style="width:35px;">序号</th>
                         <th class="eco-col" style="width:35px;">重点</th>
-                        <th style="width:22%;">商品名称</th>
-                        <th style="width:18%;">规格</th>
+                        {# 2026-11-14:商品编号独立成列,置于「商品名称」之前;未匹配显示红色「未匹配」 #}
+                        <th class="product-code-col" style="width:8%;">商品编号</th>
+                        <th style="width:19%;">商品名称</th>
+                        <th class="spec-cell" style="width:16%;">规格</th>
                         <th style="width:12%;">数量</th>
                         <th style="width:8%;">单位</th>
-                        <th style="width:15%;">备注</th>
-                        <th style="width:12%;">辅助单位提示</th>
+                        <th style="width:13%;">备注</th>
+                        <th style="width:11%;">辅助单位提示</th>
                         <th style="width:240px;">操作</th>
                     </tr>
                 </thead>
@@ -1135,6 +1161,7 @@ document.getElementById('voiceInputBtn').addEventListener('click', function () {
                     data-verified-warnings="{{ item.verified_warnings or '{}' }}">
                     <td style="text-align:center; color:#868e96; font-size:0.85rem;">{% if item.qty_invalid %}<span class="stock-icon" title="数量异常">❌</span>{% elif item.mismatch == 'warn' or item.piece_mismatch == 'warn' %}❌ {% elif item.mismatch == 'info' or item.piece_mismatch == 'info' %}💡 {% endif %}{{ loop.index }}</td>
                     <td class="eco-col">{% if '环保' in item.product_name %}<span class="eco-icon" title="环保产品">🌿</span>{% endif %}{% if '杂胶' in item.product_name and '加面' in item.specification %}<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" class="jia-mian-icon" title="加面工艺"><defs><pattern id="jm-mesh-{{ loop.index }}" width="2" height="2" patternUnits="userSpaceOnUse"><path d="M 2 0 L 0 0 0 2" fill="none" stroke="currentColor" stroke-width="0.5"/></pattern></defs><rect width="16" height="16" fill="url(#jm-mesh-{{ loop.index }})"/><line x1="0" y1="8" x2="16" y2="8" stroke="currentColor" stroke-width="1"/></svg>{% endif %}</td>
+                    <td class="product-code-cell">{% if item.product_code %}<span class="product-code-badge">{{ item.product_code }}</span>{% else %}<span class="product-code-missing" title="商品档案中未找到匹配的编号">未匹配</span>{% endif %}</td>
                     <td class="product-name-cell" style="font-size:0.9rem;" data-record-id-cell="{{ item.id }}">{{ item.product_name }}</td>
                     <td class="spec-cell" style="color:#636e72; font-size:0.9rem;">{{ item.specification }}</td>
                     <td class="qty-cell"><span class="qty-badge">{{ item.quantity }}</span></td>
@@ -1386,6 +1413,16 @@ document.getElementById('voiceInputBtn').addEventListener('click', function () {
 
 
 <script>
+    // 2026-11-14:商品编号列 —— 未匹配显示红色「未匹配」(入库页是「—」,差异只在本页)。
+    // 共享弹窗 buildShippingRecordRow 通过 window.productCodeMissingHtml 取未匹配占位,
+    // 未定义该钩子的页面(入库)自动回退「—」,装柜页无编号列。
+    function productCodeInnerHtml(code) {
+        return code ? '<span class="product-code-badge">' + escHtml(code) + '</span>'
+                    : '<span class="product-code-missing" title="商品档案中未找到匹配的编号">未匹配</span>';
+    }
+    window.productCodeMissingHtml = function() {
+        return productCodeInnerHtml('');
+    };
     // ── 行级 OCR 匹配徽章（任务流 OCR-Match 前端） ──
     // 给一行商品的产品名 cell 旁边贴 ✓/⚠/✗,status 取后端 match_status 档位(green/yellow/red)
     // JS 路径同时被 recordImageUploaded(行级上传后)与 ai-match(整单比对后)复用
@@ -2104,6 +2141,9 @@ function bindEditDeleteButtons() {
                         tds[0].innerHTML = (bad ? invalidQtyIcon() : mismatchIcon(combinedMismatch)) + rowNum;
                         // 编辑保存后保留原行徽章(stash 在 tr.dataset.matchBadgeHtml;无则不带)
                         var _oldBadgeHtml = tr.dataset.matchBadgeHtml || '';
+                        // 2026-11-14:改品名/规格后按服务端回传值刷新编号列(未匹配转红色)
+                        var codeTd = tr.querySelector('.product-code-cell');
+                        if (codeTd) codeTd.innerHTML = productCodeInnerHtml(r.product_code);
                         if (nameTd) {
                             nameTd.textContent = r.product_name;
                             if (_oldBadgeHtml) nameTd.insertAdjacentHTML('afterbegin', _oldBadgeHtml);

@@ -14,6 +14,7 @@ from models import (
     InboundOrder, InboundRecord, InboundImage, InboundPlacementImage, ProductUnit, PieceConversion, get_db, AuditLog,
     OcrMatchEvent,
     classify_record, CategoryPrompt,
+    Product,
 )
 from blueprints._helpers import (
     get_upload_dir as get_helpers_upload_dir,
@@ -27,6 +28,7 @@ from blueprints._helpers import (
     validate_weight_unit,
     check_same_warehouse,
 )
+from blueprints import _helpers
 from blueprints.ocr_engine import PaddleOCREngine, get_ocr_engine, OCR_MATCH_PROMPT_VERSION, ocr_preprocess_kind
 from blueprints.ocr_pipeline import RecordImageProcessor
 from blueprints.ocr_log import set_log_context
@@ -70,6 +72,7 @@ def _save_one_uploaded_file(file, upload_dir):
     filepath = os.path.join(upload_dir, filename)
     file.save(filepath)
     validate_image_content(filepath)
+    _helpers.backup_to_ebak(filepath)
     return filepath, file.filename
 
 
@@ -89,6 +92,7 @@ def _save_one_base64_image(data_url, upload_dir):
     with open(filepath, 'wb') as f:
         f.write(img_bytes)
     validate_image_content(filepath)
+    _helpers.backup_to_ebak(filepath)
     return filepath, 'pasted_image'
 
 
@@ -178,8 +182,14 @@ def inbound_records():
     def _check_piece(remark, quantity_str, conv):
         return check_piece_mismatch(remark, quantity_str, conv)
 
+    # 2026-11-13:明细行回填商品编号 —— 商品名+规格 命中 product 表的 product_code,
+    #   供模板在「规格」后显示编号。一次查表 + 内存匹配(不逐行查库)。
+    code_lookup = Product.get_code_lookup()
+
     for group in groups:
         for item in group['records']:
+            item['product_code'] = Product.match_code(
+                item.get('product_name', ''), item.get('specification', ''), code_lookup)
             ypp = _get_ypp(item['product_name'], item.get('specification', ''))
             item['unit_hint'] = calc_hint(item['quantity'], ypp, unit=item.get('unit', ''), remark=item.get('remark', ''))
             item['mismatch'] = _check_remark(
@@ -365,6 +375,21 @@ def api_v1_inbound_orders_update(order_id):
             InboundOrder.lock(order_id)
             AuditLog.log('lock_order', 'inbound_order', order_id)
         else:
+            # ⭐ **A6 解锁守卫**(上游 §3.9 / §7.8):
+            #   已过账的订单**不能解锁** —— 解锁意味着要改明细,
+            #   而库存已经按过账时的明细记进流水了。
+            #   硬改明细不会让库存静默不更新,那才是真账实不符。
+            #   正确做法:先红字冲销(余额回到过账前)→ 再解锁 → 改明细 → 重新过账。
+            #
+            # ⚠️ 判据是「**还有没被冲销的流水**」,不是「批次 status='posted'」——
+            #   重复点过账会留下空的批次记录,拿批次状态当判据会让
+            #   「冲销之后仍然解不了锁」(2026-11-17 实测踩到)。
+            from blueprints.stock_posting import has_live_posting
+            if has_live_posting('inbound', order_id):
+                return jsonify({
+                    'success': False,
+                    'error': '该订单已过账,请先红字冲销后再解锁',
+                }), 403
             InboundOrder.unlock(order_id)
             AuditLog.log('unlock_order', 'inbound_order', order_id)
         return jsonify({'success': True, 'is_locked': bool(data['is_locked'])})
@@ -509,6 +534,9 @@ def api_v1_inbound_orders_add_record(order_id):
         remark=data.get('remark', '')
     )
     record = InboundRecord.get_by_id(record_id)
+    # 2026-11-13:回传商品编号 —— 前端新增行时在「规格」后显示编号
+    record['product_code'] = Product.match_code(
+        record.get('product_name', ''), record.get('specification', ''))
     AuditLog.log('add_record', 'inbound_order', order_id, detail={'product': product_name, 'qty': quantity, 'unit': data.get('unit', '支')})
     return jsonify({'success': True, 'id': record_id, 'record': record}), 201
 
@@ -560,6 +588,8 @@ def api_v1_inbound_orders_add_records_batch(order_id):
     try:
         cursor.execute('SELECT COALESCE(MAX(sort_order), 0) FROM inbound_records WHERE order_pk = ?', (order_id,))
         sort_order = cursor.fetchone()[0]
+        # 2026-11-13:商品编号 —— 一次查表,批量行共用同一份快照(不逐行查库)
+        code_lookup = Product.get_code_lookup()
         result_records = []
         for rec in filtered_records:
             sort_order += 1
@@ -579,7 +609,10 @@ def api_v1_inbound_orders_add_records_batch(order_id):
                 'quantity': str(rec.get('quantity', '')),
                 'unit': unit,
                 'remark': rec.get('remark', ''),
-                'sort_order': sort_order
+                'sort_order': sort_order,
+                # 2026-11-13:回传商品编号 —— 前端批量新增行时在「规格」后显示编号
+                'product_code': Product.match_code(
+                    rec.get('product_name', ''), rec.get('specification', ''), code_lookup),
             })
         conn.commit()
         if result_records:
@@ -651,6 +684,9 @@ def api_v1_inbound_orders_update_record(record_id):
 
     InboundRecord.update(record_id, data)
     updated = InboundRecord.get_by_id(record_id)
+    # 2026-11-13:改品名/规格后商品编号要重算 —— 前端刷新「规格」后的编号
+    updated['product_code'] = Product.match_code(
+        updated.get('product_name', ''), updated.get('specification', ''))
     AuditLog.log('update_record', 'inbound_order', updated['order_pk'], detail={'record_id': record_id})
     return jsonify({'success': True, 'record': updated})
 
@@ -825,6 +861,7 @@ def _save_one_placement_upload(file, upload_dir):
         except OSError:
             pass
         raise ValueError(str(e))
+    _helpers.backup_to_ebak(filepath)
     return filepath, file.filename or filename
 
 
@@ -1180,6 +1217,7 @@ def api_v1_inbound_orders_upload_image(order_id):
         validate_image_content(filepath)
     except ValueError as e:
         return jsonify({'success': False, 'error': str(e)}), 400
+    _helpers.backup_to_ebak(filepath)
 
     source = request.form.get('source', 'upload')
     if source not in ('upload', 'ai'):

@@ -69,6 +69,97 @@
     border-left: 4px solid #d63031; border-radius: 4px;
     margin: 1.5rem 0 0.5rem;
 }
+/* ── 记录下方的图片子行 ── */
+.vehicle-page .vm-img-cell { padding: 0.5rem 0.75rem 0.75rem; background: #fcfcfd; }
+.vehicle-page .vm-img-head {
+    display: flex; align-items: center; gap: 0.5rem;
+    font-size: 0.78rem; color: #868e96; margin-bottom: 0.4rem;
+}
+.vehicle-page .vm-img-count { color: #adb5bd; }
+.vehicle-page .vm-img-grid {
+    display: grid; gap: 0.5rem;
+    grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+}
+.vehicle-page .vm-img-item {
+    position: relative; aspect-ratio: 1 / 1;
+    border: 1px solid #dfe6e9; border-radius: 6px;
+    overflow: hidden; background: #f1f3f5;
+}
+.vehicle-page .vm-img-item img {
+    width: 100%; height: 100%; object-fit: cover;
+    cursor: pointer; display: block;
+}
+.vehicle-page .vm-img-del {
+    position: absolute; top: 3px; right: 3px;
+    width: 20px; height: 20px; padding: 0; line-height: 1;
+    background: rgba(214, 48, 49, 0.85); color: #fff;
+    border: none; border-radius: 50%; cursor: pointer;
+    font-size: 0.75rem;
+}
+.vehicle-page .vm-img-del:hover { background: #d63031; }
+.vehicle-page .vm-img-add {
+    aspect-ratio: 1 / 1;
+    width: 100%; padding: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 0.2rem;
+    border: 1px dashed #ced4da; border-radius: 6px;
+    background: #fff; color: #adb5bd;
+    cursor: pointer; font-size: 1.1rem; user-select: none;
+    font-family: inherit; line-height: 1.2;
+}
+.vehicle-page .vm-img-add:hover { border-color: #d63031; color: #d63031; background: #fff5f5; }
+.vehicle-page .vm-img-add-text { font-size: 0.72rem; }
+/* ── 添加图片弹框：粘贴区 + 待上传队列 ── */
+.vehicle-page .vm-paste-zone {
+    border: 2px dashed #ced4da; border-radius: 8px;
+    padding: 1.25rem 1rem; text-align: center;
+    background: #fafbfc; cursor: text;
+}
+.vehicle-page .vm-paste-zone:focus {
+    outline: none; border-color: #d63031; background: #fff5f5;
+}
+.vehicle-page .vm-paste-icon { font-size: 1.8rem; margin-bottom: 0.35rem; }
+.vehicle-page .vm-paste-text { font-size: 0.88rem; color: #636e72; line-height: 1.6; }
+.vehicle-page .vm-paste-sub { color: #adb5bd; font-size: 0.8rem; }
+.vehicle-page .vm-paste-zone .btn { margin-top: 0.6rem; }
+.vehicle-page .vm-queue {
+    display: grid; gap: 0.5rem; margin-top: 0.75rem;
+    grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+}
+.vehicle-page .vm-queue:empty { display: none; }
+.vehicle-page .vm-queue-item {
+    position: relative; border: 1px solid #dfe6e9; border-radius: 6px;
+    overflow: hidden; background: #f8f9fa;
+}
+.vehicle-page .vm-queue-item img {
+    width: 100%; aspect-ratio: 1 / 1; object-fit: cover; display: block;
+}
+.vehicle-page .vm-queue-name {
+    font-size: 0.7rem; color: #868e96; padding: 0.25rem 0.35rem;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.vehicle-page .vm-queue-del {
+    position: absolute; top: 3px; right: 3px;
+    width: 20px; height: 20px; padding: 0; line-height: 1;
+    background: rgba(214, 48, 49, 0.85); color: #fff;
+    border: none; border-radius: 50%; cursor: pointer; font-size: 0.75rem;
+}
+/* ── 修改记录弹框 ── */
+.vehicle-page .vm-edit-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;
+}
+.vehicle-page .vm-edit-grid label {
+    display: block; font-weight: 600; font-size: 0.85rem; margin-bottom: 0.25rem;
+}
+.vehicle-page .vm-edit-grid input, .vehicle-page .vm-edit-grid select {
+    width: 100%; padding: 0.4rem 0.6rem;
+    border: 1px solid #dfe6e9; border-radius: 6px;
+    font-size: 0.9rem; background: #fff; box-sizing: border-box;
+}
+.vehicle-page .vm-edit-grid input:focus, .vehicle-page .vm-edit-grid select:focus {
+    outline: none; border-color: #d63031;
+    box-shadow: 0 0 0 2px rgba(214,48,49,0.1);
+}
 @media (max-width: 640px) {
     .vehicle-page .form-grid { grid-template-columns: 1fr 1fr; }
     .vehicle-page .form-grid > div:nth-child(1),
@@ -137,6 +228,7 @@
         </thead>
         <tbody>
         {% for item in records %}
+            {% set item_imgs = vm_images.get(item.id, []) %}
             <tr>
                 <td class="date-col">{{ item.date }}</td>
                 <td><span class="plate-badge">{{ item.vehicle_plate }}</span></td>
@@ -147,9 +239,42 @@
                 <td class="cost-col">{% if item.cost %}{{ item.cost }}{% else %}—{% endif %}</td>
                 <td class="remark-cell {% if item.remark %}has-content{% endif %}">{{ item.remark or '—' }}</td>
                 <td>
-                    <form action="/vehicle-maintenance/delete/{{ item.id }}" method="POST" onsubmit="return confirm('确定要删除这条记录吗？');" style="display:inline;">
+                    <button type="button" class="btn btn-sm vm-edit-btn" title="修改记录"
+                            data-id="{{ item.id }}"
+                            data-date="{{ item.date }}"
+                            data-plate="{{ item.vehicle_plate }}"
+                            data-type="{{ item.type }}"
+                            data-description="{{ item.description }}"
+                            data-cost="{{ item.cost or '' }}"
+                            data-remark="{{ item.remark or '' }}">✏️</button>
+                    <form action="/vehicle-maintenance/delete/{{ item.id }}" method="POST" onsubmit="return confirm('确定要删除这条记录吗？（其下的图片也会一并删除）');" style="display:inline;">
                         <button type="submit" class="btn btn-danger btn-sm">🗑️</button>
                     </form>
+                </td>
+            </tr>
+            <!-- 图片子行：缩略图 + 删除 + 添加图片 -->
+            <tr>
+                <td colspan="7" class="vm-img-cell">
+                    <div class="vm-img-wrap" data-record-id="{{ item.id }}">
+                        <div class="vm-img-head">
+                            <span>📷 图片</span>
+                            <span class="vm-img-count">{{ item_imgs | length }} 张</span>
+                        </div>
+                        <div class="vm-img-grid">
+                            {% for img in item_imgs %}
+                            <div class="vm-img-item" data-image-id="{{ img.id }}">
+                                <img src="{{ '/upload/' ~ (img.month_dir ~ '/' if img.month_dir else '') ~ img.file_name }}"
+                                     alt="{{ img.original_name or '维护图片' }}"
+                                     data-preview="{{ '/upload/' ~ (img.month_dir ~ '/' if img.month_dir else '') ~ img.file_name }}">
+                                <button type="button" class="vm-img-del" data-image-id="{{ img.id }}" title="删除图片">×</button>
+                            </div>
+                            {% endfor %}
+                            <button type="button" class="vm-img-add" title="添加图片（可粘贴截图）" onclick="vmOpenUpload(this)">
+                                <span>📷</span>
+                                <span class="vm-img-add-text">添加图片</span>
+                            </button>
+                        </div>
+                    </div>
                 </td>
             </tr>
         {% endfor %}
@@ -163,12 +288,352 @@
     {% endif %}
 </div>
 
+<!-- 修改维护记录弹框 -->
+<div id="vmEditModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center;">
+    <div class="card vehicle-page" style="width:92%; max-width:560px; margin:0;">
+        <h2 class="card-title">✏️ 修改维护记录</h2>
+        <form id="vmEditForm" method="POST" action="/vehicle-maintenance/edit/0">
+            <div class="vm-edit-grid">
+                <div>
+                    <label for="vmEditDate">日期</label>
+                    <input type="date" id="vmEditDate" name="date" required>
+                </div>
+                <div>
+                    <label for="vmEditPlate">车牌号</label>
+                    <input type="text" id="vmEditPlate" name="vehicle_plate" required>
+                </div>
+                <div>
+                    <label for="vmEditType">类型</label>
+                    <select id="vmEditType" name="type">
+                        <option value="故障">故障</option>
+                        <option value="保养">保养</option>
+                        <option value="维修">维修</option>
+                        <option value="保险">保险</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="vmEditCost">费用</label>
+                    <input type="text" id="vmEditCost" name="cost" placeholder="例如：500">
+                </div>
+            </div>
+            <div style="margin-top:0.75rem;">
+                <label for="vmEditDescription" style="display:block;font-weight:600;font-size:0.85rem;margin-bottom:0.25rem;">描述</label>
+                <textarea id="vmEditDescription" name="description" rows="2" required style="width:100%;padding:0.4rem 0.6rem;border:1px solid #dfe6e9;border-radius:6px;font-size:0.9rem;background:#fff;resize:vertical;box-sizing:border-box;"></textarea>
+            </div>
+            <div style="margin-top:0.75rem;">
+                <label for="vmEditRemark" style="display:block;font-weight:600;font-size:0.85rem;margin-bottom:0.25rem;">备注</label>
+                <textarea id="vmEditRemark" name="remark" rows="1" style="width:100%;padding:0.4rem 0.6rem;border:1px solid #dfe6e9;border-radius:6px;font-size:0.9rem;background:#fff;resize:vertical;box-sizing:border-box;"></textarea>
+            </div>
+            <div style="display:flex; gap:0.75rem; justify-content:flex-end; margin-top:1.25rem;">
+                <button type="button" class="btn btn-sm" onclick="vmCloseEdit()" style="padding:0.5rem 1rem; background:#e0e0e0; color:#333;">取消</button>
+                <button type="submit" class="btn btn-primary btn-sm">💾 保存修改</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 添加图片弹框（支持直接粘贴截图 / 多选文件） -->
+<div id="vmUploadModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center;">
+    <div class="card vehicle-page" style="width:92%; max-width:560px; margin:0;">
+        <h2 class="card-title">📷 添加图片</h2>
+        <div id="vmPasteZone" class="vm-paste-zone" tabindex="0" title="点击这里，然后按 Ctrl+V 粘贴截图">
+            <div class="vm-paste-icon">📋</div>
+            <div class="vm-paste-text">在此处按 <b>Ctrl+V</b> 粘贴截图<br><span class="vm-paste-sub">或</span></div>
+            <button type="button" id="vmPickFiles" class="btn btn-sm">🗂️ 选择文件（可多选）</button>
+            <input type="file" id="vmFileInput" accept="image/*" multiple hidden>
+        </div>
+        <div id="vmQueue" class="vm-queue"></div>
+        <div style="display:flex; gap:0.75rem; justify-content:flex-end; margin-top:1.25rem;">
+            <button type="button" class="btn btn-sm" onclick="vmCloseUpload()" style="padding:0.5rem 1rem; background:#e0e0e0; color:#333;">取消</button>
+            <button type="button" id="vmUploadSubmit" class="btn btn-primary btn-sm" disabled>💾 上传</button>
+        </div>
+    </div>
+</div>
+
 <script>
     var today = new Date().toISOString().split('T')[0];
     document.getElementById('date').value = today;
     document.getElementById('remark').addEventListener('input', function() {
         this.style.height = 'auto';
         this.style.height = this.scrollHeight + 'px';
+    });
+
+    /* ── 维护记录图片：上传 / 删除 / 预览 ─────────────────────── */
+
+    // 统计并刷新某条记录的图片数量
+    function vmUpdateCount(wrap) {
+        var grid = wrap.querySelector('.vm-img-grid');
+        var counter = wrap.querySelector('.vm-img-count');
+        if (!grid || !counter) return;
+        counter.textContent = grid.querySelectorAll('.vm-img-item').length + ' 张';
+    }
+
+    /* ── 添加图片弹框：粘贴 / 选文件 → 队列 → 上传 ───────────── */
+
+    var vmUploadWrap = null;   // 当前要上传到哪条记录
+    var vmQueue = [];          // 待上传的文件队列
+
+    function vmOpenUpload(btn) {
+        vmUploadWrap = btn.closest('.vm-img-wrap');
+        if (!vmUploadWrap) return;
+        vmQueue = [];
+        vmRenderQueue();
+        document.getElementById('vmUploadModal').style.display = 'flex';
+        document.getElementById('vmPasteZone').focus();
+    }
+
+    function vmCloseUpload() {
+        document.getElementById('vmUploadModal').style.display = 'none';
+        vmQueue = [];
+        vmUploadWrap = null;
+    }
+
+    // 把文件加入队列（同名同大小视为重复，忽略）
+    function vmQueueFiles(files) {
+        for (var i = 0; i < files.length; i++) {
+            var f = files[i];
+            if (!f || !f.type || f.type.indexOf('image/') !== 0) continue;
+            var dup = false;
+            for (var j = 0; j < vmQueue.length; j++) {
+                if (vmQueue[j].name === f.name && vmQueue[j].size === f.size) { dup = true; break; }
+            }
+            if (!dup) vmQueue.push(f);
+        }
+        vmRenderQueue();
+    }
+
+    // 渲染待上传队列（缩略图 + 移除）
+    function vmRenderQueue() {
+        var box = document.getElementById('vmQueue');
+        box.innerHTML = '';
+        for (var i = 0; i < vmQueue.length; i++) {
+            (function(file, idx) {
+                var item = document.createElement('div');
+                item.className = 'vm-queue-item';
+
+                var img = document.createElement('img');
+                img.src = URL.createObjectURL(file);
+                img.alt = file.name || '图片';
+                item.appendChild(img);
+
+                var name = document.createElement('div');
+                name.className = 'vm-queue-name';
+                name.textContent = file.name || ('图片 ' + (idx + 1));
+                item.appendChild(name);
+
+                var btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'vm-queue-del';
+                btn.title = '移除';
+                btn.textContent = '×';
+                btn.onclick = function() {
+                    vmQueue.splice(idx, 1);
+                    vmRenderQueue();
+                };
+                item.appendChild(btn);
+
+                box.appendChild(item);
+            })(vmQueue[i], i);
+        }
+        document.getElementById('vmUploadSubmit').disabled = vmQueue.length === 0;
+    }
+
+    // 把队列里的文件传到目标记录（不整页刷新，成功后追加缩略图）
+    function vmDoUpload(wrap, files) {
+        var recordId = wrap.getAttribute('data-record-id');
+        var fd = new FormData();
+        for (var i = 0; i < files.length; i++) {
+            fd.append('image', files[i], files[i].name || ('photo' + i + '.jpg'));
+        }
+        if (typeof showLoading === 'function') showLoading('上传中...');
+        fetch('/api/v1/vehicle-maintenance/' + recordId + '/images', {
+            method: 'POST',
+            body: fd
+        })
+        .then(function(r) {
+            return r.json().then(function(d) { return { ok: r.ok, data: d }; });
+        })
+        .then(function(res) {
+            if (typeof hideLoading === 'function') hideLoading();
+            if (!res.ok || !res.data || !res.data.success) {
+                alert('上传失败: ' + ((res.data && res.data.error) || '未知错误'));
+                return;
+            }
+            var imgs = res.data.images || [];
+            for (var k = 0; k < imgs.length; k++) vmAppendImage(wrap, imgs[k]);
+        })
+        .catch(function(err) {
+            if (typeof hideLoading === 'function') hideLoading();
+            alert('上传失败: ' + err.message);
+        });
+    }
+
+    // 「上传」按钮
+    document.getElementById('vmUploadSubmit').addEventListener('click', function() {
+        if (!vmUploadWrap || !vmQueue.length) return;
+        var wrap = vmUploadWrap;
+        var files = vmQueue.slice();
+        vmCloseUpload();
+        vmDoUpload(wrap, files);
+    });
+
+    // 「选择文件」按钮
+    document.getElementById('vmPickFiles').addEventListener('click', function(e) {
+        e.stopPropagation();
+        document.getElementById('vmFileInput').click();
+    });
+    document.getElementById('vmFileInput').addEventListener('change', function() {
+        vmQueueFiles(this.files);
+        this.value = '';   // 清空，允许再次选同一张图
+    });
+
+    // 粘贴区点一下就聚焦（用户按 Ctrl+V 才有地方粘）
+    document.getElementById('vmPasteZone').addEventListener('click', function(e) {
+        if (e.target && e.target.id === 'vmPickFiles') return;
+        this.focus();
+    });
+
+    // 粘贴：剪贴板里的图片直接进队列（弹框开着时才处理）
+    // 单独命名成函数，便于 tools/verify_vehicle_maint_upload_js.js 抽出实测
+    function vmHandlePaste(e) {
+        var modal = document.getElementById('vmUploadModal');
+        if (!modal || modal.style.display === 'none') return;
+        var dt = e.clipboardData;
+        if (!dt) return;
+        var files = [];
+        if (dt.items && dt.items.length) {
+            for (var i = 0; i < dt.items.length; i++) {
+                if (dt.items[i].kind === 'file' && dt.items[i].type.indexOf('image/') === 0) {
+                    var f = dt.items[i].getAsFile();
+                    if (f) files.push(f);
+                }
+            }
+        }
+        if (!files.length && dt.files && dt.files.length) {
+            for (var k = 0; k < dt.files.length; k++) files.push(dt.files[k]);
+        }
+        if (!files.length) return;
+        e.preventDefault();
+        vmQueueFiles(files);
+    }
+    document.addEventListener('paste', vmHandlePaste);
+
+    // 追加一张缩略图（插在「添加图片」磁贴之前）
+    function vmAppendImage(wrap, img) {
+        var grid = wrap.querySelector('.vm-img-grid');
+        var addTile = grid.querySelector('.vm-img-add');
+        if (!grid) return;
+
+        var item = document.createElement('div');
+        item.className = 'vm-img-item';
+        item.setAttribute('data-image-id', img.id);
+
+        var el = document.createElement('img');
+        el.src = img.url;
+        el.alt = img.original_name || '维护图片';
+        el.setAttribute('data-preview', img.url);
+        item.appendChild(el);
+
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'vm-img-del';
+        btn.setAttribute('data-image-id', img.id);
+        btn.title = '删除图片';
+        btn.textContent = '×';
+        item.appendChild(btn);
+
+        grid.insertBefore(item, addTile);
+        vmUpdateCount(wrap);
+    }
+
+    // 删除一张图片（DB 行 + 物理文件一并清掉）
+    //
+    // ⚠️ vmDeleteBusy 锁：原生 confirm() 会阻塞页面，用户的连点（双击）会在
+    //    第一次删除完成、网格左移之后落到「下一张图」的 × 上 → 误删两张。
+    //    用一把全局锁保证同一时刻只有一次删除在途，后续点击直接忽略。
+    var vmDeleteBusy = false;
+    function vmDeleteImage(imageId, btn) {
+        if (vmDeleteBusy) return;
+        if (!confirm('确定要删除这张图片吗？')) return;
+        vmDeleteBusy = true;
+        btn.disabled = true;
+        fetch('/api/v1/vehicle-maintenance/images/' + imageId, { method: 'DELETE' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data && data.success) {
+                var item = btn.closest('.vm-img-item');
+                var wrap = btn.closest('.vm-img-wrap');
+                if (item) item.remove();
+                if (wrap) vmUpdateCount(wrap);
+            } else {
+                btn.disabled = false;
+                alert('删除失败: ' + ((data && data.error) || '未知错误'));
+            }
+        })
+        .catch(function(err) {
+            btn.disabled = false;
+            alert('删除失败: ' + err.message);
+        })
+        .then(function() { vmDeleteBusy = false; });
+    }
+
+    // 事件委托：删除按钮 + 缩略图预览（动态追加的图也自动生效）
+    document.addEventListener('click', function(ev) {
+        if (!ev.target || !ev.target.closest) return;
+        var delBtn = ev.target.closest('.vm-img-del');
+        if (delBtn) {
+            ev.preventDefault();
+            vmDeleteImage(delBtn.getAttribute('data-image-id'), delBtn);
+            return;
+        }
+        var thumb = ev.target.closest('.vm-img-item img');
+        if (thumb) {
+            ev.preventDefault();
+            var src = thumb.getAttribute('data-preview') || thumb.src;
+            if (typeof showImgPreview === 'function') showImgPreview(src);
+            else window.open(src, '_blank');
+        }
+    });
+
+    /* ── 修改维护记录（弹框） ─────────────────────────────── */
+
+    function vmOpenEdit(btn) {
+        var id = btn.getAttribute('data-id');
+        document.getElementById('vmEditDate').value = btn.getAttribute('data-date') || '';
+        document.getElementById('vmEditPlate').value = btn.getAttribute('data-plate') || '';
+        document.getElementById('vmEditType').value = btn.getAttribute('data-type') || '故障';
+        document.getElementById('vmEditCost').value = btn.getAttribute('data-cost') || '';
+        document.getElementById('vmEditDescription').value = btn.getAttribute('data-description') || '';
+        document.getElementById('vmEditRemark').value = btn.getAttribute('data-remark') || '';
+        document.getElementById('vmEditForm').action = '/vehicle-maintenance/edit/' + id;
+        document.getElementById('vmEditModal').style.display = 'flex';
+    }
+
+    function vmCloseEdit() {
+        document.getElementById('vmEditModal').style.display = 'none';
+    }
+
+    // 打开弹框（事件委托）
+    document.addEventListener('click', function(ev) {
+        if (!ev.target || !ev.target.closest) return;
+        var editBtn = ev.target.closest('.vm-edit-btn');
+        if (editBtn) {
+            ev.preventDefault();
+            vmOpenEdit(editBtn);
+            return;
+        }
+        // 点弹框空白处关闭
+        if (ev.target && ev.target.id === 'vmEditModal') vmCloseEdit();
+        if (ev.target && ev.target.id === 'vmUploadModal') vmCloseUpload();
+    });
+
+    // Esc 关闭弹框
+    document.addEventListener('keydown', function(ev) {
+        if (ev.key !== 'Escape') return;
+        var editModal = document.getElementById('vmEditModal');
+        if (editModal && editModal.style.display !== 'none') { vmCloseEdit(); return; }
+        var upModal = document.getElementById('vmUploadModal');
+        if (upModal && upModal.style.display !== 'none') vmCloseUpload();
     });
 </script>
 {% endblock %}

@@ -42,6 +42,8 @@
 .product-table { width: 100%; border-collapse: collapse; background: #fff; border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-sm); }
 .product-table th { background: var(--gray-50); padding: 0.55rem 0.65rem; font-size: var(--font-sm); color: var(--gray-700); text-align: left; border-bottom: 2px solid var(--gray-200); white-space: nowrap; }
 .product-table td { padding: 0.5rem 0.65rem; font-size: var(--font-sm); border-bottom: 1px solid var(--gray-100); }
+.product-table th.rowno-col { text-align: center; }
+.product-table td.rowno-cell { text-align: center; color: var(--gray-500); }
 .product-table tr:hover td { background: var(--gray-50); }
 .product-table .btn-sm { padding: 0.2rem 0.5rem; font-size: var(--font-xs); border-radius: var(--radius-sm); border: none; cursor: pointer; }
 .modal-overlay {
@@ -106,7 +108,7 @@
         <table class="product-table" id="productTable">
             <thead>
                 <tr>
-                    <th>编号</th><th>品名</th><th>规格</th><th>型号</th>
+                    <th class="rowno-col" style="width:52px;">序号</th><th>商品编号</th><th>品名</th><th>规格</th><th>型号</th>
                     <th>主单位</th><th>辅单位</th><th>库存</th><th>辅数量</th>
                     <th style="width:80px;">操作</th>
                 </tr>
@@ -247,7 +249,8 @@ function loadProducts(catId) {
     for (var i = 0; i < 5; i++) {
         var skel = document.createElement('tr');
         skel.className = 'skeleton-row-tr';
-        skel.innerHTML = '<td colspan="9"><div class="skeleton-row">' +
+        skel.innerHTML = '<td colspan="10"><div class="skeleton-row">' +
+            '<div class="skeleton-cell" style="flex:0.3;"></div>' +
             '<div class="skeleton-cell" style="flex:1;"></div>' +
             '<div class="skeleton-cell" style="flex:1.5;"></div>' +
             '<div class="skeleton-cell" style="flex:0.8;"></div>' +
@@ -276,6 +279,7 @@ function loadProducts(catId) {
                 var tr = buildProductRow(p);
                 tbody.appendChild(tr);
             });
+            renumberProductRows();
         })
         .catch(function(err) {
             tbody.innerHTML = '';
@@ -284,11 +288,24 @@ function loadProducts(catId) {
         });
 }
 
+// ── 序号列：按 tbody 中真实数据行的当前顺序统一重排（增/删/改后避免跳号）──
+function renumberProductRows() {
+    var tbody = document.getElementById('productTbody');
+    if (!tbody) return;
+    var n = 0;
+    Array.prototype.forEach.call(tbody.querySelectorAll('tr[data-pid]'), function(tr) {
+        n += 1;
+        var cell = tr.querySelector('.rowno-cell');
+        if (cell) cell.textContent = n;
+    });
+}
+
 function buildProductRow(p) {
     var tr = document.createElement('tr');
     tr.setAttribute('data-pid', p.product_id);
     var sq = p.stock_quantity != null ? (p.stock_quantity / 100).toFixed(2) : '-';
     tr.innerHTML =
+        '<td class="rowno-cell"></td>' +
         '<td>' + (p.product_code || '') + '</td>' +
         '<td>' + (p.product_name || '') + '</td>' +
         '<td>' + (p.specification || '-') + '</td>' +
@@ -389,12 +406,14 @@ function saveProduct() {
                 if (tr) {
                     var newTr = buildProductRow(result.product);
                     tr.parentNode.replaceChild(newTr, tr);
+                    renumberProductRows();
                 }
             } else {
                 // 追加新行
                 var tbody = document.getElementById('productTbody');
                 var newTr = buildProductRow(result.product);
                 tbody.appendChild(newTr);
+                renumberProductRows();
                 document.getElementById('emptyState').style.display = 'none';
                 document.getElementById('productTable').style.display = '';
             }
@@ -422,7 +441,7 @@ function deleteProduct(pid, btn) {
                     // 淡出动画
                     tr.style.opacity = '0';
                     tr.style.transition = 'opacity 0.3s';
-                    setTimeout(function() { tr.remove(); }, 300);
+                    setTimeout(function() { tr.remove(); renumberProductRows(); }, 300);
                 }
                 // 检查是否为空
                 setTimeout(function() {
@@ -472,6 +491,7 @@ function loadAllProducts() {
             data.products.forEach(function(p) {
                 tbody.appendChild(buildProductRow(p));
             });
+            renumberProductRows();
         });
 }
 </script>
