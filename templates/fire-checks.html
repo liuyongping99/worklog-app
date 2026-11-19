@@ -1,0 +1,648 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+.fire-page .card-title { color: #e8590c; border-bottom-color: #ffe8cc; }
+.fire-page .form-grid {
+    display: grid;
+    grid-template-columns: 150px 1fr 90px 100px;
+    gap: 0.75rem; align-items: end;
+}
+.fire-page .form-grid label { display: block; font-weight: 600; font-size: 0.85rem; margin-bottom: 0.25rem; }
+.fire-page select, .fire-page input, .fire-page textarea {
+    width: 100%; padding: 0.4rem 0.6rem;
+    border: 1px solid #dfe6e9; border-radius: 6px;
+    font-size: 0.9rem; background: #fff;
+    box-sizing: border-box;
+}
+.fire-page select:focus, .fire-page input:focus, .fire-page textarea:focus {
+    outline: none; border-color: #e8590c;
+    box-shadow: 0 0 0 2px rgba(232,89,12,0.1);
+}
+.fire-page .form-row { margin-top: 0.75rem; }
+.fire-page .form-row label { display: block; font-weight: 600; font-size: 0.85rem; margin-bottom: 0.25rem; }
+.fire-page .form-row textarea {
+    width: 100%; padding: 0.4rem 0.6rem;
+    border: 1px solid #dfe6e9; border-radius: 6px;
+    font-size: 0.9rem; background: #fff;
+    resize: vertical; min-height: 2.2rem;
+    box-sizing: border-box;
+}
+.fire-page .form-hint { font-size: 0.78rem; color: #adb5bd; margin-top: 0.2rem; }
+/* ── 汇总条 ── */
+.fire-page .stat-bar {
+    display: flex; gap: 0.75rem; flex-wrap: wrap;
+    margin-bottom: 1rem; align-items: center;
+}
+.fire-page .stat-chip {
+    display: inline-flex; align-items: baseline; gap: 0.35rem;
+    padding: 0.35rem 0.8rem; border-radius: 16px;
+    font-size: 0.85rem; font-weight: 600;
+}
+.fire-page .stat-chip b { font-size: 1.05rem; }
+.fire-page .stat-total { background: #f1f3f5; color: #636e72; }
+.fire-page .stat-open { background: #fff4e6; color: #e8590c; }
+.fire-page .stat-closed { background: #e8f5e9; color: #27ae60; }
+.fire-page .filter-toggle {
+    margin-left: auto; font-size: 0.85rem; color: #636e72;
+    cursor: pointer; user-select: none;
+    padding: 0.35rem 0.8rem; border: 1px solid #dfe6e9;
+    border-radius: 16px; background: #fff;
+}
+.fire-page .filter-toggle.on { border-color: #e8590c; color: #e8590c; background: #fff4e6; }
+/* ── 列表 ── */
+.fire-page .fc-table { width: 100%; border-collapse: collapse; }
+.fire-page .fc-table th {
+    background: #f8f9fa; padding: 0.6rem 0.75rem;
+    text-align: left; font-size: 0.82rem; color: #868e96;
+    border-bottom: 2px solid #e9ecef;
+}
+.fire-page .fc-table td {
+    padding: 0.65rem 0.75rem; border-bottom: 1px solid #f1f3f5;
+    font-size: 0.92rem; vertical-align: top;
+}
+.fire-page .fc-table tr:hover td { background: #fffbf5; }
+.fire-page .fc-table tr.row-open td { background: #fffdf7; }
+.fire-page .fc-table tr.row-open:hover td { background: #fff7ec; }
+.fire-page .date-col { color: #636e72; font-size: 0.88rem; white-space: nowrap; }
+.fire-page .loc-badge {
+    background: #f1f3f5; color: #495057;
+    border: 1px solid #dee2e6;
+    padding: 0.2rem 0.6rem; border-radius: 12px;
+    font-weight: 600; font-size: 0.85rem; white-space: nowrap;
+}
+.fire-page .status-badge {
+    padding: 0.2rem 0.6rem; border-radius: 12px;
+    font-weight: 700; font-size: 0.83rem; white-space: nowrap;
+}
+.fire-page .st-open { background: #fff4e6; color: #e8590c; }
+.fire-page .st-closed { background: #e8f5e9; color: #27ae60; }
+.fire-page .items-cell { white-space: pre-wrap; word-break: break-word; }
+.fire-page .out-cell { white-space: pre-wrap; word-break: break-word; color: #e8590c; font-weight: 600; }
+.fire-page .out-empty { color: #adb5bd; font-weight: 400; }
+.fire-page .remark-cell { color: #868e96; font-size: 0.88rem; white-space: pre-wrap; }
+.fire-page .remark-cell.has-content { color: #555; }
+.fire-page .empty-state { text-align: center; padding: 3rem 1rem; color: #bbb; }
+.fire-page .empty-state .icon { font-size: 3.5rem; margin-bottom: 1rem; }
+.fire-page .edit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+.fire-page .edit-grid label { display: block; font-weight: 600; font-size: 0.85rem; margin-bottom: 0.25rem; }
+.fire-page .edit-grid input, .fire-page .edit-grid select, .fire-page .edit-grid textarea {
+    width: 100%; padding: 0.4rem 0.6rem;
+    border: 1px solid #dfe6e9; border-radius: 6px;
+    font-size: 0.9rem; background: #fff; box-sizing: border-box;
+}
+.fire-page .edit-grid textarea { resize: vertical; }
+.fire-page .edit-grid input:focus, .fire-page .edit-grid select:focus, .fire-page .edit-grid textarea:focus {
+    outline: none; border-color: #e8590c;
+    box-shadow: 0 0 0 2px rgba(232,89,12,0.1);
+}
+/* ── 记录下方的图片子行 ── */
+.fire-page .fc-img-cell { padding: 0.5rem 0.75rem 0.75rem; background: #fcfcfd; }
+.fire-page .fc-img-head {
+    display: flex; align-items: center; gap: 0.5rem;
+    font-size: 0.78rem; color: #868e96; margin-bottom: 0.4rem;
+}
+.fire-page .fc-img-count { color: #adb5bd; }
+.fire-page .fc-img-grid {
+    display: grid; gap: 0.5rem;
+    grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+}
+.fire-page .fc-img-item {
+    position: relative; aspect-ratio: 1 / 1;
+    border: 1px solid #dfe6e9; border-radius: 6px;
+    overflow: hidden; background: #f1f3f5;
+}
+.fire-page .fc-img-item img {
+    width: 100%; height: 100%; object-fit: cover;
+    cursor: pointer; display: block;
+}
+.fire-page .fc-img-del {
+    position: absolute; top: 3px; right: 3px;
+    width: 20px; height: 20px; padding: 0; line-height: 1;
+    background: rgba(214, 48, 49, 0.85); color: #fff;
+    border: none; border-radius: 50%; cursor: pointer;
+    font-size: 0.75rem;
+}
+.fire-page .fc-img-del:hover { background: #d63031; }
+.fire-page .fc-img-add {
+    aspect-ratio: 1 / 1;
+    width: 100%; padding: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 0.2rem;
+    border: 1px dashed #ced4da; border-radius: 6px;
+    background: #fff; color: #adb5bd;
+    cursor: pointer; font-size: 1.1rem; user-select: none;
+    font-family: inherit; line-height: 1.2;
+}
+.fire-page .fc-img-add:hover { border-color: #d63031; color: #d63031; background: #fff5f5; }
+.fire-page .fc-img-add-text { font-size: 0.72rem; }
+/* ── 添加图片弹框：粘贴区 + 待上传队列 ── */
+.fire-page .fc-paste-zone {
+    border: 2px dashed #ced4da; border-radius: 8px;
+    padding: 1.25rem 1rem; text-align: center;
+    background: #fafbfc; cursor: text;
+}
+.fire-page .fc-paste-zone:focus {
+    outline: none; border-color: #d63031; background: #fff5f5;
+}
+.fire-page .fc-paste-icon { font-size: 1.8rem; margin-bottom: 0.35rem; }
+.fire-page .fc-paste-text { font-size: 0.88rem; color: #636e72; line-height: 1.6; }
+.fire-page .fc-paste-sub { color: #adb5bd; font-size: 0.8rem; }
+.fire-page .fc-paste-zone .btn { margin-top: 0.6rem; }
+.fire-page .fc-queue {
+    display: grid; gap: 0.5rem; margin-top: 0.75rem;
+    grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+}
+.fire-page .fc-queue:empty { display: none; }
+.fire-page .fc-queue-item {
+    position: relative; border: 1px solid #dfe6e9; border-radius: 6px;
+    overflow: hidden; background: #f8f9fa;
+}
+.fire-page .fc-queue-item img {
+    width: 100%; aspect-ratio: 1 / 1; object-fit: cover; display: block;
+}
+.fire-page .fc-queue-name {
+    font-size: 0.7rem; color: #868e96; padding: 0.25rem 0.35rem;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.fire-page .fc-queue-del {
+    position: absolute; top: 3px; right: 3px;
+    width: 20px; height: 20px; padding: 0; line-height: 1;
+    background: rgba(214, 48, 49, 0.85); color: #fff;
+    border: none; border-radius: 50%; cursor: pointer; font-size: 0.75rem;
+}
+@media (max-width: 640px) {
+    .fire-page .form-grid { grid-template-columns: 1fr 1fr; }
+    .fire-page .edit-grid { grid-template-columns: 1fr; }
+}
+</style>
+
+<!-- 新增消防检查记录 -->
+<div class="card fire-page">
+    <h2 class="card-title">🚨 记录消防检查</h2>
+    <form action="/fire-checks/add" method="POST">
+        <div class="form-grid">
+            <div>
+                <label for="date">日期</label>
+                <input type="date" id="date" name="date" required>
+            </div>
+            <div>
+                <label for="location">检查部位</label>
+                <input type="text" id="location" name="location" placeholder="例如：成品仓 / 车间 / 办公区">
+            </div>
+        </div>
+        <div class="form-row">
+            <label for="check_items">检查事项</label>
+            <textarea id="check_items" name="check_items" rows="3" placeholder="本次检查了什么、结果如何" required></textarea>
+        </div>
+        <div class="form-row">
+            <label for="outstanding_items">遗留事项</label>
+            <textarea id="outstanding_items" name="outstanding_items" rows="2" placeholder="查出来还没整改的问题（留空表示无遗留）"></textarea>
+            <div class="form-hint">留了遗留 → 状态自动标记为「待整改」；清空 → 自动变为「已闭环」。</div>
+        </div>
+        <div class="form-row">
+            <label for="remark">备注</label>
+            <textarea id="remark" name="remark" rows="1" placeholder="可选，补充说明"></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary" style="margin-top:1rem;">💾 保存记录</button>
+    </form>
+</div>
+
+<!-- 检查台账列表 -->
+<div class="card fire-page">
+    <h2 class="card-title">📋 消防检查台账</h2>
+    <div class="stat-bar">
+        <span class="stat-chip stat-total">共 <b>{{ stats.total }}</b> 次</span>
+        <span class="stat-chip stat-open">待整改 <b>{{ stats.open }}</b></span>
+        <span class="stat-chip stat-closed">已闭环 <b>{{ stats.closed }}</b></span>
+        <span class="filter-toggle" id="fcFilterToggle" title="点击只看还有遗留事项的记录">🔍 只看待整改</span>
+    </div>
+    {% if records %}
+    <table class="fc-table" id="fcTable">
+        <thead>
+            <tr>
+                <th style="width:110px;">日期</th>
+                <th style="width:130px;">部位</th>
+                <th>检查事项</th>
+                <th style="width:24%;">遗留事项</th>
+                <th style="width:90px;">状态</th>
+                <th style="width:14%;">备注</th>
+                <th style="width:80px;">操作</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for item in records %}
+            <tr class="{% if item.status == 'open' %}row-open{% endif %}" data-status="{{ item.status }}">
+                <td class="date-col">{{ item.date }}</td>
+                <td>{% if item.location %}<span class="loc-badge">{{ item.location }}</span>{% else %}—{% endif %}</td>
+                <td class="items-cell">{{ item.check_items }}</td>
+                <td class="out-cell">{% if item.outstanding_items %}{{ item.outstanding_items }}{% else %}<span class="out-empty">—</span>{% endif %}</td>
+                <td>
+                    <span class="status-badge {% if item.status == 'open' %}st-open{% else %}st-closed{% endif %}">
+                        {{ status_label.get(item.status, item.status) }}
+                    </span>
+                </td>
+                <td class="remark-cell {% if item.remark %}has-content{% endif %}">{{ item.remark or '—' }}</td>
+                <td>
+                    <button type="button" class="btn btn-sm fc-edit-btn" title="修改记录"
+                            data-id="{{ item.id }}"
+                            data-date="{{ item.date }}"
+                            data-location="{{ item.location or '' }}"
+                            data-check-items="{{ item.check_items }}"
+                            data-outstanding-items="{{ item.outstanding_items or '' }}"
+                            data-remark="{{ item.remark or '' }}"
+                            data-status="{{ item.status }}">✏️</button>
+                    <form action="/fire-checks/delete/{{ item.id }}" method="POST" onsubmit="return confirm('确定要删除这条消防检查记录吗？（其下的图片也会一并删除）');" style="display:inline;">
+                        <button type="submit" class="btn btn-danger btn-sm">🗑️</button>
+                    </form>
+                </td>
+            </tr>
+            <!-- 图片子行：缩略图 + 删除 + 添加图片（显示在该记录下方） -->
+            {% set item_imgs = fc_images.get(item.id, []) %}
+            <tr class="fc-img-row" data-status="{{ item.status }}">
+                <td colspan="7" class="fc-img-cell">
+                    <div class="fc-img-wrap" data-record-id="{{ item.id }}">
+                        <div class="fc-img-head">
+                            <span>📷 图片</span>
+                            <span class="fc-img-count">{{ item_imgs | length }} 张</span>
+                        </div>
+                        <div class="fc-img-grid">
+                            {% for img in item_imgs %}
+                            <div class="fc-img-item" data-image-id="{{ img.id }}">
+                                <img src="{{ '/upload/' ~ (img.month_dir ~ '/' if img.month_dir else '') ~ img.file_name }}"
+                                     alt="{{ img.original_name or '检查图片' }}"
+                                     data-preview="{{ '/upload/' ~ (img.month_dir ~ '/' if img.month_dir else '') ~ img.file_name }}">
+                                <button type="button" class="fc-img-del" data-image-id="{{ img.id }}" title="删除图片">×</button>
+                            </div>
+                            {% endfor %}
+                            <button type="button" class="fc-img-add" title="添加图片（可粘贴截图）" onclick="fcOpenUpload(this)">
+                                <span>📷</span>
+                                <span class="fc-img-add-text">添加图片</span>
+                            </button>
+                        </div>
+                    </div>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <div class="icon">🚨</div>
+        <p>暂无消防检查记录，开始记录第一笔吧！</p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- 修改消防检查记录弹框 -->
+<div id="fcEditModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center;">
+    <div class="card fire-page" style="width:94%; max-width:620px; margin:0;">
+        <h2 class="card-title">✏️ 修改消防检查记录</h2>
+        <form id="fcEditForm" method="POST" action="/fire-checks/edit/0">
+            <div class="edit-grid">
+                <div>
+                    <label for="fcEditDate">日期</label>
+                    <input type="date" id="fcEditDate" name="date" required>
+                </div>
+                <div>
+                    <label for="fcEditLocation">检查部位</label>
+                    <input type="text" id="fcEditLocation" name="location">
+                </div>
+            </div>
+            <div style="margin-top:0.75rem;">
+                <label for="fcEditCheckItems" style="display:block;font-weight:600;font-size:0.85rem;margin-bottom:0.25rem;">检查事项</label>
+                <textarea id="fcEditCheckItems" name="check_items" rows="3" required></textarea>
+            </div>
+            <div style="margin-top:0.75rem;">
+                <label for="fcEditOutstanding" style="display:block;font-weight:600;font-size:0.85rem;margin-bottom:0.25rem;">遗留事项</label>
+                <textarea id="fcEditOutstanding" name="outstanding_items" rows="2"></textarea>
+            </div>
+            <div style="margin-top:0.75rem;">
+                <label for="fcEditStatus" style="display:block;font-weight:600;font-size:0.85rem;margin-bottom:0.25rem;">状态</label>
+                <select id="fcEditStatus" name="status">
+                    <option value="">按遗留事项自动判定</option>
+                    <option value="open">待整改</option>
+                    <option value="closed">已闭环</option>
+                </select>
+            </div>
+            <div style="margin-top:0.75rem;">
+                <label for="fcEditRemark" style="display:block;font-weight:600;font-size:0.85rem;margin-bottom:0.25rem;">备注</label>
+                <textarea id="fcEditRemark" name="remark" rows="1"></textarea>
+            </div>
+            <div style="display:flex; gap:0.75rem; justify-content:flex-end; margin-top:1.25rem;">
+                <button type="button" class="btn btn-sm" onclick="fcCloseEdit()" style="padding:0.5rem 1rem; background:#e0e0e0; color:#333;">取消</button>
+                <button type="submit" class="btn btn-primary btn-sm">💾 保存修改</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 添加图片弹框（支持直接粘贴截图 / 多选文件） -->
+<div id="fcUploadModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center;">
+    <div class="card fire-page" style="width:92%; max-width:560px; margin:0;">
+        <h2 class="card-title">📷 添加图片</h2>
+        <div id="fcPasteZone" class="fc-paste-zone" tabindex="0" title="点击这里，然后按 Ctrl+V 粘贴截图">
+            <div class="fc-paste-icon">📋</div>
+            <div class="fc-paste-text">在此处按 <b>Ctrl+V</b> 粘贴截图<br><span class="fc-paste-sub">或</span></div>
+            <button type="button" id="fcPickFiles" class="btn btn-sm">🗂️ 选择文件（可多选）</button>
+            <input type="file" id="fcFileInput" accept="image/*" multiple hidden>
+        </div>
+        <div id="fcQueue" class="fc-queue"></div>
+        <div style="display:flex; gap:0.75rem; justify-content:flex-end; margin-top:1.25rem;">
+            <button type="button" class="btn btn-sm" onclick="fcCloseUpload()" style="padding:0.5rem 1rem; background:#e0e0e0; color:#333;">取消</button>
+            <button type="button" id="fcUploadSubmit" class="btn btn-primary btn-sm" disabled>💾 上传</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    var today = new Date().toISOString().split('T')[0];
+    document.getElementById('date').value = today;
+
+    /* ── 修改弹框 ─────────────────────────────────────────── */
+    function fcOpenEdit(btn) {
+        var f = document.getElementById('fcEditForm');
+        f.action = '/fire-checks/edit/' + btn.dataset.id;
+        document.getElementById('fcEditDate').value = btn.dataset.date || '';
+        document.getElementById('fcEditLocation').value = btn.dataset.location || '';
+        document.getElementById('fcEditCheckItems').value = btn.dataset.checkItems || '';
+        document.getElementById('fcEditOutstanding').value = btn.dataset.outstandingItems || '';
+        document.getElementById('fcEditRemark').value = btn.dataset.remark || '';
+        // 状态默认「按遗留事项自动判定」：不改遗留事项时，状态随遗留事项重新推导；
+        // 想手动覆盖（保留 open / 强制 closed）时，用户自己在下拉里选。
+        document.getElementById('fcEditStatus').value = '';
+        var m = document.getElementById('fcEditModal');
+        m.style.display = 'flex';
+    }
+
+    function fcCloseEdit() {
+        document.getElementById('fcEditModal').style.display = 'none';
+    }
+
+    document.querySelectorAll('.fc-edit-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () { fcOpenEdit(btn); });
+    });
+
+    /* 点弹框遮罩关闭 */
+    document.getElementById('fcEditModal').addEventListener('click', function (e) {
+        if (e.target === this) fcCloseEdit();
+    });
+
+    /* 点上传弹框遮罩关闭 */
+    document.getElementById('fcUploadModal').addEventListener('click', function (e) {
+        if (e.target === this) fcCloseUpload();
+    });
+
+    /* ── 只看待整改筛选 ───────────────────────────────────── */
+    var fcToggle = document.getElementById('fcFilterToggle');
+    if (fcToggle) {
+        fcToggle.addEventListener('click', function () {
+            this.classList.toggle('on');
+            var onlyOpen = this.classList.contains('on');
+            document.querySelectorAll('#fcTable tbody tr[data-status]').forEach(function (tr) {
+                tr.style.display = (onlyOpen && tr.dataset.status !== 'open') ? 'none' : '';
+            });
+        });
+    }
+
+    /* ── 记录图片：上传 / 删除 / 放大预览 ─────────────────────── */
+
+    // 统计并刷新某条记录的图片数量
+    function fcUpdateCount(wrap) {
+        var grid = wrap.querySelector('.fc-img-grid');
+        var counter = wrap.querySelector('.fc-img-count');
+        if (!grid || !counter) return;
+        counter.textContent = grid.querySelectorAll('.fc-img-item').length + ' 张';
+    }
+
+    var fcUploadWrap = null;   // 当前要上传到哪条记录
+    var fcQueue = [];          // 待上传的文件队列
+
+    function fcOpenUpload(btn) {
+        fcUploadWrap = btn.closest('.fc-img-wrap');
+        if (!fcUploadWrap) return;
+        fcQueue = [];
+        fcRenderQueue();
+        document.getElementById('fcUploadModal').style.display = 'flex';
+        document.getElementById('fcPasteZone').focus();
+    }
+
+    function fcCloseUpload() {
+        document.getElementById('fcUploadModal').style.display = 'none';
+        fcQueue = [];
+        fcUploadWrap = null;
+    }
+
+    // 把文件加入队列（同名同大小视为重复，忽略）
+    function fcQueueFiles(files) {
+        for (var i = 0; i < files.length; i++) {
+            var f = files[i];
+            if (!f || !f.type || f.type.indexOf('image/') !== 0) continue;
+            var dup = false;
+            for (var j = 0; j < fcQueue.length; j++) {
+                if (fcQueue[j].name === f.name && fcQueue[j].size === f.size) { dup = true; break; }
+            }
+            if (!dup) fcQueue.push(f);
+        }
+        fcRenderQueue();
+    }
+
+    // 渲染待上传队列（缩略图 + 移除）
+    function fcRenderQueue() {
+        var box = document.getElementById('fcQueue');
+        box.innerHTML = '';
+        for (var i = 0; i < fcQueue.length; i++) {
+            (function (file, idx) {
+                var item = document.createElement('div');
+                item.className = 'fc-queue-item';
+
+                var img = document.createElement('img');
+                img.src = URL.createObjectURL(file);
+                img.alt = file.name || '图片';
+                item.appendChild(img);
+
+                var name = document.createElement('div');
+                name.className = 'fc-queue-name';
+                name.textContent = file.name || ('图片 ' + (idx + 1));
+                item.appendChild(name);
+
+                var btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'fc-queue-del';
+                btn.title = '移除';
+                btn.textContent = '×';
+                btn.onclick = function () {
+                    fcQueue.splice(idx, 1);
+                    fcRenderQueue();
+                };
+                item.appendChild(btn);
+
+                box.appendChild(item);
+            })(fcQueue[i], i);
+        }
+        document.getElementById('fcUploadSubmit').disabled = fcQueue.length === 0;
+    }
+
+    // 把队列里的文件传到目标记录（不整页刷新，成功后追加缩略图）
+    function fcDoUpload(wrap, files) {
+        var recordId = wrap.getAttribute('data-record-id');
+        var fd = new FormData();
+        for (var i = 0; i < files.length; i++) {
+            fd.append('image', files[i], files[i].name || ('photo' + i + '.jpg'));
+        }
+        if (typeof showLoading === 'function') showLoading('上传中...');
+        fetch('/api/v1/fire-checks/' + recordId + '/images', {
+            method: 'POST',
+            body: fd
+        })
+        .then(function (r) {
+            return r.json().then(function (d) { return { ok: r.ok, data: d }; });
+        })
+        .then(function (res) {
+            if (typeof hideLoading === 'function') hideLoading();
+            if (!res.ok || !res.data || !res.data.success) {
+                alert('上传失败: ' + ((res.data && res.data.error) || '未知错误'));
+                return;
+            }
+            var imgs = res.data.images || [];
+            for (var k = 0; k < imgs.length; k++) fcAppendImage(wrap, imgs[k]);
+        })
+        .catch(function (err) {
+            if (typeof hideLoading === 'function') hideLoading();
+            alert('上传失败: ' + err.message);
+        });
+    }
+
+    // 「上传」按钮
+    document.getElementById('fcUploadSubmit').addEventListener('click', function () {
+        if (!fcUploadWrap || !fcQueue.length) return;
+        var wrap = fcUploadWrap;
+        var files = fcQueue.slice();
+        fcCloseUpload();
+        fcDoUpload(wrap, files);
+    });
+
+    // 「选择文件」按钮
+    document.getElementById('fcPickFiles').addEventListener('click', function (e) {
+        e.stopPropagation();
+        document.getElementById('fcFileInput').click();
+    });
+    document.getElementById('fcFileInput').addEventListener('change', function () {
+        fcQueueFiles(this.files);
+        this.value = '';   // 清空，允许再次选同一张图
+    });
+
+    // 粘贴区点一下就聚焦（用户按 Ctrl+V 才有地方粘）
+    document.getElementById('fcPasteZone').addEventListener('click', function (e) {
+        if (e.target && e.target.id === 'fcPickFiles') return;
+        this.focus();
+    });
+
+    // 粘贴：剪贴板里的图片直接进队列（弹框开着时才处理）
+    function fcHandlePaste(e) {
+        var modal = document.getElementById('fcUploadModal');
+        if (!modal || modal.style.display === 'none') return;
+        var dt = e.clipboardData;
+        if (!dt) return;
+        var files = [];
+        if (dt.items && dt.items.length) {
+            for (var i = 0; i < dt.items.length; i++) {
+                if (dt.items[i].kind === 'file' && dt.items[i].type.indexOf('image/') === 0) {
+                    var f = dt.items[i].getAsFile();
+                    if (f) files.push(f);
+                }
+            }
+        }
+        if (!files.length && dt.files && dt.files.length) {
+            for (var k = 0; k < dt.files.length; k++) files.push(dt.files[k]);
+        }
+        if (!files.length) return;
+        e.preventDefault();
+        fcQueueFiles(files);
+    }
+    document.addEventListener('paste', fcHandlePaste);
+
+    // 追加一张缩略图（插在「添加图片」磁贴之前）
+    function fcAppendImage(wrap, img) {
+        var grid = wrap.querySelector('.fc-img-grid');
+        if (!grid) return;
+        var addTile = grid.querySelector('.fc-img-add');
+
+        var item = document.createElement('div');
+        item.className = 'fc-img-item';
+        item.setAttribute('data-image-id', img.id);
+
+        var el = document.createElement('img');
+        el.src = img.url;
+        el.alt = img.original_name || '检查图片';
+        el.setAttribute('data-preview', img.url);
+        item.appendChild(el);
+
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'fc-img-del';
+        btn.setAttribute('data-image-id', img.id);
+        btn.title = '删除图片';
+        btn.textContent = '×';
+        item.appendChild(btn);
+
+        grid.insertBefore(item, addTile);
+        fcUpdateCount(wrap);
+    }
+
+    // 删除一张图片（DB 行 + 物理文件一并清掉）
+    //
+    // ⚠️ fcDeleteBusy 锁：原生 confirm() 会阻塞页面，用户的连点（双击）会在
+    //    第一次删除完成、网格左移之后落到「下一张图」的 × 上 → 误删两张。
+    var fcDeleteBusy = false;
+    function fcDeleteImage(imageId, btn) {
+        if (fcDeleteBusy) return;
+        if (!confirm('确定要删除这张图片吗？')) return;
+        fcDeleteBusy = true;
+        btn.disabled = true;
+        fetch('/api/v1/fire-checks/images/' + imageId, { method: 'DELETE' })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (data && data.success) {
+                var item = btn.closest('.fc-img-item');
+                var wrap = btn.closest('.fc-img-wrap');
+                if (item) item.remove();
+                if (wrap) fcUpdateCount(wrap);
+            } else {
+                btn.disabled = false;
+                alert('删除失败: ' + ((data && data.error) || '未知错误'));
+            }
+        })
+        .catch(function (err) {
+            btn.disabled = false;
+            alert('删除失败: ' + err.message);
+        })
+        .then(function () { fcDeleteBusy = false; });
+    }
+
+    // 事件委托：删除按钮 + 缩略图放大（动态追加的图也自动生效）
+    document.addEventListener('click', function (ev) {
+        if (!ev.target || !ev.target.closest) return;
+        var delBtn = ev.target.closest('.fc-img-del');
+        if (delBtn) {
+            ev.preventDefault();
+            fcDeleteImage(delBtn.getAttribute('data-image-id'), delBtn);
+            return;
+        }
+        var thumb = ev.target.closest('.fc-img-item img');
+        if (thumb) {
+            ev.preventDefault();
+            var src = thumb.getAttribute('data-preview') || thumb.src;
+            if (typeof showImgPreview === 'function') showImgPreview(src);
+            else window.open(src, '_blank');
+        }
+    });
+
+    // Esc 关闭上传弹框
+    document.addEventListener('keydown', function (ev) {
+        if (ev.key !== 'Escape') return;
+        var upModal = document.getElementById('fcUploadModal');
+        if (upModal && upModal.style.display !== 'none') fcCloseUpload();
+    });
+</script>
+{% endblock %}
