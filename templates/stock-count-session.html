@@ -1,0 +1,543 @@
+{% extends "base.html" %}
+{% block title %}盘点 · {{ count.title }} · 丰源工作台{% endblock %}
+{% block head %}
+<style>
+.stkcs-page { max-width: 1500px; margin: 0 auto; padding: 1rem 0.75rem 2.5rem; }
+.stkcs-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 0.8rem; flex-wrap: wrap; }
+.stkcs-head h1 { font-size: 1.35rem; margin: 0; color: #2d3436; }
+.stkcs-head .subtitle { color: #636e72; font-size: 0.88rem; margin: 0.25rem 0 0; }
+.stkcs-head .subtitle b { color: #14664d; }
+.stkcs-badges { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.45rem; }
+
+.stkcs-badge { display: inline-block; padding: 0.14rem 0.6rem; border-radius: 999px; font-size: 0.76rem; font-weight: 600; white-space: nowrap; }
+.stkcs-badge.open { background: #fff3cd; color: #856404; }
+.stkcs-badge.closed { background: #dbf6e6; color: #146745; }
+.stkcs-badge.info { background: #e8f5ee; color: #14664d; }
+.stkcs-badge.warn { background: #fff3cd; color: #856404; }
+.stkcs-badge.hit { background: #fdecea; color: #c0392b; }
+
+.stkcs-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 0.6rem; margin-bottom: 0.8rem; }
+.stkcs-stat { background: #fff; border-radius: 12px; padding: 0.65rem 0.85rem; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+.stkcs-stat .num { font-size: 1.4rem; font-weight: 700; color: #2d3436; line-height: 1.2; }
+.stkcs-stat .label { font-size: 0.76rem; color: #868e96; margin-top: 0.15rem; }
+.stkcs-stat.ok .num { color: #14664d; }
+.stkcs-stat.hit .num { color: #c0392b; }
+
+.stkcs-toolbar { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.6rem; }
+.stkcs-search { flex: 1 1 220px; }
+.stkcs-search input[type="text"] {
+  width: 100%; box-sizing: border-box; border: 1px solid #d6dee0; border-radius: 8px;
+  padding: 0.45rem 0.6rem; font-size: 0.9rem;
+}
+.stkcs-toggle { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.85rem; color: #2d3436; cursor: pointer; }
+
+.stkcs-btn {
+  font-size: 0.85rem; padding: 0.4rem 0.8rem; border-radius: 8px;
+  background: #fff; border: 1px solid #d6dee0; color: #2d3436; text-decoration: none; cursor: pointer;
+  display: inline-block;
+}
+.stkcs-btn:hover { background: #f1f8f4; color: #14664d; border-color: #c9e7d8; }
+.stkcs-btn.primary { background: #14664d; border-color: #14664d; color: #fff; font-weight: 600; }
+.stkcs-btn.primary:hover { background: #0f5239; color: #fff; }
+.stkcs-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.stkcs-card { background: #fff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); overflow: hidden; }
+.stkcs-card table { width: 100%; border-collapse: collapse; }
+.stkcs-card th, .stkcs-card td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #f1f3f5; font-size: 0.86rem; }
+.stkcs-card th { background: #f8f9fa; font-weight: 600; color: #636e72; font-size: 0.74rem; letter-spacing: 0.4px; white-space: nowrap; position: sticky; top: 0; z-index: 2; }
+.stkcs-card td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.stkcs-card td.code { color: #868e96; font-size: 0.8rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.stkcs-card td.spec { color: #636e72; }
+.stkcs-card tbody tr:hover { background: #f8fbf9; }
+.stkcs-card tbody tr.hidden { display: none; }
+.stkcs-diff.pos { color: #c0392b; font-weight: 700; }
+.stkcs-diff.neg { color: #14664d; font-weight: 700; }
+.stkcs-diff.zero { color: #b2bec3; }
+.stkcs-qty { width: 92px; text-align: right; border: 1px solid #d6dee0; border-radius: 6px; padding: 0.25rem 0.4rem; font-size: 0.86rem; font-variant-numeric: tabular-nums; }
+.stkcs-qty:focus { outline: 2px solid #14664d; outline-offset: -1px; border-color: #14664d; }
+.stkcs-qty.dirty { border-color: #b8860b; background: #fffbf0; }
+.stkcs-qty.saved { border-color: #14664d; background: #f1f8f4; }
+.stkcs-empty { text-align: center; color: #868e96; padding: 2.5rem 1rem; }
+
+.stkcs-modal { position: fixed; inset: 0; background: rgba(20,30,26,0.45); display: none; z-index: 90; overflow: auto; padding: 2rem 1rem; }
+.stkcs-modal.open { display: flex; align-items: flex-start; justify-content: center; }
+.stkcs-modal-box { background: #fff; border-radius: 14px; width: 100%; max-width: 620px; box-shadow: 0 12px 40px rgba(0,0,0,0.22); }
+.stkcs-modal-box.lg { max-width: 1000px; }
+.stkcs-modal-head { padding: 0.9rem 1.1rem; border-bottom: 1px solid #f1f3f5; display: flex; justify-content: space-between; align-items: center; }
+.stkcs-modal-head h3 { margin: 0; font-size: 1.02rem; color: #2d3436; }
+.stkcs-modal-head .x { border: 0; background: transparent; font-size: 1.3rem; cursor: pointer; color: #868e96; line-height: 1; }
+.stkcs-modal-body { padding: 1rem 1.1rem; max-height: 70vh; overflow: auto; }
+.stkcs-modal-foot { padding: 0.8rem 1.1rem; border-top: 1px solid #f1f3f5; display: flex; justify-content: flex-end; gap: 0.5rem; }
+.stkcs-field { margin-bottom: 0.85rem; }
+.stkcs-field label { display: block; font-size: 0.82rem; color: #636e72; font-weight: 600; margin-bottom: 0.3rem; }
+.stkcs-field textarea, .stkcs-field input[type="text"] {
+  width: 100%; box-sizing: border-box; border: 1px solid #d6dee0; border-radius: 8px;
+  padding: 0.45rem 0.6rem; font-size: 0.9rem; font-family: inherit;
+}
+.stkcs-field textarea { resize: vertical; min-height: 120px; font-family: Consolas, Menlo, monospace; }
+.stkcs-field .hint { font-size: 0.78rem; color: #868e96; margin-top: 0.25rem; }
+.stkcs-field .hint.warn { color: #b8860b; }
+
+.stkcs-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 0.5rem; margin-bottom: 0.9rem; }
+.stkcs-summary .cell { background: #f8f9fa; border-radius: 10px; padding: 0.55rem 0.7rem; }
+.stkcs-summary .cell .n { font-size: 1.2rem; font-weight: 700; color: #2d3436; }
+.stkcs-summary .cell .l { font-size: 0.74rem; color: #868e96; }
+.stkcs-summary .cell.hit .n { color: #c0392b; }
+.stkcs-summary .cell.ok .n { color: #14664d; }
+
+.stkcs-preview table { width: 100%; border-collapse: collapse; }
+.stkcs-preview th, .stkcs-preview td { padding: 0.38rem 0.5rem; border-bottom: 1px solid #f1f3f5; font-size: 0.82rem; text-align: right; font-variant-numeric: tabular-nums; }
+.stkcs-preview th { background: #f8f9fa; color: #636e72; font-weight: 600; font-size: 0.74rem; }
+.stkcs-preview th:nth-child(1), .stkcs-preview td:nth-child(1) { text-align: left; }
+.stkcs-preview tr.period-row td { background: #fffdf5; }
+.stkcs-preview .delta-pos { color: #c0392b; font-weight: 700; }
+.stkcs-preview .delta-neg { color: #14664d; font-weight: 700; }
+.stkcs-preview .delta-zero { color: #b2bec3; }
+.stkcs-period { margin: 0.3rem 0 0.6rem; padding: 0.4rem 0.6rem; background: #fffdf5; border-left: 3px solid #e0a800; border-radius: 0 6px 6px 0; font-size: 0.79rem; }
+.stkcs-period table { width: 100%; border-collapse: collapse; }
+.stkcs-period td { padding: 0.15rem 0.35rem; border: 0; font-size: 0.78rem; text-align: left; color: #636e72; }
+
+.stkcs-parse { margin-top: 0.7rem; max-height: 240px; overflow: auto; border: 1px solid #e4e8ec; border-radius: 8px; }
+.stkcs-parse table { width: 100%; border-collapse: collapse; }
+.stkcs-parse td, .stkcs-parse th { padding: 0.28rem 0.45rem; border-bottom: 1px solid #f1f3f5; font-size: 0.79rem; }
+.stkcs-parse th { background: #f8f9fa; color: #636e72; text-align: left; }
+.stkcs-parse .ok { color: #14664d; }
+.stkcs-parse .bad { color: #c0392b; }
+.stkcs-parse .skip { color: #b8860b; }
+
+.stkcs-toast { position: fixed; left: 50%; transform: translateX(-50%); top: 1.1rem; z-index: 120; display: none; padding: 0.6rem 1.1rem; border-radius: 999px; font-size: 0.88rem; font-weight: 600; box-shadow: 0 6px 20px rgba(0,0,0,0.16); }
+.stkcs-toast.ok { display: block; background: #dbf6e6; color: #146745; }
+.stkcs-toast.err { display: block; background: #fdecea; color: #c0392b; }
+
+/* 提交前最后一道闸:页内二次确认(不用原生 confirm —— 原生弹框会卡住渲染进程) */
+.stkcs-warn {
+  background: #fdecea; color: #c0392b; border: 1px solid #f0c9c6; border-radius: 10px;
+  padding: 0.6rem 0.8rem; margin-bottom: 0.8rem; font-size: 0.86rem; line-height: 1.5;
+}
+.stkcs-btn.danger { background: #c0392b; border-color: #c0392b; color: #fff; font-weight: 700; }
+.stkcs-btn.danger:hover { background: #a93226; color: #fff; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="stkcs-page">
+  <div class="stkcs-head">
+    <div>
+      <h1>📋 {{ count.title }}</h1>
+      <div class="stkcs-badges">
+        <span class="stkcs-badge {{ count.status }}">{{ count.status_label }}</span>
+        <span class="stkcs-badge info">🏭 {{ count.warehouse_name }}</span>
+        <span class="stkcs-badge info">基准时点 {{ count.as_of }}</span>
+        {% if count.remark %}<span class="stkcs-badge info">{{ count.remark }}</span>{% endif %}
+      </div>
+      <p class="subtitle">
+        基准时点在建单那一刻写死 —— 它把流水切成「基准余额」和「期间变动」两段，
+        所以 <b>先数货后入库</b> 和 <b>先入库后数货</b> 都能算对。
+      </p>
+    </div>
+    <div style="display:flex;gap:0.4rem;flex-wrap:wrap;">
+      <a class="stkcs-btn" href="/stock-count">← 返回列表</a>
+      <a class="stkcs-btn" href="/api/v1/stock/counts/{{ count.id }}/export.csv">⬇ 导出盘点表</a>
+      {% if count.status == 'open' %}
+      <button class="stkcs-btn" onclick="openBulkModal()">📋 批量粘贴</button>
+      <button class="stkcs-btn primary" onclick="openSubmitModal()">✅ 提交盘点</button>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="stkcs-stats">
+    <div class="stkcs-stat"><div class="num">{{ count.total_items }}</div><div class="label">应盘 SKU</div></div>
+    <div class="stkcs-stat ok"><div class="num">{{ count.counted_items }}</div><div class="label">已录数</div></div>
+    <div class="stkcs-stat"><div class="num">{{ count.total_items - count.counted_items }}</div><div class="label">待录</div></div>
+    <div class="stkcs-stat hit"><div class="num">{{ count.diff_items }}</div><div class="label">账面有差异</div></div>
+  </div>
+
+  <div class="stkcs-toolbar">
+    <div class="stkcs-search">
+      <input type="text" id="rowFilter" placeholder="筛选：编号 / 品名 / 规格" oninput="filterRows()">
+    </div>
+    <label class="stkcs-toggle"><input type="checkbox" id="onlyUnfilled" onchange="filterRows()"> 只看待录</label>
+    {% if count.status != 'open' %}
+    <span class="stkcs-badge closed">已提交 —— 单据不可再改</span>
+    {% endif %}
+  </div>
+
+  <div class="stkcs-card">
+    <table>
+      <thead>
+        <tr>
+          <th>编号</th><th>品名</th><th>规格</th><th>单位</th>
+          <th style="text-align:right;">账面数</th><th style="text-align:right;">实盘数</th>
+          <th style="text-align:right;">差异</th><th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="itemBody">
+      {% for it in items %}
+        <tr data-key="{{ (it.product_code ~ ' ' ~ it.product_name ~ ' ' ~ it.specification) | lower }}"
+            data-unfilled="{{ '1' if it.actual_quantity is none else '0' }}">
+          <td class="code">{{ it.product_code }}</td>
+          <td>{{ it.product_name }}</td>
+          <td class="spec">{{ it.specification }}</td>
+          <td>{{ it.base_unit }}</td>
+          <td class="num">{{ "%.4g" | format(it.book_quantity) }}</td>
+          <td class="num">
+            {% if count.status == 'open' %}
+            <input class="stkcs-qty" type="number" step="any" min="0"
+                   value="{{ '' if it.actual_quantity is none else it.actual_quantity }}"
+                   data-pid="{{ it.product_id }}"
+                   onblur="saveQty(this)"
+                   onkeydown="if (event.key === 'Enter') { this.blur(); }">
+            {% else %}
+            <span>{{ '' if it.actual_quantity is none else "%.4g" | format(it.actual_quantity) }}</span>
+            {% endif %}
+          </td>
+          <td class="num stkcs-diff" id="diff-{{ it.product_id }}"
+              data-book="{{ it.book_quantity }}">
+            {% if it.diff is none %}<span style="color:#b2bec3;">—</span>
+            {% elif it.diff > 0 %}<span class="pos">+{{ "%.4g" | format(it.diff) }}</span>
+            {% elif it.diff < 0 %}<span class="neg">{{ "%.4g" | format(it.diff) }}</span>
+            {% else %}<span class="zero">0</span>{% endif %}
+          </td>
+          <td>
+            {% if count.status == 'open' %}
+            <button class="stkcs-btn" onclick="delItem({{ it.product_id }}, this)">删除</button>
+            {% endif %}
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="8"><div class="stkcs-empty">盘点单里没有明细</div></td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ── 批量粘贴弹框 ── -->
+<div class="stkcs-modal" id="bulkModal">
+  <div class="stkcs-modal-box lg">
+    <div class="stkcs-modal-head">
+      <h3>📋 批量粘贴回填</h3>
+      <button class="x" onclick="closeBulkModal()">×</button>
+    </div>
+    <div class="stkcs-modal-body">
+      <div class="stkcs-field">
+        <label>粘贴内容</label>
+        <textarea id="bulkText" placeholder="每行一条：编号&#9;实盘数&#10;02050127&#9;20&#10;白磅布 A1&#9;15"></textarea>
+        <div class="hint">
+          格式：<b>编号 + 实盘数</b>（TAB 或空格分隔）。
+          编号可以写 <b>商品编号</b>（漏前导 0 也能认）、<b>品名 + 规格</b>。
+          只写品名如果命中多行会提示补规格。
+        </div>
+      </div>
+      <div id="bulkResult"></div>
+    </div>
+    <div class="stkcs-modal-foot">
+      <button class="stkcs-btn" onclick="closeBulkModal()">关闭</button>
+      <button class="stkcs-btn primary" id="bulkBtn" onclick="doBulkInput()">解析并回填</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── 提交确认弹框(⭐ A5)───────────────────────────────── -->
+<div class="stkcs-modal" id="submitModal">
+  <div class="stkcs-modal-box lg">
+    <div class="stkcs-modal-head">
+      <h3>✅ 提交盘点 —— 提交后不可撤销</h3>
+      <button class="x" onclick="closeSubmitModal()">×</button>
+    </div>
+    <div class="stkcs-modal-body">
+      <div class="stkcs-warn" id="submitWarn" style="display:none;"></div>
+      <div id="submitBody">
+        <div style="padding:1rem;color:#868e96;">正在算差额…</div>
+      </div>
+    </div>
+    <div class="stkcs-modal-foot">
+      <button class="stkcs-btn" onclick="closeSubmitModal()">取消</button>
+      <button class="stkcs-btn primary" id="submitBtn" onclick="doSubmit()">确认提交</button>
+    </div>
+  </div>
+</div>
+<div class="stkcs-toast" id="toast"></div>
+
+<script>
+const CS_COUNT_ID = {{ count.id }};
+const CS_OPEN = {{ 'true' if count.status == 'open' else 'false' }};
+
+function toast(msg, ok) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'stkcs-toast ' + (ok ? 'ok' : 'err');
+  clearTimeout(window.__toastTimer);
+  window.__toastTimer = setTimeout(() => { el.className = 'stkcs-toast'; }, 2600);
+}
+function fmt(n) {
+  if (n === null || n === undefined) return '—';
+  const v = Number(n);
+  if (!isFinite(v)) return '—';
+  return (Math.round(v * 10000) / 10000).toString();
+}
+function esc(s) {
+  return String(s === null || s === undefined ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+/* ── 筛选 ── */
+function filterRows() {
+  const kw = (document.getElementById('rowFilter').value || '').trim().toLowerCase();
+  const onlyUnfilled = document.getElementById('onlyUnfilled').checked;
+  document.querySelectorAll('#itemBody tr[data-key]').forEach(tr => {
+    const hitKey = !kw || tr.dataset.key.indexOf(kw) >= 0;
+    const hitUn = !onlyUnfilled || tr.dataset.unfilled === '1';
+    tr.classList.toggle('hidden', !(hitKey && hitUn));
+  });
+}
+
+/* ── 单行录数(失焦即存)── */
+async function saveQty(input) {
+  const pid = input.dataset.pid;
+  const raw = (input.value || '').trim();
+  const qty = raw === '' ? null : Number(raw);
+  if (raw !== '' && !isFinite(qty)) { toast('实盘数必须是数字', false); return; }
+  if (qty !== null && qty < 0) { toast('实盘数不能是负数', false); input.value = ''; return; }
+
+  input.classList.add('dirty');
+  try {
+    const res = await fetch('/api/v1/stock/counts/' + CS_COUNT_ID + '/items/' + pid, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ quantity: qty }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) { toast(data.error || '保存失败', false); input.classList.remove('dirty'); return; }
+    input.classList.remove('dirty');
+    input.classList.add('saved');
+    setTimeout(() => input.classList.remove('saved'), 900);
+    // 差异列
+    const diffEl = document.getElementById('diff-' + pid);
+    if (diffEl) {
+      const book = parseFloat(diffEl.dataset.book || '0');
+      const d = qty === null ? null : qty - book;
+      diffEl.innerHTML = (d === null)
+        ? '<span style="color:#b2bec3;">—</span>'
+        : (d > 0 ? '<span class="pos">+' + fmt(d) + '</span>'
+                 : (d < 0 ? '<span class="neg">' + fmt(d) + '</span>'
+                          : '<span class="zero">0</span>'));
+      diffEl.className = 'num stkcs-diff';
+    }
+    // 标记行状态(「只看待录」筛选要用)
+    const tr = input.closest('tr');
+    if (tr) tr.dataset.unfilled = (qty === null ? '1' : '0');
+    filterRows();
+  } catch (e) {
+    input.classList.remove('dirty');
+    toast('保存失败：' + e.message, false);
+  }
+}
+
+async function delItem(pid, btn) {
+  if (!confirm('删除这一行（回到「待录」）？')) return;
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/v1/stock/counts/' + CS_COUNT_ID + '/items/' + pid, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok || !data.success) { toast(data.error || '删除失败', false); btn.disabled = false; return; }
+    const tr = btn.closest('tr');
+    if (tr) tr.remove();
+    toast('已删除', true);
+  } catch (e) {
+    btn.disabled = false;
+    toast('删除失败：' + e.message, false);
+  }
+}
+
+/* ── 批量粘贴 ── */
+function openBulkModal() { document.getElementById('bulkModal').classList.add('open'); }
+function closeBulkModal() { document.getElementById('bulkModal').classList.remove('open'); }
+
+async function doBulkInput() {
+  const btn = document.getElementById('bulkBtn');
+  const text = document.getElementById('bulkText').value || '';
+  if (!text.trim()) { toast('粘贴内容为空', false); return; }
+  btn.disabled = true; btn.textContent = '解析中…';
+  try {
+    const res = await fetch('/api/v1/stock/counts/' + CS_COUNT_ID + '/bulk-input', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) { toast(data.error || '粘贴失败', false); return; }
+    renderBulkResult(data);
+    toast(data.message, true);
+  } catch (e) {
+    toast('粘贴失败：' + e.message, false);
+  } finally {
+    btn.disabled = false; btn.textContent = '解析并回填';
+  }
+}
+
+function renderBulkResult(data) {
+  const rows = (data.lines || []).map(l => {
+    let cls = 'skip', mark = '⚠';
+    if (l.status === 'matched') { cls = 'ok'; mark = '✓'; }
+    else if (l.status === 'unmatched') { cls = 'bad'; mark = '✕'; }
+    const name = l.product_name
+      ? esc(l.product_name) + (l.specification ? ' ' + esc(l.specification) : '') + ' = ' + fmt(l.quantity)
+      : esc(l.message || '');
+    return '<tr><td style="width:40px;">' + l.line + '</td><td style="width:30px;">' + mark +
+           '</td><td style="width:30%;">' + esc(l.text) + '</td><td>' + name + '</td></tr>';
+  }).join('');
+  document.getElementById('bulkResult').innerHTML =
+    '<div class="stkcs-summary">' +
+      '<div class="cell"><div class="n">' + data.parsed + '</div><div class="l">识别行数</div></div>' +
+      '<div class="cell ok"><div class="n">' + data.matched + '</div><div class="l">成功回填</div></div>' +
+      '<div class="cell hit"><div class="n">' + data.unmatched + '</div><div class="l">未匹配</div></div>' +
+      '<div class="cell"><div class="n">' + data.skipped + '</div><div class="l">跳过</div></div>' +
+    '</div>' +
+    (rows ? '<div class="stkcs-parse"><table><thead><tr><th>行</th><th></th><th>原文</th><th>结果</th></tr></thead><tbody>' + rows + '</tbody></table></div>' : '');
+  // 已回填的行要刷新页面上的数
+  setTimeout(() => location.reload(), 900);
+}
+
+/* ── 提交(⭐ A5)── */
+let previewData = null;
+let submitArmed = false;      // 页内二次确认状态:第一次点=进入确认态,第二次点=真提交
+
+function resetSubmitArm() {
+  submitArmed = false;
+  const warn = document.getElementById('submitWarn');
+  if (warn) { warn.style.display = 'none'; warn.innerHTML = ''; }
+  const btn = document.getElementById('submitBtn');
+  if (btn) {
+    btn.textContent = '确认提交';
+    btn.classList.remove('danger');
+    btn.disabled = false;
+  }
+}
+
+async function openSubmitModal() {
+  resetSubmitArm();
+  document.getElementById('submitModal').classList.add('open');
+  document.getElementById('submitBody').innerHTML = '<div style="padding:1rem;color:#868e96;">正在算差额…</div>';
+  try {
+    const res = await fetch('/api/v1/stock/counts/' + CS_COUNT_ID + '/submit/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'inventory' }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      document.getElementById('submitBody').innerHTML =
+        '<div style="padding:1rem;color:#c0392b;">' + esc(data.error || '预览失败') + '</div>';
+      document.getElementById('submitBtn').disabled = true;
+      return;
+    }
+    previewData = data;
+    document.getElementById('submitBtn').disabled = false;
+    renderPreview(data);
+  } catch (e) {
+    document.getElementById('submitBody').innerHTML =
+      '<div style="padding:1rem;color:#c0392b;">预览失败：' + esc(e.message) + '</div>';
+    document.getElementById('submitBtn').disabled = true;
+  }
+}
+function closeSubmitModal() {
+  resetSubmitArm();
+  document.getElementById('submitModal').classList.remove('open');
+}
+
+function renderPreview(d) {
+  const s = d.summary || {};
+  let html = '<div class="stkcs-summary">' +
+    '<div class="cell ok"><div class="n">' + (s.counted || 0) + '</div><div class="l">已录数行</div></div>' +
+    '<div class="cell hit"><div class="n">' + (s.adjusted || 0) + '</div><div class="l">将写调整流水</div></div>' +
+    '<div class="cell"><div class="n">' + (s.unchanged || 0) + '</div><div class="l">差额为 0</div></div>' +
+    '<div class="cell"><div class="n">' + (s.total_period_changes || 0) + '</div><div class="l">期间变动笔数</div></div>' +
+    '</div>';
+
+  html += '<div class="hint" style="margin-bottom:0.6rem;">'
+    + '未录数的 <b>' + (s.unfilled || 0) + '</b> 行不参与提交，也不会被启用。'
+    + '差额 = <b>实际 − 基准余额 − 期间变动</b>（不是「实盘 − 当前余额」）。'
+    + '</div>';
+
+  const rows = (d.rows || []);
+  if (!rows.length) {
+    html += '<div class="stkcs-empty">还没有录任何数 —— 先录数再提交</div>';
+  } else {
+    html += '<div class="stkcs-preview"><table><thead><tr>'
+      + '<th>商品</th><th>实际</th><th>基准</th><th>期间</th><th>调整</th>'
+      + '</tr></thead><tbody>';
+    rows.forEach(r => {
+      const hasPeriod = (r.period_rows || []).length > 0;
+      const dcls = r.delta > 0 ? 'delta-pos' : (r.delta < 0 ? 'delta-neg' : 'delta-zero');
+      html += '<tr class="' + (hasPeriod ? 'period-row' : '') + '">'
+        + '<td>' + esc(r.product_name) + (r.specification ? ' ' + esc(r.specification) : '')
+        + (r.product_code ? ' <span style="color:#b2bec3;font-size:0.76rem;">' + esc(r.product_code) + '</span>' : '')
+        + '</td>'
+        + '<td>' + fmt(r.actual_quantity) + '</td>'
+        + '<td>' + fmt(r.base_qty) + '</td>'
+        + '<td>' + (hasPeriod ? '+' + fmt(r.period_qty) : fmt(r.period_qty)) + '</td>'
+        + '<td class="' + dcls + '">' + (r.delta > 0 ? '+' : '') + fmt(r.delta) + '</td>'
+        + '</tr>';
+      if (hasPeriod) {
+        html += '<tr><td colspan="5" style="padding:0;">';
+        html += '<div class="stkcs-period"><b>期间变动逐笔</b>（盘点基准时点之后发生的出入库）<table>';
+        (r.period_rows || []).forEach(p => {
+          html += '<tr><td>' + esc(p.occurred_at || '') + '</td><td>' + esc(p.biz_type || '') + '</td>'
+            + '<td>' + fmt(p.quantity) + '</td><td>' + esc(p.memo || '') + '</td></tr>';
+        });
+        html += '</table></div></td></tr>';
+      }
+    });
+    html += '</tbody></table></div>';
+  }
+
+  html += '<div class="stkcs-field" style="margin-top:0.9rem;">'
+    + '<label>备注（会写进每条调整流水的 memo）</label>'
+    + '<input type="text" id="submitReason" placeholder="例：11 月底全仓盘点">'
+    + '</div>';
+
+  document.getElementById('submitBody').innerHTML = html;
+}
+
+async function doSubmit() {
+  const btn = document.getElementById('submitBtn');
+  // ── 第一步:进入「最终确认」态 ──
+  // ⚠️ **不用原生 confirm()**:原生弹框会**卡住渲染进程**(嵌入式浏览器里
+  //    点下去直接超时),而且跟阶段 4 的过账 / 冲销二次确认弹框口径不一致。
+  //    这里改成**页内二次确认**:第一次点亮红色警告条 + 按钮变「⚠ 确定提交」,
+  //    第二次点才真的提交。
+  if (!submitArmed) {
+    submitArmed = true;
+    const s = (previewData && previewData.summary) || {};
+    const warn = document.getElementById('submitWarn');
+    warn.innerHTML = '⚠️ <b>提交后不可撤销</b> —— 这张盘点单不能再改、也不能重复提交。'
+      + '本次将写 <b>' + (s.adjusted || 0) + '</b> 条调整流水、启用 <b>' + (s.counted || 0) + '</b> 个商品。';
+    warn.style.display = 'block';
+    btn.textContent = '⚠ 确定提交';
+    btn.classList.add('danger');
+    return;
+  }
+  // ── 第二步:真的提交 ──
+  btn.disabled = true; btn.textContent = '提交中…';
+  try {
+    const res = await fetch('/api/v1/stock/counts/' + CS_COUNT_ID + '/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'inventory',
+        reason: (document.getElementById('submitReason') || {}).value || '',
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) { toast(data.error || '提交失败', false); resetSubmitArm(); return; }
+    toast(data.message || '提交成功', true);
+    setTimeout(() => location.reload(), 700);
+  } catch (e) {
+    toast('提交失败：' + e.message, false);
+    resetSubmitArm();
+  }
+}
+</script>
+{% endblock %}

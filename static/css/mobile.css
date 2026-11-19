@@ -257,3 +257,160 @@
 .m-copy-paper-tag.tag-label { color: #1864ab; }
 /* 2026-09-09: .m-copy-paper-tag.tag-count / .m-copy-paper-count-input 已删(张数录入废弃) */
 .place-result.bad .pr-row b { color:#c0392b; }
+/* ── 移动端盘点(阶段 6)──────────────────────────────────────────────
+   场景:站在货堆前,单手拿着手机,点一下 +1 就要记一笔。
+   所以:按钮要够大(≥40px)、数字要显眼、颜色一眼能分清
+   (绿=一致 / 橙=多 / 红=少),冲突提示要跳出来。 */
+
+.m-count { max-width: 480px; margin: 0 auto; padding: 12px 12px calc(24px + env(safe-area-inset-bottom)); }
+.m-count .app-head { background: linear-gradient(140deg,#14664d,#21956c); color:#fff; padding:14px; border-radius:12px; }
+.m-count .head-row { display:flex; justify-content:space-between; align-items:center; }
+.m-count .head-actions { display:flex; align-items:center; gap:7px; }
+.m-count .header-stat { background:rgba(255,255,255,.22); border-radius:99px; padding:4px 11px; font-size:13px; font-weight:700; }
+.m-count .refresh-btn { display:inline-grid; place-items:center; width:32px; height:32px; border-radius:50%; background:rgba(255,255,255,.22); color:#fff; font-size:18px; font-weight:700; text-decoration:none; }
+.m-count h2 { margin:0 0 4px; }
+.m-count .subtitle { margin:0; opacity:.85; font-size:12px; }
+.m-count .empty { text-align:center; color:#64748b; padding:32px 0; }
+
+/* 操作人条(A7) */
+.m-count-operator { display:flex; align-items:center; gap:8px; background:#fff; border:1px solid #e9eef2; border-radius:12px; padding:9px 12px; margin:11px 0; box-shadow:0 2px 6px rgba(15,23,42,.05); }
+.m-count .op-avatar { width:30px; height:30px; flex:0 0 auto; border-radius:50%; background:#17664f; color:#fff; display:grid; place-items:center; font-weight:800; font-size:14px; }
+.m-count .op-avatar.warn { background:#c5342c; }
+.m-count .op-name { font-weight:700; font-size:14px; color:#1d2b27; }
+.m-count .op-role { margin-left:auto; font-size:11px; color:#64748b; background:#eef2f7; border-radius:99px; padding:3px 9px; }
+.m-count .op-btn { margin-left:auto; border:0; border-radius:9px; background:#17664f; color:#fff; padding:8px 14px; font-weight:800; font-size:13px; }
+
+/* 筛选 */
+.m-count-filters { display:flex; align-items:center; gap:8px; margin:10px 0; }
+.m-count-tabs { display:flex; background:#eef2f1; border-radius:10px; padding:3px; flex:1; }
+.m-count-tab { flex:1; text-align:center; padding:7px 4px; border-radius:8px; font-size:12.5px; font-weight:700; color:#5b6b65; text-decoration:none; }
+.m-count-tab.on { background:#fff; color:#17664f; box-shadow:0 1px 3px rgba(15,23,42,.10); }
+.m-count-wh { border:1px solid #d7e2dd; border-radius:10px; padding:8px 10px; font-size:13px; background:#fff; color:#1d2b27; max-width:44%; }
+
+/* 新建 */
+.m-count-new { width:100%; border:0; border-radius:12px; background:linear-gradient(135deg,#16835f,#1f9a70); color:#fff; padding:14px; margin:4px 0 12px; font-weight:800; font-size:15px; box-shadow:0 3px 8px rgba(22,131,95,.25); }
+.m-count-new:active { transform:scale(.985); }
+
+/* 进度 */
+.m-count-progress { background:#fff; border:1px solid #e6f0ea; border-radius:12px; padding:11px 13px; margin:10px 0; box-shadow:0 2px 6px rgba(15,23,42,.05); }
+.m-count-pbar { height:8px; background:#e6ecef; border-radius:99px; overflow:hidden; }
+.m-count-pbar i { display:block; height:100%; background:#1f9a70; transition:width .25s ease; }
+.m-count-ptext { margin-top:7px; font-size:12.5px; color:#5b6b65; }
+.m-count-ptext b { color:#14664d; font-size:15px; }
+.m-count-ptext .has-diff { color:#c0392b; font-weight:700; margin-left:8px; }
+
+/* 并发冲突提示(6.6) */
+.m-count-conflict { margin:10px 0; padding:10px 12px; border-radius:10px; font-size:12.5px; line-height:1.5; background:#fff4e0; color:#b9770e; border:1px solid #f3d9a8; }
+.m-count-conflict[hidden] { display:none; }
+.m-count-conflict.warn { background:#fff4e0; color:#b9770e; border-color:#f3d9a8; }
+.m-count-conflict.error { background:#fdecea; color:#c0392b; border-color:#f3c3bb; }
+.m-count-conflict.ok { background:#e6f6ee; color:#146745; border-color:#b9ddcf; }
+
+/* 工具条 */
+.m-count-tools { display:flex; gap:8px; margin:10px 0; }
+.m-count-search { flex:1; min-width:0; border:1px solid #d7e2dd; border-radius:10px; padding:10px 12px; font-size:14px; background:#fff; }
+.m-count-toggle { border:1px solid #d7e2dd; border-radius:10px; background:#fff; color:#5b6b65; padding:10px 12px; font-size:12.5px; font-weight:700; white-space:nowrap; }
+.m-count-toggle.on { background:#17664f; color:#fff; border-color:#17664f; }
+
+/* 分类分组 */
+.m-cgroup { background:#fff; border:1px solid #e9eef2; border-radius:12px; margin:10px 0; overflow:hidden; box-shadow:0 2px 6px rgba(15,23,42,.05); }
+.m-cgroup-head { display:flex; align-items:center; gap:8px; padding:11px 13px; background:#f6faf8; cursor:pointer; }
+.m-cgroup-name { font-weight:800; font-size:14px; color:#155f49; }
+.m-cgroup-meta { margin-left:auto; font-size:11.5px; color:#64748b; }
+.m-cgroup-arrow { color:#94a3b8; font-size:13px; transition:transform .2s ease; }
+.m-cgroup.folded .m-cgroup-arrow { transform:rotate(-90deg); }
+.m-cgroup.folded .m-cgroup-body { display:none; }
+.m-cgroup-body { padding:4px 11px 8px; }
+
+/* 明细行 */
+.m-crow { padding:10px 2px; border-top:1px solid #eef2f1; }
+.m-crow:first-child { border-top:0; }
+.m-crow-head { display:flex; flex-direction:column; gap:2px; }
+.m-crow-name { font-weight:750; font-size:14.5px; color:#1d2b27; line-height:1.3; }
+.m-crow-spec { font-size:11.5px; color:#64748b; }
+.m-crow-code { background:#eef2f7; border-radius:6px; padding:1px 6px; margin-left:5px; font-size:10.5px; color:#475569; }
+.m-crow-ctl { display:flex; align-items:center; gap:8px; margin-top:8px; flex-wrap:wrap; }
+.m-crow-book { font-size:11.5px; color:#5b6b65; white-space:nowrap; }
+.m-crow-input { flex:1 1 96px; min-width:78px; }
+.m-cqty { width:100%; box-sizing:border-box; border:2px solid #d7e2dd; border-radius:9px; padding:9px 10px; font-size:16px; font-weight:700; text-align:center; color:#1d2b27; background:#fff; }
+.m-cqty:focus { outline:none; border-color:#16835f; }
+.m-crow-btns { display:flex; gap:5px; flex-wrap:wrap; }
+.m-crow-btns .qbtn { border:1px solid #d7e2dd; background:#fff; border-radius:9px; padding:9px 10px; font-size:13px; font-weight:700; color:#1d2b27; min-width:42px; min-height:38px; }
+.m-crow-btns .qbtn:active { background:#eef8f4; }
+.m-crow-btns .qbtn.cam { color:#16835f; border-color:#bfe3d4; }
+.m-crow-btns .qbtn.clr { color:#8a9a94; }
+.m-crow-diff { margin-top:6px; font-size:12px; color:#5b6b65; display:flex; align-items:center; gap:8px; }
+.m-crow-diff .up b { color:#b9770e; }
+.m-crow-diff .down b { color:#c0392b; }
+.m-crow-diff .same { color:#146745; font-weight:700; }
+.m-crow-todo { background:#fff1c2; color:#805700; border-radius:99px; padding:2px 8px; font-size:10.5px; font-weight:700; }
+.m-crow-at { margin-left:auto; color:#94a3b8; font-size:10.5px; }
+.m-count-closed { background:#eef2f7; color:#475569; border-radius:10px; padding:11px 13px; margin:10px 0; font-size:12.5px; }
+
+/* 底部提交条 */
+.m-count-foot { position:sticky; bottom:0; background:#fff; border-top:1px solid #e6ecef; padding:10px 0 4px; margin-top:14px; }
+.m-count-submit { width:100%; border:0; border-radius:12px; background:linear-gradient(135deg,#14664d,#1f9a70); color:#fff; padding:14px; font-weight:800; font-size:15px; box-shadow:0 3px 8px rgba(22,131,95,.25); }
+.m-count-submit[disabled] { opacity:.6; }
+.m-count-foot-note { text-align:center; font-size:10.5px; color:#94a3b8; padding-top:6px; }
+
+/* 底部弹起的 sheet(选身份 / 新建 / 拍照 / 提交确认) */
+.m-sheet-mask { position:fixed; inset:0; z-index:2300; background:rgba(15,23,42,.45); display:flex; align-items:flex-end; justify-content:center; }
+.m-sheet-mask[hidden] { display:none; }
+.m-sheet { width:100%; max-width:480px; background:#fff; border-radius:18px 18px 0 0; max-height:90vh; display:flex; flex-direction:column; overflow:hidden; animation:m-sheet-up .24s ease; }
+@keyframes m-sheet-up { from { transform:translateY(100%); } to { transform:translateY(0); } }
+.m-sheet-title { font-weight:800; font-size:15px; padding:14px 16px 10px; border-bottom:1px solid #eef2f1; }
+.m-sheet-body { padding:12px 16px; overflow-y:auto; -webkit-overflow-scrolling:touch; }
+.m-sheet-actions { display:flex; gap:9px; padding:12px 16px calc(16px + env(safe-area-inset-bottom)); border-top:1px solid #eef2f1; }
+.m-sheet-actions button { flex:1; border-radius:10px; padding:12px; font-weight:800; font-size:14px; border:1px solid #d7e2dd; background:#fff; color:#1d2b27; }
+.m-sheet-actions .primary { background:#16835f; color:#fff; border-color:#16835f; }
+.m-sheet-actions .ghost { color:#5b6b65; }
+
+/* 表单字段 */
+.m-field { display:block; margin-bottom:12px; }
+.m-field > span { display:block; font-size:12px; font-weight:700; color:#5b6b65; margin-bottom:5px; }
+.m-field input, .m-field select { width:100%; box-sizing:border-box; border:1px solid #d7e2dd; border-radius:9px; padding:11px 12px; font-size:14px; background:#fff; color:#1d2b27; }
+.m-field select { appearance:none; }
+.m-hint { font-size:11.5px; color:#8a9a94; line-height:1.5; background:#f6faf8; border-radius:9px; padding:9px 11px; }
+
+/* 选人 */
+.m-staff { display:flex; align-items:center; gap:10px; width:100%; border:0; background:#fff; border-bottom:1px solid #f1f5f3; padding:11px 4px; text-align:left; }
+.m-staff:active { background:#f6faf8; }
+.m-staff-avatar { width:34px; height:34px; flex:0 0 auto; border-radius:50%; background:#e7f6ef; color:#17664f; display:grid; place-items:center; font-weight:800; }
+.m-staff-name { font-weight:700; font-size:14px; color:#1d2b27; }
+.m-staff-role { margin-left:auto; font-size:11px; color:#64748b; background:#eef2f7; border-radius:99px; padding:3px 9px; }
+
+/* 拍照 */
+.m-cam-tip { font-size:12px; color:#5b6b65; line-height:1.6; }
+.m-cam-status { margin-top:10px; font-size:12.5px; color:#8a9a94; }
+.m-cam-cands { display:flex; flex-wrap:wrap; gap:7px; margin-top:10px; }
+.m-cand { border:1px solid #bfe3d4; background:#eef8f4; color:#17664f; border-radius:9px; padding:10px 13px; font-size:15px; font-weight:800; }
+.m-ocr-text { display:block; margin-top:6px; font-size:11px; color:#64748b; background:#f8fafc; border-radius:8px; padding:8px 10px; max-height:120px; overflow:auto; white-space:pre-wrap; }
+
+/* 提交确认 */
+.m-sub-sum { display:grid; grid-template-columns:repeat(4,1fr); gap:7px; margin-bottom:11px; }
+.m-sub-sum > div { background:#f6faf8; border:1px solid #e1ece6; border-radius:10px; padding:9px 4px; text-align:center; }
+.m-sub-sum b { display:block; font-size:19px; color:#14664d; }
+.m-sub-sum span { font-size:10.5px; color:#64748b; }
+.m-sub-warn { background:#fff4e0; color:#b9770e; border-radius:9px; padding:9px 11px; font-size:12px; margin-bottom:10px; }
+.m-sub-list { max-height:44vh; overflow-y:auto; border:1px solid #eef2f1; border-radius:9px; }
+.m-sub-row { display:flex; flex-direction:column; gap:2px; padding:8px 11px; border-bottom:1px solid #f5f8f7; }
+.m-sub-row:last-child { border-bottom:0; }
+.m-sub-name { font-size:12.5px; font-weight:700; color:#1d2b27; }
+.m-sub-num { font-size:11px; color:#64748b; }
+.m-sub-num b { color:#c0392b; }
+.m-sub-more { padding:8px 11px; font-size:11px; color:#94a3b8; }
+.m-sub-none { background:#e6f6ee; color:#146745; border-radius:9px; padding:10px 12px; font-size:12.5px; }
+.m-sub-note { margin-top:10px; font-size:11px; color:#94a3b8; line-height:1.5; }
+/* 阶段 6 补丁:`[hidden]` 必须真的隐藏。
+   ⚠️ 坑:作者样式 `.m-field { display:block }` 会**盖掉** UA 样式表的
+   `[hidden] { display:none }` —— 作者样式优先级高于 UA 样式,
+   所以 `<label class="m-field" hidden>` 照样显示出来。
+   → 每个可能带 hidden 的块都要补一条 `[hidden]{display:none}`。 */
+.m-field[hidden] { display:none; }
+.m-count-conflict[hidden] { display:none; }
+.m-sheet-mask[hidden] { display:none; }
+.m-cgroup-body[hidden] { display:none; }
+/* 阶段 6 补丁 2:拍照按钮改成**真的 file input**(可见、可点、自动化也能选文件)。 */
+.m-cam-file { display:block; width:100%; box-sizing:border-box; border:2px dashed #bfe3d4; background:#eef8f4; color:#17664f; border-radius:11px; padding:13px 10px; font-weight:800; font-size:14px; margin-bottom:10px; }
+.m-cam-file::before { content:"📷 拍照 / 选图"; display:block; font-size:17px; margin-bottom:3px; }
+.m-cam-file::-webkit-file-upload-button { display:none; }

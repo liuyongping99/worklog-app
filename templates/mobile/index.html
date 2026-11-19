@@ -56,6 +56,8 @@
     .portal-ico.ship { background: linear-gradient(135deg, #2563eb, #1d4ed8); }
     .portal-ico.inbound { background: linear-gradient(135deg, #059669, #047857); }
     .portal-ico.loading { background: linear-gradient(135deg, #d97706, #b45309); }
+    .portal-ico.count { background: linear-gradient(135deg, #7c3aed, #5b21b6); }
+    .portal-ico.stock { background: linear-gradient(135deg, #0f766e, #115e59); }
     .portal-meta {
       flex: 1;
       min-width: 0;
@@ -118,6 +120,15 @@
         <div class="portal-meta">
           <div class="name">独立点数</div>
           <div class="desc">拍照 · 手指点击计数 · 自动记录用户与位置</div>
+        </div>
+        <div class="portal-arrow">›</div>
+      </a>
+
+      <a class="portal-card" href="{{ url_for('stock_count_mobile.mobile_stock_count_list') }}">
+        <div class="portal-ico stock">📋</div>
+        <div class="portal-meta">
+          <div class="name">盘点</div>
+          <div class="desc">现场录数 · 大按钮加减 · 与 PC 同一张盘点单</div>
         </div>
         <div class="portal-arrow">›</div>
       </a>  </div>

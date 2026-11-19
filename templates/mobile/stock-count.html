@@ -1,0 +1,212 @@
+{% extends "base.html" %}
+{% block title %}盘点{% endblock %}
+{% block head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/mobile.css') }}">
+{% endblock %}
+{% block navbar %}{% endblock %}
+{% block content %}
+<div class="mobile-today m-count">
+  <header class="app-head">
+    <div class="head-row">
+      <h2>📋 盘点</h2>
+      <div class="head-actions">
+        <span class="header-stat">{{ stats.open }} 张进行中</span>
+        <a class="refresh-btn" href="{{ url_for('stock_count_mobile.mobile_stock_count_list', status=status or None, warehouse_id=warehouse['id']) }}" title="刷新">↻</a>
+      </div>
+    </div>
+    <p class="subtitle">{{ warehouse['name'] }} · 共 {{ stats.total }} 张单(已提交 {{ stats.closed }})</p>
+  </header>
+
+  {# ── 操作人条(A7:改账要留痕)── #}
+  <div class="m-count-operator" id="opBar">
+    {% if operator %}
+      <span class="op-avatar">{{ operator['name'][:1] }}</span>
+      <span class="op-name">{{ operator['name'] }}</span>
+      <span class="op-role">{{ operator['role'] or '操作人' }}</span>
+    {% else %}
+      <span class="op-avatar warn">!</span>
+      <span class="op-name">未选操作人</span>
+      <button class="op-btn" onclick="pickIdentity()">选我</button>
+    {% endif %}
+  </div>
+
+  {# ── 筛选 ── #}
+  <div class="m-count-filters">
+    <div class="m-count-tabs">
+      <a class="m-count-tab {{ 'on' if not status else '' }}" href="{{ url_for('stock_count_mobile.mobile_stock_count_list', warehouse_id=warehouse['id']) }}">全部</a>
+      <a class="m-count-tab {{ 'on' if status == 'open' else '' }}" href="{{ url_for('stock_count_mobile.mobile_stock_count_list', status='open', warehouse_id=warehouse['id']) }}">进行中</a>
+      <a class="m-count-tab {{ 'on' if status == 'closed' else '' }}" href="{{ url_for('stock_count_mobile.mobile_stock_count_list', status='closed', warehouse_id=warehouse['id']) }}">已提交</a>
+    </div>
+    {% if warehouses|length > 1 %}
+    <select class="m-count-wh" onchange="location.href=this.value">
+      {% for w in warehouses %}
+      <option value="{{ url_for('stock_count_mobile.mobile_stock_count_list', status=status or None, warehouse_id=w['id']) }}" {{ 'selected' if w['id'] == warehouse['id'] else '' }}>{{ w['name'] }}</option>
+      {% endfor %}
+    </select>
+    {% endif %}
+  </div>
+
+  {# ── 新建 ── #}
+  <button class="m-count-new" onclick="openCreate()">＋ 新建盘点单</button>
+
+  {# ── 单据列表 ── #}
+  {% if not counts %}
+    <p class="empty">这里还没有盘点单,点上面的按钮建一张</p>
+  {% else %}
+    {% for c in counts %}
+      <a class="order-card" href="{{ url_for('stock_count_mobile.mobile_stock_count_detail', count_id=c['id']) }}">
+        <div class="row">
+          <div>
+            <div class="customer">{{ c['title'] }}</div>
+            <div class="number">{{ c['warehouse_name'] }} · 基准 {{ c['as_of'][:16] }}</div>
+          </div>
+          <span class="badge {% if c['status'] == 'open' %}todo{% else %}done{% endif %}">{{ c['status_label'] }}</span>
+        </div>
+        <div class="line"><i style="width: {{ (c['counted_items'] * 100 // c['total_items']) if c['total_items'] else 0 }}%"></i></div>
+        <div class="metrics">
+          <span>已录 <b>{{ c['counted_items'] }}</b>/{{ c['total_items'] }}</span>
+          <span>{% if c['diff_items'] %}差异 {{ c['diff_items'] }} 项{% else %}暂无差异{% endif %}</span>
+        </div>
+        <button class="enter">进入现场录入 ›</button>
+      </a>
+    {% endfor %}
+  {% endif %}
+</div>
+
+{# ── 选身份弹框 ── #}
+<div class="m-sheet-mask" id="idSheet" hidden>
+  <div class="m-sheet">
+    <div class="m-sheet-title">这次是谁在盘?</div>
+    <div class="m-sheet-body">
+      {% for s in staff_list %}
+      <button class="m-staff" onclick="pickStaff({{ s['id'] }})">
+        <span class="m-staff-avatar">{{ s['name'][:1] }}</span>
+        <span class="m-staff-name">{{ s['name'] }}</span>
+        <span class="m-staff-role">{{ s['role'] or '员工' }}</span>
+      </button>
+      {% endfor %}
+    </div>
+    <div class="m-sheet-actions">
+      <button class="ghost" onclick="closeSheet('idSheet')">取消</button>
+    </div>
+  </div>
+</div>
+
+{# ── 新建盘点单弹框 ── #}
+<div class="m-sheet-mask" id="createSheet" hidden>
+  <div class="m-sheet">
+    <div class="m-sheet-title">新建盘点单</div>
+    <div class="m-sheet-body">
+      <label class="m-field">
+        <span>单据名称</span>
+        <input type="text" id="cTitle" value="移动盘点 {{ now_label }}" placeholder="例如:11月全仓盘点">
+      </label>
+      <label class="m-field">
+        <span>仓库</span>
+        <select id="cWh">
+          {% for w in warehouses %}
+          <option value="{{ w['id'] }}" {{ 'selected' if w['id'] == warehouse['id'] else '' }}>{{ w['name'] }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="m-field">
+        <span>范围</span>
+        <select id="cScope" onchange="syncScope()">
+          <option value="all">全仓(所有商品)</option>
+          <option value="category">按分类</option>
+          <option value="search">按搜索结果</option>
+        </select>
+      </label>
+      <label class="m-field" id="cCatWrap" hidden>
+        <span>分类</span>
+        <select id="cCat">
+          <option value="">请选择分类</option>
+          {% for c in categories %}
+          <option value="{{ c['id'] }}">{{ c['label'] or c['name'] }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="m-field" id="cQueryWrap" hidden>
+        <span>搜索词(品名 / 规格 / 编号)</span>
+        <input type="text" id="cQuery" placeholder="例如:白磅布">
+      </label>
+      <div class="m-hint">建单那一刻会<b>写死盘点基准时点</b>,之后不能再改 —— 它决定「先数货还是先入库」怎么算账。</div>
+    </div>
+    <div class="m-sheet-actions">
+      <button class="ghost" onclick="closeSheet('createSheet')">取消</button>
+      <button class="primary" id="cOk" onclick="submitCreate()">建单</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function openSheet(id) { document.getElementById(id).hidden = false; }
+function closeSheet(id) { document.getElementById(id).hidden = true; }
+
+function pickIdentity() { openSheet('idSheet'); }
+
+function pickStaff(id) {
+  fetch('/m/stock-count/identity', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ staff_id: id })
+  }).then(r => r.json()).then(d => {
+    closeSheet('idSheet');
+    if (d.success) { location.reload(); }
+    else { alert(d.error || '选择失败'); }
+  });
+}
+
+function syncScope() {
+  var s = document.getElementById('cScope').value;
+  document.getElementById('cCatWrap').hidden = (s !== 'category');
+  document.getElementById('cQueryWrap').hidden = (s !== 'search');
+}
+
+function openCreate() {
+  if (!document.querySelector('#opBar .op-name') ||
+      document.querySelector('#opBar .op-name').textContent.indexOf('未选') === 0) {
+    alert('先选一下操作人 —— 盘点要留痕(谁改的账)');
+    pickIdentity();
+    return;
+  }
+  openSheet('createSheet');
+}
+
+function submitCreate() {
+  var btn = document.getElementById('cOk');
+  var scope = document.getElementById('cScope').value;
+  var body = {
+    title: (document.getElementById('cTitle').value || '').trim(),
+    warehouse_id: parseInt(document.getElementById('cWh').value, 10),
+    scope: scope
+  };
+  if (scope === 'category') {
+    var cid = document.getElementById('cCat').value;
+    if (!cid) { alert('请选择分类'); return; }
+    body.category_id = parseInt(cid, 10);
+  } else if (scope === 'search') {
+    var q = (document.getElementById('cQuery').value || '').trim();
+    if (!q) { alert('请输入搜索词'); return; }
+    body.q = q;
+  }
+  btn.disabled = true;
+  btn.textContent = '建单中…';
+  fetch('/api/v1/stock/counts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  }).then(r => r.json().then(d => ({ ok: r.ok, d: d })))
+    .then(res => {
+      btn.disabled = false;
+      btn.textContent = '建单';
+      if (!res.d.success) { alert(res.d.error || '建单失败'); return; }
+      location.href = '/m/stock-count/' + res.d.count_id;
+    }).catch(e => {
+      btn.disabled = false;
+      btn.textContent = '建单';
+      alert('建单失败:' + e);
+    });
+}
+</script>
+{% endblock %}

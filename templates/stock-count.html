@@ -1,0 +1,385 @@
+{% extends "base.html" %}
+{% block title %}盘点 · 丰源工作台{% endblock %}
+{% block head %}
+<style>
+.stkc-page { max-width: 1400px; margin: 0 auto; padding: 1rem 0.75rem 2.5rem; }
+.stkc-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 0.9rem; flex-wrap: wrap; }
+.stkc-head h1 { font-size: 1.4rem; margin: 0; color: #2d3436; }
+.stkc-head .subtitle { color: #636e72; font-size: 0.9rem; margin: 0.25rem 0 0; }
+.stkc-wh-tag {
+  display: inline-block; padding: 0.45rem 0.9rem; border-radius: 999px;
+  background: #e8f5ee; color: #14664d; font-weight: 700; font-size: 0.95rem;
+  border: 1px solid #c9e7d8;
+}
+
+.stkc-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 0.6rem; margin-bottom: 0.9rem; }
+.stkc-stat { background: #fff; border-radius: 12px; padding: 0.7rem 0.9rem; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+.stkc-stat .num { font-size: 1.45rem; font-weight: 700; color: #2d3436; line-height: 1.2; }
+.stkc-stat .label { font-size: 0.78rem; color: #868e96; margin-top: 0.15rem; }
+.stkc-stat.ok .num { color: #14664d; }
+.stkc-stat.off .num { color: #868e96; }
+
+.stkc-error { background: #fdecea; color: #c0392b; border: 1px solid #f0c9c6; border-radius: 10px; padding: 0.7rem 0.9rem; margin-bottom: 0.9rem; font-size: 0.9rem; }
+
+.stkc-card { background: #fff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); overflow: hidden; }
+.stkc-card table { width: 100%; border-collapse: collapse; }
+.stkc-card th, .stkc-card td { text-align: left; padding: 0.55rem 0.7rem; border-bottom: 1px solid #f1f3f5; font-size: 0.87rem; }
+.stkc-card th { background: #f8f9fa; font-weight: 600; color: #636e72; font-size: 0.75rem; letter-spacing: 0.4px; white-space: nowrap; }
+.stkc-card td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.stkc-card tbody tr:hover { background: #f8fbf9; }
+.stkc-empty { text-align: center; color: #868e96; padding: 2.5rem 1rem; }
+
+.stkc-badge { display: inline-block; padding: 0.12rem 0.55rem; border-radius: 999px; font-size: 0.74rem; font-weight: 600; white-space: nowrap; }
+.stkc-badge.open { background: #fff3cd; color: #856404; }
+.stkc-badge.closed { background: #dbf6e6; color: #146745; }
+
+.stkc-btn {
+  font-size: 0.85rem; padding: 0.4rem 0.8rem; border-radius: 8px;
+  background: #fff; border: 1px solid #d6dee0; color: #2d3436; text-decoration: none; cursor: pointer;
+}
+.stkc-btn:hover { background: #f1f8f4; color: #14664d; border-color: #c9e7d8; }
+.stkc-btn.primary { background: #14664d; border-color: #14664d; color: #fff; font-weight: 600; }
+.stkc-btn.primary:hover { background: #0f5239; color: #fff; }
+.stkc-btn.danger { color: #c0392b; border-color: #f0c9c6; }
+.stkc-btn.danger:hover { background: #fdecea; color: #c0392b; }
+.stkc-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.stkc-filters { display: flex; gap: 0.3rem; margin-bottom: 0.6rem; }
+.stkc-filters a { font-size: 0.82rem; padding: 0.35rem 0.65rem; border-radius: 999px; background: #fff; border: 1px solid #d6dee0; color: #2d3436; text-decoration: none; }
+.stkc-filters a.active { background: #14664d; border-color: #14664d; color: #fff; font-weight: 600; }
+
+/* ── 弹框 ── */
+.stkc-modal { position: fixed; inset: 0; background: rgba(20,30,26,0.45); display: none; z-index: 90; overflow: auto; padding: 2rem 1rem; }
+.stkc-modal.open { display: flex; align-items: flex-start; justify-content: center; }
+.stkc-modal-box { background: #fff; border-radius: 14px; width: 100%; max-width: 620px; box-shadow: 0 12px 40px rgba(0,0,0,0.22); }
+.stkc-modal-box.lg { max-width: 860px; }
+.stkc-modal-head { padding: 0.9rem 1.1rem; border-bottom: 1px solid #f1f3f5; display: flex; justify-content: space-between; align-items: center; }
+.stkc-modal-head h3 { margin: 0; font-size: 1.02rem; color: #2d3436; }
+.stkc-modal-head .x { border: 0; background: transparent; font-size: 1.3rem; cursor: pointer; color: #868e96; line-height: 1; }
+.stkc-modal-body { padding: 1rem 1.1rem; max-height: 70vh; overflow: auto; }
+.stkc-modal-foot { padding: 0.8rem 1.1rem; border-top: 1px solid #f1f3f5; display: flex; justify-content: flex-end; gap: 0.5rem; }
+
+.stkc-field { margin-bottom: 0.85rem; }
+.stkc-field label { display: block; font-size: 0.82rem; color: #636e72; font-weight: 600; margin-bottom: 0.3rem; }
+.stkc-field input[type="text"], .stkc-field select, .stkc-field textarea {
+  width: 100%; box-sizing: border-box; border: 1px solid #d6dee0; border-radius: 8px;
+  padding: 0.45rem 0.6rem; font-size: 0.9rem; background: #fff; font-family: inherit;
+}
+.stkc-field textarea { resize: vertical; min-height: 80px; }
+.stkc-field .hint { font-size: 0.76rem; color: #868e96; margin-top: 0.25rem; }
+.stkc-field .hint.warn { color: #b8860b; }
+
+.stkc-scope { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.stkc-scope label {
+  display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.35rem 0.7rem;
+  border: 1px solid #d6dee0; border-radius: 999px; font-size: 0.85rem; cursor: pointer;
+  font-weight: 500; margin: 0;
+}
+.stkc-scope label:has(input:checked) { background: #e8f5ee; border-color: #14664d; color: #14664d; font-weight: 600; }
+.stkc-scope input { margin: 0; }
+
+.stkc-picker { border: 1px solid #d6dee0; border-radius: 8px; max-height: 260px; overflow: auto; }
+.stkc-picker-row { display: flex; align-items: center; gap: 0.45rem; padding: 0.35rem 0.55rem; border-bottom: 1px solid #f8f9fa; font-size: 0.84rem; }
+.stkc-picker-row:last-child { border-bottom: 0; }
+.stkc-picker-row .code { color: #868e96; font-size: 0.78rem; font-variant-numeric: tabular-nums; min-width: 84px; }
+.stkc-picker-row .nm { flex: 1 1 auto; }
+.stkc-picker-row .sp { color: #636e72; }
+.stkc-picker-row .st { font-size: 0.74rem; color: #b2bec3; }
+.stkc-picker-row.picked { background: #f1f8f4; }
+
+.stkc-cat { max-height: 200px; overflow: auto; border: 1px solid #d6dee0; border-radius: 8px; padding: 0.4rem; }
+.stkc-cat ul { list-style: none; margin: 0; padding-left: 0.7rem; }
+.stkc-cat > ul { padding-left: 0.2rem; }
+.stkc-cat li { margin: 0.1rem 0; }
+.stkc-cat label { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.85rem; cursor: pointer; font-weight: 500; margin: 0; }
+
+.stkc-toast { position: fixed; left: 50%; transform: translateX(-50%); top: 1.1rem; z-index: 120; display: none; padding: 0.6rem 1.1rem; border-radius: 999px; font-size: 0.88rem; font-weight: 600; box-shadow: 0 6px 20px rgba(0,0,0,0.16); }
+.stkc-toast.ok { display: block; background: #dbf6e6; color: #146745; }
+.stkc-toast.err { display: block; background: #fdecea; color: #c0392b; }
+</style>
+{% endblock %}
+
+{% macro render_cat_tree(nodes) %}
+  {% for n in nodes %}
+  <li>
+    <label>
+      <input type="radio" name="category_id" value="{{ n.id }}" data-name="{{ n.category_name }}">
+      {{ n.category_name }}
+    </label>
+    {% if n.children %}<ul>{{ render_cat_tree(n.children) }}</ul>{% endif %}
+  </li>
+  {% endfor %}
+{% endmacro %}
+
+{% block content %}
+<div class="stkc-page">
+  <div class="stkc-head">
+    <div>
+      <h1>📋 盘点</h1>
+      <p class="subtitle">盘点是<b>一项作业</b>：建单 → 导出/数货 → 粘贴回填 → 提交对齐。提交后不可撤销</p>
+    </div>
+    <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+      {% if warehouses_count <= 1 %}
+        <span class="stkc-wh-tag">🏭 {{ warehouse.name if warehouse else '—' }}</span>
+      {% else %}
+        <select class="stkc-btn" onchange="location.href='/stock-count?warehouse_id=' + this.value;">
+          {% for w in warehouses %}
+          <option value="{{ w.id }}" {{ 'selected' if warehouse and w.id == warehouse.id else '' }}>{{ w.name }}</option>
+          {% endfor %}
+        </select>
+      {% endif %}
+      <button class="stkc-btn primary" onclick="openCreateModal()">＋ 新建盘点单</button>
+    </div>
+  </div>
+
+  {% if error %}
+  <div class="stkc-error">{{ error }}</div>
+  {% endif %}
+
+  <div class="stkc-stats">
+    <div class="stkc-stat"><div class="num">{{ stats.total }}</div><div class="label">盘点单总数</div></div>
+    <div class="stkc-stat ok"><div class="num">{{ stats.open }}</div><div class="label">进行中</div></div>
+    <div class="stkc-stat off"><div class="num">{{ stats.closed }}</div><div class="label">已提交</div></div>
+  </div>
+
+  <div class="stkc-filters">
+    <a href="/stock-count" class="{{ 'active' if not status else '' }}">全部</a>
+    <a href="/stock-count?status=open" class="{{ 'active' if status == 'open' else '' }}">进行中</a>
+    <a href="/stock-count?status=closed" class="{{ 'active' if status == 'closed' else '' }}">已提交</a>
+  </div>
+
+  <div class="stkc-card">
+    <table>
+      <thead>
+        <tr>
+          <th>单号</th><th>名称</th><th>仓库</th><th>状态</th>
+          <th style="text-align:right;">应盘</th><th style="text-align:right;">已录</th>
+          <th style="text-align:right;">有差异</th><th>基准时点</th><th>创建时间</th><th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for c in counts %}
+        <tr>
+          <td class="num"><a href="/stock-count/{{ c.id }}">#{{ c.id }}</a></td>
+          <td><a href="/stock-count/{{ c.id }}" style="color:#2d3436;text-decoration:none;font-weight:600;">{{ c.title }}</a>
+              {% if c.remark %}<div style="font-size:0.76rem;color:#868e96;">{{ c.remark }}</div>{% endif %}
+          </td>
+          <td>🏭 {{ c.warehouse_name }}</td>
+          <td><span class="stkc-badge {{ c.status }}">{{ c.status_label }}</span></td>
+          <td class="num">{{ c.total_items }}</td>
+          <td class="num">{{ c.counted_items }}</td>
+          <td class="num" style="{{ 'color:#c0392b;font-weight:700;' if c.diff_items else '' }}">{{ c.diff_items }}</td>
+          <td style="font-size:0.8rem;color:#636e72;">{{ c.as_of }}</td>
+          <td style="font-size:0.8rem;color:#868e96;">{{ c.created_at }}</td>
+          <td style="white-space:nowrap;">
+            <a class="stkc-btn" href="/stock-count/{{ c.id }}">打开</a>
+            {% if c.status == 'open' %}
+            <button class="stkc-btn danger" onclick='deleteCount({{ c.id }}, {{ c.title | tojson }})'>删除</button>
+            {% endif %}
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="10"><div class="stkc-empty">还没有盘点单 —— 点右上角「＋ 新建盘点单」开始</div></td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ── 新建盘点单弹框 ── -->
+<div class="stkc-modal" id="createModal">
+  <div class="stkc-modal-box lg">
+    <div class="stkc-modal-head">
+      <h3>新建盘点单</h3>
+      <button class="x" onclick="closeCreateModal()">×</button>
+    </div>
+    <div class="stkc-modal-body">
+      <div class="stkc-field">
+        <label>盘点单名称 *</label>
+        <input type="text" id="cntTitle" placeholder="例：11 月底全仓盘点">
+        <div class="hint">基准时点会在建单那一刻写死 —— 它决定「先数货还是先入库」怎么切分，之后不能改</div>
+      </div>
+      <div class="stkc-field">
+        <label>备注</label>
+        <input type="text" id="cntRemark" placeholder="例：月中抽盘 A 区">
+      </div>
+      <div class="stkc-field">
+        <label>盘点范围 *</label>
+        <div class="stkc-scope">
+          {% for key, label in scopes %}
+          <label><input type="radio" name="cntScope" value="{{ key }}" {{ 'checked' if loop.first else '' }} onchange="onScopeChange()">{{ label }}</label>
+          {% endfor %}
+        </div>
+        <div class="hint">范围口径与「库存」页完全一致 —— 盘出来的清单要跟你在库存页看到的货对得上</div>
+      </div>
+
+      <!-- 按分类 -->
+      <div class="stkc-field" id="scopeCategory" style="display:none;">
+        <label>选分类</label>
+        <div class="stkc-cat">{{ render_cat_tree(category_tree) }}</div>
+        <div class="hint">选父分类会<b>自动含所有子类</b>（跟库存页一样）</div>
+      </div>
+
+      <!-- 按搜索结果 -->
+      <div class="stkc-field" id="scopeSearch" style="display:none;">
+        <label>搜索词</label>
+        <input type="text" id="cntSearch" placeholder="例：白磅布">
+        <div class="hint">按品名 / 规格 / 商品编号模糊匹配，范围 = 当前搜索命中的全部商品</div>
+      </div>
+
+      <!-- 勾选商品 -->
+      <div class="stkc-field" id="scopeSelected" style="display:none;">
+        <label>勾选商品</label>
+        <div style="display:flex;gap:0.4rem;margin-bottom:0.4rem;">
+          <input type="text" id="pickSearch" placeholder="搜索商品…" style="flex:1 1 auto;">
+          <button class="stkc-btn" onclick="loadPickList()">搜索</button>
+        </div>
+        <div class="stkc-picker" id="pickList"><div style="padding:0.8rem;color:#868e96;font-size:0.85rem;">搜索后勾选商品</div></div>
+        <div class="hint">已勾选 <b id="pickCount">0</b> 个</div>
+      </div>
+    </div>
+    <div class="stkc-modal-foot">
+      <button class="stkc-btn" onclick="closeCreateModal()">取消</button>
+      <button class="stkc-btn primary" id="createSubmitBtn" onclick="submitCreate()">建单</button>
+    </div>
+  </div>
+</div>
+
+<div class="stkc-toast" id="toast"></div>
+
+<script>
+const CS_WAREHOUSE_ID = {{ warehouse.id if warehouse else 1 }};
+const pickedProducts = new Map();   // product_id → {name, spec, code}
+
+function toast(msg, ok) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'stkc-toast ' + (ok ? 'ok' : 'err');
+  clearTimeout(window.__stkcToastTimer);
+  window.__stkcToastTimer = setTimeout(() => { el.className = 'stkc-toast'; }, 2600);
+}
+
+function openCreateModal() {
+  document.getElementById('createModal').classList.add('open');
+  document.getElementById('cntTitle').focus();
+  onScopeChange();
+}
+function closeCreateModal() {
+  document.getElementById('createModal').classList.remove('open');
+}
+
+function currentScope() {
+  const el = document.querySelector('input[name="cntScope"]:checked');
+  return el ? el.value : 'all';
+}
+function onScopeChange() {
+  const s = currentScope();
+  document.getElementById('scopeCategory').style.display = (s === 'category') ? '' : 'none';
+  document.getElementById('scopeSearch').style.display = (s === 'search') ? '' : 'none';
+  document.getElementById('scopeSelected').style.display = (s === 'selected') ? '' : 'none';
+}
+
+/* ── 商品勾选 ── */
+async function loadPickList() {
+  const q = (document.getElementById('pickSearch').value || '').trim();
+  const box = document.getElementById('pickList');
+  box.innerHTML = '<div style="padding:0.8rem;color:#868e96;font-size:0.85rem;">加载中…</div>';
+  try {
+    const url = '/api/v1/stock?warehouse_id=' + CS_WAREHOUSE_ID + '&page_size=100' + (q ? '&q=' + encodeURIComponent(q) : '');
+    const res = await fetch(url);
+    const data = await res.json();
+    if (!data.success) { box.innerHTML = '<div style="padding:0.8rem;color:#c0392b;">' + (data.error || '加载失败') + '</div>'; return; }
+    if (!data.rows.length) { box.innerHTML = '<div style="padding:0.8rem;color:#868e96;font-size:0.85rem;">没有匹配的商品</div>'; return; }
+    box.innerHTML = '';
+    data.rows.forEach(r => {
+      const div = document.createElement('div');
+      div.className = 'stkc-picker-row' + (pickedProducts.has(r.product_id) ? ' picked' : '');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = pickedProducts.has(r.product_id);
+      cb.onchange = () => {
+        if (cb.checked) {
+          pickedProducts.set(r.product_id, {
+            name: r.product_name, spec: r.specification || '', code: r.product_code || ''
+          });
+        } else {
+          pickedProducts.delete(r.product_id);
+        }
+        div.classList.toggle('picked', cb.checked);
+        document.getElementById('pickCount').textContent = pickedProducts.size;
+      };
+      const code = document.createElement('span');
+      code.className = 'code'; code.textContent = r.product_code || '';
+      const nm = document.createElement('span');
+      nm.className = 'nm';
+      nm.textContent = r.product_name || '';
+      const sp = document.createElement('span');
+      sp.className = 'sp'; sp.textContent = r.specification || '';
+      const st = document.createElement('span');
+      st.className = 'st';
+      st.textContent = r.is_tracking ? '已启用' : '未启用';
+      div.appendChild(cb); div.appendChild(code); div.appendChild(nm);
+      div.appendChild(sp); div.appendChild(st);
+      box.appendChild(div);
+    });
+  } catch (e) {
+    box.innerHTML = '<div style="padding:0.8rem;color:#c0392b;">加载失败：' + e.message + '</div>';
+  }
+}
+
+/* ── 建单 ── */
+async function submitCreate() {
+  const btn = document.getElementById('createSubmitBtn');
+  const title = (document.getElementById('cntTitle').value || '').trim();
+  if (!title) { toast('请填写盘点单名称', false); return; }
+  const scope = currentScope();
+  const body = {
+    title: title,
+    remark: (document.getElementById('cntRemark').value || '').trim(),
+    warehouse_id: CS_WAREHOUSE_ID,
+    scope: scope,
+  };
+  if (scope === 'category') {
+    const cat = document.querySelector('input[name="category_id"]:checked');
+    if (!cat) { toast('请选择一个分类', false); return; }
+    body.category_id = parseInt(cat.value, 10);
+  } else if (scope === 'search') {
+    body.q = (document.getElementById('cntSearch').value || '').trim();
+    if (!body.q) { toast('请填写搜索词', false); return; }
+  } else if (scope === 'selected') {
+    if (!pickedProducts.size) { toast('请至少勾选一个商品', false); return; }
+    body.product_ids = Array.from(pickedProducts.keys());
+  }
+  btn.disabled = true; btn.textContent = '建单中…';
+  try {
+    const res = await fetch('/api/v1/stock/counts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) { toast(data.error || '建单失败', false); return; }
+    toast(data.message || '建单成功', true);
+    setTimeout(() => { location.href = '/stock-count/' + data.count_id; }, 500);
+  } catch (e) {
+    toast('建单失败：' + e.message, false);
+  } finally {
+    btn.disabled = false; btn.textContent = '建单';
+  }
+}
+
+/* ── 删单 ── */
+async function deleteCount(id, title) {
+  if (!confirm('确定删除盘点单「' + title + '」？\n（只能删未提交的草稿）')) return;
+  try {
+    const res = await fetch('/api/v1/stock/counts/' + id, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok || !data.success) { toast(data.error || '删除失败', false); return; }
+    toast('已删除', true);
+    setTimeout(() => location.reload(), 400);
+  } catch (e) {
+    toast('删除失败：' + e.message, false);
+  }
+}
+</script>
+{% endblock %}

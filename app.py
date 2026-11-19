@@ -171,6 +171,10 @@ def create_app():
     from blueprints.point_count import bp as point_count_bp, bp_api as point_count_api_bp
     # 阶段 2:库存查询(只读)—— bp 走页面 /stock,bp_api 走 /api/v1/{warehouses,stock}
     from blueprints.stock import bp as stock_bp, bp_api as stock_api_bp
+    # 阶段 5:盘点单(PC)—— 页面 /stock-count,bp_api 走 /api/v1/stock/counts
+    from blueprints.stock_count import bp as stock_count_bp, bp_api as stock_count_api_bp
+    # 阶段 6:盘点单(移动端)—— 页面 /m/stock-count;写操作复用阶段 5 的同一套 API
+    from blueprints.stock_count_mobile import bp as stock_count_mobile_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(upload_bp)
@@ -193,6 +197,9 @@ def create_app():
     app.register_blueprint(point_count_api_bp)
     app.register_blueprint(stock_bp)
     app.register_blueprint(stock_api_bp)
+    app.register_blueprint(stock_count_bp)
+    app.register_blueprint(stock_count_api_bp)
+    app.register_blueprint(stock_count_mobile_bp)
 
     return app
 

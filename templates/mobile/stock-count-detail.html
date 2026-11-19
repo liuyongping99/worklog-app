@@ -1,0 +1,411 @@
+{% extends "base.html" %}
+{% block title %}盘点 · {{ count['title'] }}{% endblock %}
+{% block head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/mobile.css') }}">
+{% endblock %}
+{% block navbar %}{% endblock %}
+{% block content %}
+<div class="m-count m-count-detail"
+     data-count-id="{{ count['id'] }}"
+     data-status="{{ count['status'] }}"
+     data-counted="{{ count['counted_items'] }}"
+     data-total="{{ count['total_items'] }}">
+
+  <header class="app-head">
+    <div class="head-row">
+      <h2>{{ count['title'] }}</h2>
+      <div class="head-actions">
+        <a class="refresh-btn" href="{{ url_for('stock_count_mobile.mobile_stock_count_detail', count_id=count['id']) }}" title="刷新">↻</a>
+      </div>
+    </div>
+    <p class="subtitle">{{ warehouse['name'] if warehouse else '' }} · 基准 {{ count['as_of'][:16] }}</p>
+  </header>
+
+  {# ── 进度条 ── #}
+  <div class="m-count-progress">
+    <div class="m-count-pbar"><i id="pbarFill" style="width: {{ (count['counted_items'] * 100 // count['total_items']) if count['total_items'] else 0 }}%"></i></div>
+    <div class="m-count-ptext">
+      已录 <b id="pCounted">{{ count['counted_items'] }}</b> / {{ count['total_items'] }} 个 SKU
+      <span id="pDiff" class="{{ 'has-diff' if count['diff_items'] else '' }}">差异 {{ count['diff_items'] }} 项</span>
+    </div>
+  </div>
+
+  {# ── 并发冲突提示(6.6:最后写入生效 + 提示谁先改的)── #}
+  <div class="m-count-conflict" id="conflictBar" hidden></div>
+
+  {# ── 工具条:搜索 / 只看待录 ── #}
+  <div class="m-count-tools">
+    <input type="search" id="q" class="m-count-search" placeholder="搜品名 / 规格 / 编号" oninput="applyFilter()">
+    <button class="m-count-toggle" id="onlyTodo" onclick="toggleOnlyTodo()">只看待录</button>
+  </div>
+
+  {# ── 分组明细 ── #}
+  {% if count['status'] != 'open' %}
+  <p class="m-count-closed">这张单已提交({{ count['closed_at'][:16] }})—— 已提交的盘点单不能再改。</p>
+  {% endif %}
+
+  {% for g in groups %}
+  <section class="m-cgroup" data-cname="{{ g['category_name'] }}">
+    <header class="m-cgroup-head" onclick="toggleGroup(this)">
+      <span class="m-cgroup-name">{{ g['category_name'] }}</span>
+      <span class="m-cgroup-meta">已录 {{ g['counted'] }}/{{ g['total'] }}</span>
+      <span class="m-cgroup-arrow">▾</span>
+    </header>
+    <div class="m-cgroup-body">
+      {% for it in g['items'] %}
+      <div class="m-crow" data-pid="{{ it['product_id'] }}"
+           data-name="{{ it['product_name'] }} {{ it['specification'] }} {{ it['product_code'] }}"
+           data-at="{{ it['counted_at'] or '' }}">
+        <div class="m-crow-head">
+          <div class="m-crow-name">{{ it['product_name'] }}</div>
+          <div class="m-crow-spec">{{ it['specification'] or '—' }}
+            <span class="m-crow-code">{{ it['product_code'] }}</span></div>
+        </div>
+        <div class="m-crow-ctl">
+          <span class="m-crow-book">账面 {{ it['book_quantity'] }} {{ it['base_unit'] }}</span>
+          <div class="m-crow-input">
+            <input type="number" inputmode="decimal" step="any" class="m-cqty"
+                   value="{{ '' if it['actual_quantity'] is none else it['actual_quantity'] }}"
+                   placeholder="待录"
+                   onblur="onQtyBlur(this)"
+                   onkeydown="if(event.key==='Enter'){this.blur();}">
+          </div>
+          <div class="m-crow-btns">
+            <button class="qbtn" onmousedown="return false" onclick="bump(this,-1)">−1</button>
+            <button class="qbtn" onmousedown="return false" onclick="bump(this,1)">+1</button>
+            <button class="qbtn" onmousedown="return false" onclick="bump(this,5)">+5</button>
+            <button class="qbtn" onmousedown="return false" onclick="bump(this,10)">+10</button>
+            <button class="qbtn cam" onclick="openCam({{ it['product_id'] }})">📷</button>
+            <button class="qbtn clr" onmousedown="return false" onclick="clearQty(this)">清空</button>
+          </div>
+        </div>
+        <div class="m-crow-diff">
+          {% if it['actual_quantity'] is none %}
+            <span class="m-crow-todo">待录</span>
+          {% elif it['diff'] is none %}
+            <span>已录 {{ it['actual_quantity'] }}</span>
+          {% elif it['diff'] > 0 %}
+            <span class="up">实 {{ it['actual_quantity'] }} · <b>多 {{ it['diff'] }}</b></span>
+          {% elif it['diff'] < 0 %}
+            <span class="down">实 {{ it['actual_quantity'] }} · <b>少 {{ (-it['diff']) }}</b></span>
+          {% else %}
+            <span class="same">实 {{ it['actual_quantity'] }} · 一致</span>
+          {% endif %}
+          {% if it['counted_at'] %}<span class="m-crow-at">{{ it['counted_at'][11:16] }} 录</span>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endfor %}
+
+  {# ── 底部提交条 ── #}
+  {% if count['status'] == 'open' %}
+  <div class="m-count-foot">
+    <button class="m-count-submit" id="submitBtn" onclick="doPreview()">提交盘点单</button>
+    <div class="m-count-foot-note">提交后会写调整流水,单据随即关闭,不能再改。</div>
+  </div>
+  {% endif %}
+</div>
+
+{# ── 拍照弹框 ── #}
+<div class="m-sheet-mask" id="camSheet" hidden>
+  <div class="m-sheet">
+    <div class="m-sheet-title">拍照识别数量</div>
+    <div class="m-sheet-body">
+      <input type="file" id="camFile" accept="image/*" capture="environment" class="m-cam-file" onchange="doOcr(this)">
+      <div class="m-cam-tip">
+        拍下写着数量的那张纸 / 标签,自动把数字填进这一行。<br>
+        <b>只做预填,不会自动过账</b> —— 认错了可以改。
+      </div>
+      <div id="camStatus" class="m-cam-status">点上面的按钮拍照 / 选图</div>
+      <div id="camCands" class="m-cam-cands"></div>
+    </div>
+    <div class="m-sheet-actions">
+      <button class="ghost" onclick="closeSheet('camSheet')">关闭</button>
+    </div>
+  </div>
+</div>
+
+{# ── 提交确认弹框 ── #}
+<div class="m-sheet-mask" id="subSheet" hidden>
+  <div class="m-sheet">
+    <div class="m-sheet-title">确认提交</div>
+    <div class="m-sheet-body" id="subBody"></div>
+    <div class="m-sheet-actions">
+      <button class="ghost" onclick="closeSheet('subSheet')">再想想</button>
+      <button class="primary" id="subOk" onclick="doSubmit()">确认提交</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const COUNT_ID = {{ count['id'] }};
+let camPid = null;
+let preview = null;
+let submitting = false;
+
+/* ── 提交确认的两段式:第一次点预览,第二次点才真提交 ── */
+function closeSheet(id) { document.getElementById(id).hidden = true; }
+function openSheet(id) { document.getElementById(id).hidden = false; }
+
+function toast(msg, kind) {
+  const bar = document.getElementById('conflictBar');
+  bar.hidden = false;
+  bar.className = 'm-count-conflict ' + (kind || 'info');
+  bar.innerHTML = msg;
+  if (kind !== 'error') {
+    clearTimeout(window.__toastT);
+    window.__toastT = setTimeout(() => { bar.hidden = true; }, 6000);
+  }
+}
+
+/* ── 录数:失焦即存 ── */
+function onQtyBlur(input) {
+  const row = input.closest('.m-crow');
+  const raw = input.value.trim();
+  const cur = row.querySelector('.m-crow-diff').dataset.act;
+  const val = (raw === '') ? null : parseFloat(raw);
+  if (raw !== '' && (isNaN(val) || val < 0)) {
+    toast('实盘数填的不对(要数字、不能负数)', 'error');
+    input.value = (cur === '' ? '' : cur);
+    return;
+  }
+  if (row.dataset.saved === (raw === '' ? '' : String(val))) return;  // 没变就不写
+  saveQty(row, val);
+}
+
+function bump(btn, delta) {
+  const row = btn.closest('.m-crow');
+  const input = row.querySelector('.m-cqty');
+  const base = parseFloat(input.value);
+  const now = isNaN(base) ? 0 : base;
+  const next = Math.round((now + delta) * 1000) / 1000;
+  input.value = next;
+  saveQty(row, next);
+}
+
+function clearQty(btn) {
+  const row = btn.closest('.m-crow');
+  const input = row.querySelector('.m-cqty');
+  input.value = '';
+  saveQty(row, null);
+}
+
+function saveQty(row, val) {
+  const pid = row.dataset.pid;
+  const body = { quantity: val };
+  if (row.dataset.at !== undefined) body.client_counted_at = row.dataset.at || '';
+  row.dataset.saved = (val === null || val === undefined) ? '' : String(val);
+  fetch('/api/v1/stock/counts/' + COUNT_ID + '/items/' + pid, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  }).then(r => r.json().then(d => ({ ok: r.ok, d: d })))
+    .then(res => {
+      if (!res.d.success) {
+        toast('保存失败:' + (res.d.error || '未知错误'), 'error');
+        return;
+      }
+      const item = res.d.item || {};
+      row.dataset.at = item.counted_at || '';
+      row.querySelector('.m-crow-diff').dataset.act = (item.actual_quantity === null ? '' : String(item.actual_quantity));
+      paintDiff(row, item);
+      if (res.d.stats) {
+        document.getElementById('pCounted').textContent = res.d.stats.counted_items;
+        document.getElementById('pDiff').textContent = '差异 ' + (res.d.stats.diff_items || 0) + ' 项';
+        document.getElementById('pDiff').className = res.d.stats.diff_items ? 'has-diff' : '';
+        const tot = parseInt(document.querySelector('.m-count-detail').dataset.total, 10) || 0;
+        document.getElementById('pbarFill').style.width = (tot ? (res.d.stats.counted_items * 100 / tot) : 0) + '%';
+      }
+      if (res.d.conflict) {
+        toast('⚠ 这一行在你之前已被别人改过(' + (res.d.conflict_at || '时间未知') + '),已按你填的数保存。', 'warn');
+      }
+    }).catch(e => toast('保存失败:' + e, 'error'));
+}
+
+function paintDiff(row, item) {
+  const box = row.querySelector('.m-crow-diff');
+  const act = item.actual_quantity;
+  let html = '';
+  if (act === null || act === undefined) {
+    html = '<span class="m-crow-todo">待录</span>';
+  } else {
+    const diff = (parseFloat(act) - parseFloat(item.book_quantity || 0));
+    if (diff > 0) html = '<span class="up">实 ' + act + ' · <b>多 ' + diff + '</b></span>';
+    else if (diff < 0) html = '<span class="down">实 ' + act + ' · <b>少 ' + (-diff) + '</b></span>';
+    else html = '<span class="same">实 ' + act + ' · 一致</span>';
+  }
+  box.innerHTML = html;
+}
+
+/* ── 分组折叠 ── */
+function toggleGroup(head) {
+  const sec = head.parentElement;
+  sec.classList.toggle('folded');
+}
+
+/* ── 搜索 / 只看待录 ── */
+function applyFilter() {
+  const q = document.getElementById('q').value.trim().toLowerCase();
+  const onlyTodo = document.getElementById('onlyTodo').classList.contains('on');
+  document.querySelectorAll('.m-cgroup').forEach(sec => {
+    let visible = 0;
+    sec.querySelectorAll('.m-crow').forEach(row => {
+      const hit = !q || row.dataset.name.toLowerCase().indexOf(q) >= 0;
+      const todo = row.querySelector('.m-crow-todo') !== null;
+      const show = hit && (!onlyTodo || todo);
+      row.style.display = show ? '' : 'none';
+      if (show) visible++;
+    });
+    sec.style.display = visible ? '' : 'none';
+  });
+}
+
+function toggleOnlyTodo() {
+  document.getElementById('onlyTodo').classList.toggle('on');
+  applyFilter();
+}
+
+/* ── 拍照辅助 ── */
+function openCam(pid) {
+  camPid = pid;
+  document.getElementById('camStatus').textContent = '点上面的按钮拍照 / 选图';
+  document.getElementById('camCands').innerHTML = '';
+  document.getElementById('camFile').value = '';
+  openSheet('camSheet');
+}
+
+function doOcr(input) {
+  if (!input.files || !input.files[0]) return;
+  const st = document.getElementById('camStatus');
+  st.textContent = '识别中…(第一次要加载模型,可能要十几秒)';
+  const fd = new FormData();
+  fd.append('file', input.files[0]);
+  fetch('/m/stock-count/ocr-prefill', { method: 'POST', body: fd })
+    .then(r => r.json())
+    .then(d => {
+      if (!d.success) {
+        st.textContent = d.error || '识别失败';
+        return;
+      }
+      const cands = d.candidates || [];
+      if (!cands.length) {
+        st.innerHTML = '没认出数量。识别到的文字:<br><span class="m-ocr-text">' +
+          escapeHtml(d.ocr_text || '(空)') + '</span>';
+        return;
+      }
+      st.textContent = '挑一个填进去:';
+      const box = document.getElementById('camCands');
+      box.innerHTML = '';
+      cands.slice(0, 12).forEach(c => {
+        const b = document.createElement('button');
+        b.className = 'm-cand';
+        b.textContent = c.value + (c.label && c.label !== String(c.value) ? ' (' + c.label + ')' : '');
+        b.onclick = () => {
+          const row = document.querySelector('.m-crow[data-pid="' + camPid + '"]');
+          const inp = row.querySelector('.m-cqty');
+          inp.value = c.value;
+          saveQty(row, c.value);
+          closeSheet('camSheet');
+        };
+        box.appendChild(b);
+      });
+    }).catch(e => { st.textContent = '识别失败:' + e; });
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/* ── 提交:预览 → 二次确认 → 提交(同一套阶段 5 API)── */
+function doPreview() {
+  const btn = document.getElementById('submitBtn');
+  btn.disabled = true;
+  btn.textContent = '计算中…';
+  fetch('/api/v1/stock/counts/' + COUNT_ID + '/submit/preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode: 'inventory' })
+  }).then(r => r.json().then(d => ({ ok: r.ok, d: d })))
+    .then(res => {
+      btn.disabled = false;
+      btn.textContent = '提交盘点单';
+      if (!res.d.success) { toast(res.d.error || '预览失败', 'error'); return; }
+      preview = res.d;
+      renderPreview(res.d);
+      openSheet('subSheet');
+    }).catch(e => {
+      btn.disabled = false;
+      btn.textContent = '提交盘点单';
+      toast('预览失败:' + e, 'error');
+    });
+}
+
+function renderPreview(p) {
+  const s = p.summary || {};
+  const rows = p.rows || [];
+  let html = '<div class="m-sub-sum">' +
+    '<div><b>' + (s.counted || 0) + '</b><span>已录</span></div>' +
+    '<div><b>' + (s.adjusted || 0) + '</b><span>要调整</span></div>' +
+    '<div><b>' + (s.unchanged || 0) + '</b><span>无变化</span></div>' +
+    '<div><b>' + (s.total_period_changes || 0) + '</b><span>期间变动</span></div>' +
+    '</div>';
+  if (s.unfilled) {
+    html += '<div class="m-sub-warn">还有 ' + s.unfilled + ' 个 SKU 没录数 —— <b>没录的不参与提交</b>,也不会被启用。</div>';
+  }
+  const diffRows = rows.filter(r => r.need_adjust);
+  if (diffRows.length) {
+    html += '<div class="m-sub-list">';
+    diffRows.slice(0, 30).forEach(r => {
+      html += '<div class="m-sub-row">' +
+        '<span class="m-sub-name">' + escapeHtml(r.product_name) +
+        (r.specification ? ' ' + escapeHtml(r.specification) : '') + '</span>' +
+        '<span class="m-sub-num">实际 ' + r.actual_quantity +
+        ' / 基准 ' + r.base_qty + ' / 期间 ' + (r.period_qty >= 0 ? '+' : '') + r.period_qty +
+        ' / <b>调整 ' + (r.delta >= 0 ? '+' : '') + r.delta + '</b></span>' +
+        '</div>';
+    });
+    if (diffRows.length > 30) {
+      html += '<div class="m-sub-more">…还有 ' + (diffRows.length - 30) + ' 项</div>';
+    }
+    html += '</div>';
+  } else {
+    html += '<div class="m-sub-none">实盘数跟账面(扣掉期间变动)完全对得上,不用调整。</div>';
+  }
+  html += '<div class="m-sub-note">提交会写「调整」流水并关闭这张单,提交后不能再改、不能重复提交。</div>';
+  document.getElementById('subBody').innerHTML = html;
+}
+
+function doSubmit() {
+  if (submitting) return;
+  submitting = true;
+  const btn = document.getElementById('subOk');
+  btn.disabled = true;
+  btn.textContent = '提交中…';
+  fetch('/api/v1/stock/counts/' + COUNT_ID + '/submit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode: 'inventory' })
+  }).then(r => r.json().then(d => ({ ok: r.ok, d: d })))
+    .then(res => {
+      submitting = false;
+      btn.disabled = false;
+      btn.textContent = '确认提交';
+      if (!res.d.success) {
+        toast('提交失败:' + (res.d.error || '未知错误'), 'error');
+        return;
+      }
+      closeSheet('subSheet');
+      const s = res.d.stats || {};
+      toast('✅ 已提交:调整 ' + res.d.adjusted + ' 个商品 / 未变 ' + res.d.unchanged + ' 个。刷新可看到库存已更新。', 'ok');
+      setTimeout(() => location.reload(), 1200);
+    }).catch(e => {
+      submitting = false;
+      btn.disabled = false;
+      btn.textContent = '确认提交';
+      toast('提交失败:' + e, 'error');
+    });
+}
+</script>
+{% endblock %}

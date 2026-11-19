@@ -277,7 +277,8 @@
                     <a href="{{ url_for('manage_category_prompts.manage_page') }}" class="{% if request.endpoint == 'manage_category_prompts.manage_page' %}active{% endif %}">📚 分类提示词</a>
                 </div>
             </li>
-            <li><a href="/stock" class="{% if request.endpoint == 'stock.stock_page' %}active{% endif %}" title="按仓库查看库存(阶段 3·入库过账后端已就绪)">📦 库存</a></li>
+            <li><a href="/stock" class="{% if request.endpoint == 'stock.stock_page' %}active{% endif %}" title="按仓库查看库存(阶段 4·入库过账前端已就绪)">📦 库存</a></li>
+            <li><a href="/stock-count" class="{% if request.endpoint in ('stock_count.stock_count_page', 'stock_count.stock_count_detail_page') %}active{% endif %}" title="盘点单：建单 → 数货 → 粘贴回填 → 提交对齐(阶段 5)">📋 盘点</a></li>
             <li><a href="/priceboard" class="{% if request.endpoint == 'priceboard' %}active{% endif %}">🧰 码数报价</a></li>
             <li class="nav-dropdown">
                 <a href="#" class="nav-dropdown-toggle">📝 操作要点 ▾</a>
