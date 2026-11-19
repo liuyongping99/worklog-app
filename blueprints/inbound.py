@@ -247,6 +247,14 @@ def inbound_records():
             for r in group['records']
         )
 
+    # 2026-11-18 阶段 4:批量查本页所有入库单的过账状态(订单头徽章用)。
+    # ⚠️ 用批量版而不是前端逐单 GET /stock-status —— 一个日期区间可能几十张单,
+    #    逐单请求会打出同样多个请求 + N 次建连。
+    from blueprints.stock_posting import get_stock_status_bulk
+    _stock_status_map = get_stock_status_bulk([g['id'] for g in groups])
+    for g in groups:
+        g['stock_post'] = _stock_status_map.get(g['id'], {})
+
 
     # 2026-08-26:placement_groups (group by product_name, same product specs rendered together)
     placement_groups = {}

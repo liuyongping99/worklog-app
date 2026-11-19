@@ -1,0 +1,546 @@
+{# 入库过账弹框 —— 阶段 4
+   挂在入库页(/inbound-records)。依赖阶段 3 的三个端点:
+     GET  /api/v1/inbound-orders/<id>/stock-status   查状态 / 跳过清单 / 未启用清单
+     POST /api/v1/inbound-orders/<id>/post           过账
+     POST /api/v1/inbound-orders/<id>/reverse        红字冲销
+   成功/幂等后由本模板的 refreshStockBadges() 刷新订单头徽章,
+   页面可另定义 onStockPosted(orderId, data) 钩子做额外处理。
+   依赖:static/js/common.js 的 escHtml / showBtnLoading / hideBtnLoading。
+#}
+<style>
+/* ── 入库过账弹框(阶段 4)──────────────────────────────────────── */
+.stock-post-modal {
+    display: none;
+    position: fixed; top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(0,0,0,0.5);
+    z-index: 1600;
+    align-items: center;
+    justify-content: center;
+}
+.stock-post-modal.show { display: flex; }
+.stock-post-modal .modal-dialog {
+    background: #fff;
+    border-radius: 12px;
+    padding: 1.5rem;
+    width: 760px;
+    max-width: 94%;
+    max-height: 88vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    position: relative;
+}
+.stock-post-modal .modal-title {
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: #2d3436;
+    margin-bottom: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.stock-post-modal .modal-close {
+    position: absolute;
+    top: 0.6rem; right: 0.75rem;
+    cursor: pointer;
+    font-size: 1.5rem;
+    color: #999;
+    line-height: 1;
+    background: none;
+    border: none;
+    padding: 0;
+}
+.stock-post-modal .modal-close:hover { color: #333; }
+.stock-post-modal .sp-body {
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+    font-size: 0.88rem;
+    color: #2d3436;
+}
+.stock-post-modal .sp-warehouse {
+    background: #e8f4fd;
+    color: #0984e3;
+    border-radius: 8px;
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 0.75rem;
+    font-size: 0.9rem;
+}
+/* 汇总四格 */
+.stock-post-modal .sp-summary {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.9rem;
+}
+.stock-post-modal .sp-sum-item {
+    flex: 1;
+    border: 1px solid #dfe6e9;
+    border-radius: 8px;
+    padding: 0.5rem;
+    text-align: center;
+    background: #fafafa;
+}
+.stock-post-modal .sp-sum-item.ok { border-color: #00b894; background: #e6faf4; }
+.stock-post-modal .sp-sum-item.warn { border-color: #fdcb6e; background: #fff7e6; }
+.stock-post-modal .sp-sum-num {
+    display: block;
+    font-size: 1.35rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+.stock-post-modal .sp-sum-label {
+    display: block;
+    font-size: 0.75rem;
+    color: #636e72;
+    margin-top: 0.1rem;
+}
+/* 跳过行明细表 */
+.stock-post-modal .sp-block {
+    border: 1px solid #ffeaa7;
+    background: #fff9f0;
+    border-radius: 8px;
+    padding: 0.6rem 0.75rem;
+    margin-bottom: 0.75rem;
+}
+.stock-post-modal .sp-block-title {
+    font-weight: 700;
+    color: #b8860b;
+    margin-bottom: 0.4rem;
+    font-size: 0.88rem;
+}
+.stock-post-modal .sp-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+    background: #fff;
+}
+.stock-post-modal .sp-table th,
+.stock-post-modal .sp-table td {
+    border: 1px solid #eee;
+    padding: 0.3rem 0.4rem;
+    text-align: left;
+    vertical-align: top;
+}
+.stock-post-modal .sp-table th { background: #f8f9fa; font-weight: 600; }
+.stock-post-modal .sp-reason { color: #d63031; }
+/* 未启用提示块 */
+.stock-post-modal .sp-block-nt {
+    border-color: #dfe6e9;
+    background: #f8f9fa;
+}
+.stock-post-modal .sp-block-nt .sp-block-title { color: #636e72; }
+.stock-post-modal .sp-hint {
+    font-size: 0.78rem;
+    color: #636e72;
+    margin-top: 0.35rem;
+    line-height: 1.5;
+}
+.stock-post-modal .sp-nt-list {
+    margin: 0.35rem 0 0;
+    padding-left: 1.1rem;
+    font-size: 0.8rem;
+    color: #636e72;
+}
+/* 冲销二次确认 */
+.stock-post-modal .sp-reverse-warn {
+    background: #fff5f5;
+    border-left: 4px solid #e17055;
+    border-radius: 6px;
+    padding: 0.6rem 0.75rem;
+    margin-bottom: 0.75rem;
+    line-height: 1.7;
+}
+.stock-post-modal .sp-reverse-warn b { color: #d63031; }
+.stock-post-modal .sp-modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid #eee;
+}
+.stock-post-modal .sp-modal-actions .btn {
+    padding: 0.45rem 1.1rem;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    font-size: 0.88rem;
+    font-weight: 600;
+}
+.stock-post-modal .sp-btn-cancel { background: #e9ecef; color: #333; }
+.stock-post-modal .sp-btn-confirm { background: #00b894; color: #fff; }
+.stock-post-modal .sp-btn-danger { background: #e17055; color: #fff; }
+/* 订单头徽章(阶段 4) */
+.stock-badge-area { display: inline-flex; gap: 0.3rem; margin-left: 0.4rem; vertical-align: middle; }
+.stock-badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.2rem 0.5rem;
+    border-radius: 8px;
+    white-space: nowrap;
+}
+.stock-badge.badge-posted { background: #d3f9d8; color: #0b8457; }
+.stock-badge.badge-skip { background: #ffeaa7; color: #b8860b; }
+.stock-badge.badge-rev { background: #ffe3e3; color: #d63031; }
+/* 轻提示(替代 alert) */
+.sp-toast {
+    position: fixed;
+    left: 50%;
+    bottom: 40px;
+    transform: translateX(-50%);
+    background: rgba(45,52,54,0.95);
+    color: #fff;
+    padding: 0.6rem 1.2rem;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    z-index: 2000;
+    display: none;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+    max-width: 80vw;
+}
+.sp-toast.show { display: block; }
+.sp-toast.sp-toast-err { background: rgba(214,48,49,0.96); }
+</style>
+
+<!-- 过账确认 -->
+<div id="stockPostModal" class="stock-post-modal">
+    <div class="modal-dialog">
+        <button type="button" class="modal-close" onclick="closeStockPostModal()">&times;</button>
+        <div class="modal-title">📥 入库过账</div>
+        <div class="sp-body" id="stockPostBody"></div>
+        <div class="sp-modal-actions">
+            <button type="button" class="btn sp-btn-cancel" onclick="closeStockPostModal()">取消</button>
+            <button type="button" class="btn sp-btn-confirm" id="stockPostConfirmBtn" onclick="confirmStockPost()">确认过账</button>
+        </div>
+    </div>
+</div>
+
+<!-- 冲销二次确认 -->
+<div id="stockReverseModal" class="stock-post-modal">
+    <div class="modal-dialog" style="width:520px;">
+        <button type="button" class="modal-close" onclick="closeStockReverseModal()">&times;</button>
+        <div class="modal-title">↩ 红字冲销</div>
+        <div class="sp-body" id="stockReverseBody"></div>
+        <div class="sp-modal-actions">
+            <button type="button" class="btn sp-btn-cancel" onclick="closeStockReverseModal()">取消</button>
+            <button type="button" class="btn sp-btn-danger" id="stockReverseConfirmBtn" onclick="confirmStockReverse()">确认冲销</button>
+        </div>
+    </div>
+</div>
+
+<div id="spToast" class="sp-toast"></div>
+
+<script>
+/* ── 入库过账(阶段 4)────────────────────────────────────────────
+   口径全部来自后端 /stock-status —— 前端不自己推算入账状态,
+   免得「页面说已过账、库存说没入账」两边打架。            */
+
+// 当前弹框上下文
+var _stockPostCtx = {orderId: null, status: null};
+var _stockReverseCtx = {orderId: null};
+
+function _spToast(msg, isErr) {
+    var el = document.getElementById('spToast');
+    if (!el) { alert(msg); return; }
+    el.textContent = msg;
+    el.className = 'sp-toast show' + (isErr ? ' sp-toast-err' : '');
+    clearTimeout(_spToast._t);
+    _spToast._t = setTimeout(function() { el.className = 'sp-toast'; }, 3200);
+}
+
+// 数量格式化:整数不拖小数,小数最多 6 位(跟后端容差 1e-6 对齐)
+function _spFmtQty(v) {
+    if (v === null || v === undefined || v === '') return '-';
+    var n = Number(v);
+    if (isNaN(n)) return String(v);
+    return String(Math.round(n * 1e6) / 1e6);
+}
+
+// 订单头徽章 HTML(服务端首屏渲染同一口径,这里用于过账/冲销后刷新)
+// ⚠️ 冲销过的单**不显示「✓ 已过账」** —— 红字冲销后余额已回到过账前,
+//    再挂着「已过账」会让人以为这批货还在账上(实际是已冲销)。
+function _spBadgesHtml(d) {
+    var h = '';
+    var c = d.counts || {};
+    if (d.is_reversed) {
+        h += '<span class="stock-badge badge-rev" title="已红字冲销,余额回到过账前">↩ 已冲销</span>';
+    } else if ((c.posted || 0) > 0) {
+        h += '<span class="stock-badge badge-posted" title="已入账 ' + c.posted + ' 行">✓ 已过账</span>';
+    }
+    if ((c.skipped || 0) > 0) {
+        h += '<span class="stock-badge badge-skip" title="' + c.skipped + ' 行未入账(点开看原因)">⚠ ' + c.skipped + ' 行未入账</span>';
+    }
+    return h;
+}
+
+// ── 过账 ────────────────────────────────────────────────────────
+function openStockPostModal(orderId) {
+    orderId = parseInt(orderId, 10);
+    var dg = document.querySelector('.date-group[data-order-id="' + orderId + '"]');
+    var btn = dg ? dg.querySelector('.stock-post-btn') : null;
+    if (dg && dg.getAttribute('data-locked') !== '1') {
+        _spToast('请先锁定订单,再点过账', true);
+        return;
+    }
+    fetch('/api/v1/inbound-orders/' + orderId + '/stock-status')
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (!d.success) { _spToast(d.error || '查询过账状态失败', true); return; }
+            _renderStockPostModal(d);
+        })
+        .catch(function(e) { _spToast('查询失败:' + e.message, true); });
+}
+
+function _renderStockPostModal(d) {
+    _stockPostCtx.orderId = d.order.id;
+    _stockPostCtx.status = d;
+
+    var wh = d.warehouse || {};
+    var c = d.counts || {};
+    var items = d.items || [];
+    var postedQty = 0, skipRows = [];
+    items.forEach(function(it) {
+        if (it.state === 'posted') postedQty += Number(it.posted_quantity || 0);
+        else if (it.state === 'skipped') skipRows.push(it);
+    });
+
+    var html = '';
+    html += '<div class="sp-warehouse">📦 仓库：<b>' + escHtml(wh.name || '未知仓库') + '</b>'
+          + (wh.code ? '（' + escHtml(wh.code) + '）' : '')
+          + ' · 单据日期 ' + escHtml(d.order.date || '-') + '</div>';
+
+    html += '<div class="sp-summary">'
+          + '<div class="sp-sum-item"><span class="sp-sum-num">' + (c.total || 0) + '</span><span class="sp-sum-label">本单总行数</span></div>'
+          + '<div class="sp-sum-item ok"><span class="sp-sum-num">' + (c.posted || 0) + '</span><span class="sp-sum-label">已入账</span></div>'
+          + '<div class="sp-sum-item warn"><span class="sp-sum-num">' + (c.skipped || 0) + '</span><span class="sp-sum-label">未入账</span></div>'
+          + '<div class="sp-sum-item"><span class="sp-sum-num">' + (c.pending || 0) + '</span><span class="sp-sum-label">待过账</span></div>'
+          + '</div>';
+
+    if (postedQty > 0) {
+        html += '<div class="sp-hint" style="margin-bottom:.6rem;">已入账数量合计 <b>' + _spFmtQty(postedQty) + '</b>（折算到商品主单位）。</div>';
+    }
+
+    // 跳过行明细表 —— 品名 / 规格 / 数量 / 单位 / 原因
+    if (skipRows.length) {
+        html += '<div class="sp-block"><div class="sp-block-title">⚠ 未入账明细（' + skipRows.length + ' 行）</div>';
+        html += '<table class="sp-table"><thead><tr><th>品名</th><th>规格</th><th>数量</th><th>单位</th><th>原因</th></tr></thead><tbody>';
+        skipRows.forEach(function(it) {
+            html += '<tr><td>' + escHtml(it.product_name) + '</td>'
+                  + '<td>' + escHtml(it.specification) + '</td>'
+                  + '<td>' + escHtml(it.raw_quantity) + '</td>'
+                  + '<td>' + escHtml(it.raw_unit) + '</td>'
+                  + '<td class="sp-reason">' + escHtml(it.reason_text || it.reason_code || '') + '</td></tr>';
+        });
+        html += '</tbody></table>';
+        var resolvable = skipRows.filter(function(it) { return it.resolvable; }).length;
+        if (resolvable) {
+            html += '<div class="sp-hint">其中 <b>' + resolvable + '</b> 行补齐商品资料后，可再点一次「过账」补入。</div>';
+        }
+    } else {
+        html += '<div class="sp-hint" style="margin-bottom:.6rem;">本单没有跳过行 —— 全部明细都能入账。</div>';
+    }
+
+    // 未启用提示块
+    var nt = d.not_tracking || [];
+    if (nt.length) {
+        html += '<div class="sp-block sp-block-nt"><div class="sp-block-title">🔒 未启用库存计算（' + nt.length + ' 个商品）</div>';
+        html += '<div class="sp-hint">这些商品<strong>已入账</strong>（内部累计照记），但对外显示 0 —— 启用只能走盘点 / 归零。</div>';
+        html += '<ul class="sp-nt-list">';
+        nt.forEach(function(x) {
+            html += '<li>' + escHtml(x.product_name)
+                  + (x.specification ? ' · ' + escHtml(x.specification) : '')
+                  + ' · 内部累计 ' + _spFmtQty(x.internal_total) + '</li>';
+        });
+        html += '</ul></div>';
+    }
+
+    document.getElementById('stockPostBody').innerHTML = html;
+    document.getElementById('stockPostModal').classList.add('show');
+}
+
+function closeStockPostModal() {
+    document.getElementById('stockPostModal').classList.remove('show');
+    _resetStockPostModal();
+}
+
+function _resetStockPostModal() {
+    _stockPostCtx.orderId = null;
+    _stockPostCtx.status = null;
+    document.getElementById('stockPostBody').innerHTML = '';
+    var btn = document.getElementById('stockPostConfirmBtn');
+    btn.textContent = '确认过账';
+    btn.onclick = confirmStockPost;
+    btn.style.display = '';
+}
+
+// 过账成功 → 弹框**原地转成结果视图**(不直接关掉)
+// ⚠️ 为什么:跳过行明细表(品名/规格/数量/单位/原因)只有过账之后才知道
+//    (跳过是过账动作的结果,事前无法预判哪行匹配不上 product)。
+//    直接弹个 toast 就关窗,用户还得再点一次过账才能看到「哪行没入账、为什么」。
+function _renderStockPostResult(d) {
+    var skipRows = d.skipped || [];
+    var nt = d.not_tracking || [];
+    var html = '';
+
+    if (d.already_posted) {
+        html += '<div class="sp-block sp-block-done" style="border-color:#dfe6e9;background:#f8f9fa;">'
+              + '<div class="sp-block-title" style="color:#636e72;">ℹ️ '
+              + escHtml(d.message || '本单已过账,没有新增入账') + '</div>'
+              + '<div class="sp-hint">重复点过账不会重复入账 —— 库存没变。</div></div>';
+    } else {
+        html += '<div class="sp-block sp-block-done" style="border-color:#00b894;background:#e6faf4;">'
+              + '<div class="sp-block-title" style="color:#0b8457;">✅ '
+              + escHtml(d.message || '过账完成') + '</div>'
+              + '<div class="sp-hint">业务日期取单据日期（'
+              + escHtml(d.occurred_at || '-') + '），不是今天。</div></div>';
+    }
+
+    if (skipRows.length) {
+        html += '<div class="sp-block"><div class="sp-block-title">⚠ 未入账明细（' + skipRows.length + ' 行）</div>';
+        html += '<table class="sp-table"><thead><tr><th>品名</th><th>规格</th><th>数量</th><th>单位</th><th>原因</th></tr></thead><tbody>';
+        skipRows.forEach(function(it) {
+            html += '<tr><td>' + escHtml(it.product_name) + '</td>'
+                  + '<td>' + escHtml(it.specification) + '</td>'
+                  + '<td>' + escHtml(it.raw_quantity) + '</td>'
+                  + '<td>' + escHtml(it.raw_unit) + '</td>'
+                  + '<td class="sp-reason">' + escHtml(it.reason_text || it.reason_code || '') + '</td></tr>';
+        });
+        html += '</tbody></table>';
+        var resolvable = skipRows.filter(function(it) { return it.resolvable; }).length;
+        if (resolvable) {
+            html += '<div class="sp-hint">其中 <b>' + resolvable + '</b> 行补齐商品资料后，可再点一次「过账」补入。</div>';
+        }
+    }
+
+    if (nt.length) {
+        html += '<div class="sp-block sp-block-nt"><div class="sp-block-title">🔒 未启用库存计算（' + nt.length + ' 个商品）</div>';
+        html += '<div class="sp-hint">这些商品<strong>已入账</strong>（内部累计照记），但对外显示 0 —— 启用只能走盘点 / 归零。</div>';
+        html += '<ul class="sp-nt-list">';
+        nt.forEach(function(x) {
+            html += '<li>' + escHtml(x.product_name || x.product_id)
+                  + (x.specification ? ' · ' + escHtml(x.specification) : '')
+                  + ' · 内部累计 ' + _spFmtQty(x.internal_total) + '</li>';
+        });
+        html += '</ul></div>';
+    }
+
+    document.getElementById('stockPostBody').innerHTML = html;
+    var btn = document.getElementById('stockPostConfirmBtn');
+    btn.textContent = '完成';
+    btn.onclick = function() { closeStockPostModal(); };
+    // 徽章同步刷新(不关窗)
+    if (_stockPostCtx.orderId) refreshStockBadges(_stockPostCtx.orderId);
+}
+
+function confirmStockPost() {
+    var orderId = _stockPostCtx.orderId;
+    if (!orderId) return;
+    var btn = document.getElementById('stockPostConfirmBtn');
+    showBtnLoading(btn, '过账中...');
+    fetch('/api/v1/inbound-orders/' + orderId + '/post', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'}
+    })
+        .then(function(r) {
+            return r.json().then(function(d) { return {ok: r.ok, d: d}; });
+        })
+        .then(function(res) {
+            hideBtnLoading(btn);
+            if (!res.ok || !res.d.success) {
+                _spToast(res.d.error || '过账失败', true);
+                return;
+            }
+            // 幂等:后端 already_posted=true 是「本单已过账」的正常结果,不是报错
+            _spToast(res.d.message || '过账完成');
+            _renderStockPostResult(res.d);
+            if (typeof onStockPosted === 'function') onStockPosted(orderId, res.d);
+        })
+        .catch(function(e) {
+            hideBtnLoading(btn);
+            _spToast('过账失败:' + e.message, true);
+        });
+}
+
+// ── 冲销(二次确认)────────────────────────────────────────────────
+function openStockReverseModal(orderId) {
+    orderId = parseInt(orderId, 10);
+    fetch('/api/v1/inbound-orders/' + orderId + '/stock-status')
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (!d.success) { _spToast(d.error || '查询过账状态失败', true); return; }
+            var rows = 0, qty = 0;
+            (d.items || []).forEach(function(it) {
+                if (it.state === 'posted') { rows++; qty += Number(it.posted_quantity || 0); }
+            });
+            if (!rows) { _spToast('本单没有可冲销的入账流水', true); return; }
+            _stockReverseCtx.orderId = orderId;
+            var html = '<div class="sp-reverse-warn">'
+                + '本单已过账 <b>' + rows + '</b> 行 / <b>' + _spFmtQty(qty) + '</b>（折算后）。<br>'
+                + '冲销后：这 ' + rows + ' 行会写入<b>负数流水</b>，库存余额回到<b>过账前</b>。<br>'
+                + '⚠ 原记录永久保留（红字冲销，不删不改）；冲销过的行不能再重新过账 —— 要改单据请改源头重新建单。'
+                + '</div>';
+            document.getElementById('stockReverseBody').innerHTML = html;
+            document.getElementById('stockReverseModal').classList.add('show');
+        })
+        .catch(function(e) { _spToast('查询失败:' + e.message, true); });
+}
+
+function closeStockReverseModal() {
+    document.getElementById('stockReverseModal').classList.remove('show');
+}
+
+function confirmStockReverse() {
+    var orderId = _stockReverseCtx.orderId;
+    if (!orderId) return;
+    var btn = document.getElementById('stockReverseConfirmBtn');
+    showBtnLoading(btn, '冲销中...');
+    fetch('/api/v1/inbound-orders/' + orderId + '/reverse', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'}
+    })
+        .then(function(r) {
+            return r.json().then(function(d) { return {ok: r.ok, d: d}; });
+        })
+        .then(function(res) {
+            hideBtnLoading(btn);
+            if (!res.ok || !res.d.success) {
+                _spToast(res.d.error || '冲销失败', true);
+                return;
+            }
+            closeStockReverseModal();
+            _spToast(res.d.message || '冲销完成');
+            refreshStockBadges(orderId);
+            if (typeof onStockPosted === 'function') onStockPosted(orderId, res.d);
+        })
+        .catch(function(e) {
+            hideBtnLoading(btn);
+            _spToast('冲销失败:' + e.message, true);
+        });
+}
+
+// ── 刷新订单头徽章 / 按钮状态 ────────────────────────────────────
+function refreshStockBadges(orderId) {
+    fetch('/api/v1/inbound-orders/' + orderId + '/stock-status')
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (!d.success) return;
+            var dg = document.querySelector('.date-group[data-order-id="' + orderId + '"]');
+            if (!dg) return;
+            var area = dg.querySelector('.stock-badge-area');
+            if (area) area.innerHTML = _spBadgesHtml(d);
+            var btn = dg.querySelector('.stock-post-btn');
+            if (btn) {
+                var locked = dg.getAttribute('data-locked') === '1';
+                var canPost = locked && d.can_post;
+                btn.disabled = !canPost;
+                btn.title = !locked ? '请先锁定订单'
+                        : (canPost ? '把这张单的数量计入库存' : '本单没有待入账的行');
+            }
+            var rb = dg.querySelector('.stock-reverse-btn');
+            if (rb) rb.style.display = d.can_reverse ? 'inline-block' : 'none';
+        })
+        .catch(function() { /* 徽章刷新失败不打扰用户,页面其它部分照常用 */ });
+}
+</script>

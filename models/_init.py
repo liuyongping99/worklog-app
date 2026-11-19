@@ -65,7 +65,32 @@ def _rebuild_table_for_fk(conn, cursor, tbl, ddl_tpl, want_fks, indexes=(), trig
 
 
 def init_db():
+    """建表 + 迁移 + 种子数据。
+
+    ⚠️ 为什么要拆成 `_init_db_impl(conn)`（阶段 3 回归修复）：
+       原来的写法把 `conn.close()` 放在函数**最后一行**，不在 try/finally 里
+       → 中途任何异常都会漏掉 close()。漏掉的连接带着**未提交的事务**
+       → SQLite 写锁被永久持有 → 之后所有写库都报 "database is locked"。
+       拆壳之后：异常必走 rollback + close，写锁一定还回去。
+    """
     conn = get_db()
+    try:
+        _init_db_impl(conn)
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _init_db_impl(conn):
+    """init_db 的真正实现。连接由外层 init_db() 负责关闭。"""
     cursor = conn.cursor()
 
     cursor.execute('''
@@ -1251,10 +1276,24 @@ def init_db():
         )
     ''')
     # 唯一的种子行:芙蓉仓(id=1)。INSERT OR IGNORE → 幂等,重复跑不报错。
-    cursor.execute(
-        "INSERT OR IGNORE INTO warehouses (code, name, is_default, sort_order) "
-        "VALUES ('FR', '芙蓉仓', 1, 1)"
-    )
+    try:
+        cursor.execute(
+            "INSERT OR IGNORE INTO warehouses (code, name, is_default, sort_order) "
+            "VALUES ('FR', '芙蓉仓', 1, 1)"
+        )
+    except sqlite3.OperationalError:
+        # 被别的连接占着写锁 → 不该让整个应用起不来（OR IGNORE + 行本来就在，
+        # 失败无害；下次启动会再补一次）。
+        try:
+            conn.rollback()
+        except sqlite3.Error:
+            pass
+    # ⚠️ 立刻 commit（阶段 3 回归修复）：这条 INSERT 是稳定库上 init_db() 的
+    #    第一条 DML → Python sqlite3 会开隐式事务 → init_db 剩下几百行 DDL
+    #    全跑在这个**写事务**里 → 整个启动过程占着 SQLite 写锁
+    #    → 别的连接写库时 busy_timeout 等满 30s 后报 "database is locked"。
+    #    提前 commit，把写锁窗口缩到这一条语句。
+    conn.commit()
 
     # ── 3.2 product_stock 当前库存(仓库 × SKU)──────────────────────
     cursor.execute('''
@@ -1509,5 +1548,5 @@ def init_db():
             'seed blank category prompts failed (non-fatal)')
 
     conn.commit()
-    conn.close()
+    # conn.close() 由外层 init_db() 的 finally 统一负责。
 

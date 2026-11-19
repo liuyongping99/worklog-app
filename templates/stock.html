@@ -1,0 +1,326 @@
+{% extends "base.html" %}
+{% block title %}库存 · 丰源工作台{% endblock %}
+{% block head %}
+<style>
+.stk-page { max-width: 1400px; margin: 0 auto; padding: 1rem 0.75rem 2.5rem; }
+.stk-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 0.9rem; flex-wrap: wrap; }
+.stk-head h1 { font-size: 1.4rem; margin: 0; color: #2d3436; }
+.stk-head .subtitle { color: #636e72; font-size: 0.9rem; margin: 0.25rem 0 0; }
+.stk-wh-tag {
+    display: inline-block; padding: 0.45rem 0.9rem; border-radius: 999px;
+    background: #e8f5ee; color: #14664d; font-weight: 700; font-size: 0.95rem;
+    border: 1px solid #c9e7d8;
+}
+.stk-wh-form { display: flex; gap: 0.4rem; align-items: center; }
+.stk-wh-form select {
+    border: 1px solid #d6dee0; border-radius: 8px; padding: 0.4rem 0.5rem;
+    font-size: 0.9rem; background: #fff;
+}
+
+.stk-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 0.6rem; margin-bottom: 0.9rem; }
+.stk-stat { background: #fff; border-radius: 12px; padding: 0.7rem 0.9rem; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+.stk-stat .num { font-size: 1.45rem; font-weight: 700; color: #2d3436; line-height: 1.2; }
+.stk-stat .label { font-size: 0.78rem; color: #868e96; margin-top: 0.15rem; }
+.stk-stat.ok .num { color: #14664d; }
+.stk-stat.off .num { color: #868e96; }
+.stk-stat.hit .num { color: #c0392b; }
+.stk-stats-note { font-size: 0.8rem; color: #868e96; margin: -0.4rem 0 0.8rem; }
+.stk-stats-note a { color: #14664d; text-decoration: none; }
+.stk-stats-note a:hover { text-decoration: underline; }
+
+.stk-error {
+    background: #fdecea; color: #c0392b; border: 1px solid #f0c9c6;
+    border-radius: 10px; padding: 0.7rem 0.9rem; margin-bottom: 0.9rem; font-size: 0.9rem;
+}
+
+.stk-body { display: flex; gap: 0.8rem; align-items: flex-start; }
+@media (max-width: 900px) { .stk-body { flex-direction: column; } }
+
+.stk-side {
+    flex: 0 0 210px; background: #fff; border-radius: 12px; padding: 0.6rem 0.75rem 0.8rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06); max-height: 70vh; overflow: auto;
+}
+.stk-side-title { font-size: 0.78rem; color: #868e96; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 0.4rem; }
+.stk-tree { list-style: none; margin: 0; padding: 0; font-size: 0.88rem; }
+.stk-tree ul { list-style: none; margin: 0; padding-left: 0.7rem; border-left: 1px dashed #e4e8ec; }
+.stk-tree li { margin: 0.1rem 0; }
+.stk-tree a {
+    display: block; padding: 0.22rem 0.4rem; border-radius: 6px;
+    color: #2d3436; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.stk-tree a:hover { background: #f1f8f4; color: #14664d; }
+.stk-tree a.active { background: #14664d; color: #fff; font-weight: 600; }
+
+.stk-main { flex: 1 1 auto; min-width: 0; }
+.stk-toolbar {
+    display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.6rem;
+}
+.stk-search { display: flex; gap: 0.4rem; flex: 1 1 260px; }
+.stk-search input[type="text"] {
+    flex: 1 1 auto; min-width: 140px; box-sizing: border-box;
+    border: 1px solid #d6dee0; border-radius: 8px; padding: 0.45rem 0.6rem; font-size: 0.9rem;
+}
+.stk-filters { display: flex; gap: 0.3rem; }
+.stk-filters a {
+    font-size: 0.82rem; padding: 0.35rem 0.65rem; border-radius: 999px;
+    background: #fff; border: 1px solid #d6dee0; color: #2d3436; text-decoration: none;
+}
+.stk-filters a.active { background: #14664d; border-color: #14664d; color: #fff; font-weight: 600; }
+.stk-btn {
+    font-size: 0.85rem; padding: 0.4rem 0.8rem; border-radius: 8px;
+    background: #fff; border: 1px solid #d6dee0; color: #2d3436; text-decoration: none; cursor: pointer;
+}
+.stk-btn:hover { background: #f1f8f4; color: #14664d; border-color: #c9e7d8; }
+
+.stk-card { background: #fff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); overflow: hidden; }
+.stk-card table { width: 100%; border-collapse: collapse; }
+.stk-card th, .stk-card td { text-align: left; padding: 0.55rem 0.7rem; border-bottom: 1px solid #f1f3f5; font-size: 0.87rem; }
+.stk-card th { background: #f8f9fa; font-weight: 600; color: #636e72; font-size: 0.75rem; letter-spacing: 0.4px; white-space: nowrap; }
+.stk-card tbody tr.stk-row { cursor: pointer; }
+.stk-card tbody tr.stk-row:hover { background: #f8fbf9; }
+.stk-card td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.stk-card td.qty { font-weight: 700; color: #14664d; }
+.stk-card td.qty.zero { color: #b2bec3; font-weight: 600; }
+.stk-badge { display: inline-block; padding: 0.12rem 0.55rem; border-radius: 999px; font-size: 0.74rem; font-weight: 600; white-space: nowrap; }
+.stk-badge.on { background: #dbf6e6; color: #146745; }
+.stk-badge.off { background: #f1f3f5; color: #868e96; }
+.stk-muted { color: #b2bec3; font-size: 0.8rem; }
+.stk-detail td { background: #fbfcfc; padding: 0; }
+.stk-detail-inner { padding: 0.6rem 0.9rem 0.8rem; }
+.stk-detail-inner h4 { margin: 0 0 0.45rem; font-size: 0.85rem; color: #636e72; }
+.stk-detail-inner table { width: 100%; border-collapse: collapse; }
+.stk-detail-inner th, .stk-detail-inner td { font-size: 0.8rem; padding: 0.35rem 0.5rem; border-bottom: 1px solid #f1f3f5; text-align: left; }
+.stk-detail-inner th { color: #868e96; font-weight: 600; }
+.stk-empty { text-align: center; color: #868e96; padding: 2.5rem 1rem; }
+.stk-hidden-col { display: none; }
+.stk-pager { display: flex; gap: 0.3rem; align-items: center; justify-content: center; margin-top: 0.7rem; font-size: 0.85rem; }
+.stk-pager a, .stk-pager span {
+    padding: 0.28rem 0.6rem; border-radius: 6px; border: 1px solid #d6dee0;
+    background: #fff; color: #2d3436; text-decoration: none;
+}
+.stk-pager a:hover { background: #f1f8f4; color: #14664d; }
+.stk-pager .cur { background: #14664d; border-color: #14664d; color: #fff; font-weight: 600; }
+.stk-pager .gap { border: 0; background: transparent; }
+</style>
+{% endblock %}
+
+{% macro render_tree(nodes) %}
+  {% for n in nodes %}
+  <li>
+    <a href="/stock?{{ qs(category_id=n.id, page=1) }}"
+       class="{{ 'active' if category_id and category_id == n.id|string else '' }}"
+       title="{{ n.category_name }}">{{ n.category_name }}</a>
+    {% if n.children %}<ul>{{ render_tree(n.children) }}</ul>{% endif %}
+  </li>
+  {% endfor %}
+{% endmacro %}
+
+{% block content %}
+<div class="stk-page">
+  <div class="stk-head">
+    <div>
+      <h1>📦 库存</h1>
+      <p class="subtitle">按仓库查看每个 SKU 的当前库存 —— <b>入库过账</b>前后端已就绪（阶段 3 / 4）；<b>盘点</b>单据页已就绪（阶段 5）；归零在阶段 7</p>
+    </div>
+    <div>
+      {# 单仓 → 静态标签(一个只有一项的下拉框很怪);多仓 → 下拉 #}
+      {% if warehouses_count <= 1 %}
+        <span class="stk-wh-tag">🏭 {{ warehouse.name if warehouse else '—' }}</span>
+      {% else %}
+        <form method="get" class="stk-wh-form" onsubmit="return true;">
+          <input type="hidden" name="q" value="{{ q }}">
+          <input type="hidden" name="category_id" value="{{ category_id }}">
+          <input type="hidden" name="only_tracking" value="{{ '' if only_tracking is none else ('1' if only_tracking else '0') }}">
+          <select name="warehouse_id" onchange="this.form.submit()">
+            {% for w in warehouses %}
+            <option value="{{ w.id }}" {{ 'selected' if warehouse and w.id == warehouse.id else '' }}>{{ w.name }}</option>
+            {% endfor %}
+          </select>
+        </form>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="stk-stats">
+    <div class="stk-stat"><div class="num">{{ stats.total }}</div><div class="label">SKU 总数</div></div>
+    <div class="stk-stat ok"><div class="num">{{ stats.tracking }}</div><div class="label">已启用</div></div>
+    <div class="stk-stat off"><div class="num">{{ stats.untracked }}</div><div class="label">未启用</div></div>
+    <div class="stk-stat hit"><div class="num">{{ stats.with_stock }}</div><div class="label">有库存数</div></div>
+  </div>
+  {# 统计格跟随当前筛选(主流进销存做法)→ 旁边标出全仓总数做对照 #}
+  <div class="stk-stats-note">
+    {% if stats.total != stats_all.total %}
+      当前筛选 <b>{{ stats.total }}</b> 个 SKU · 全仓共 <b>{{ stats_all.total }}</b> 个
+      · <a href="/stock?{{ qs(category_id='', only_tracking='', q='', page=1) }}">清除筛选看全仓</a>
+    {% else %}
+      全仓共 <b>{{ stats_all.total }}</b> 个 SKU
+    {% endif %}
+  </div>
+
+  {% if error %}<div class="stk-error">⚠️ {{ error }}</div>{% endif %}
+
+  <div class="stk-body">
+    <aside class="stk-side">
+      <div class="stk-side-title">分类</div>
+      <ul class="stk-tree">
+        <li><a href="/stock?{{ qs(category_id='', page=1) }}" class="{{ 'active' if not category_id else '' }}">全部</a></li>
+        {{ render_tree(category_tree) }}
+      </ul>
+    </aside>
+
+    <section class="stk-main">
+      <div class="stk-toolbar">
+        <form method="get" class="stk-search">
+          <input type="hidden" name="warehouse_id" value="{{ warehouse.id if warehouse else '' }}">
+          <input type="hidden" name="category_id" value="{{ category_id }}">
+          <input type="hidden" name="only_tracking" value="{{ '' if only_tracking is none else ('1' if only_tracking else '0') }}">
+          <input type="text" name="q" value="{{ q }}" placeholder="搜编号 / 品名 / 规格">
+          <button class="stk-btn" type="submit">搜索</button>
+        </form>
+        <div class="stk-filters">
+          <a href="/stock?{{ qs(only_tracking='', page=1) }}" class="{{ 'active' if only_tracking is none else '' }}">全部</a>
+          <a href="/stock?{{ qs(only_tracking='1', page=1) }}" class="{{ 'active' if only_tracking else '' }}">仅看已启用</a>
+          <a href="/stock?{{ qs(only_tracking='0', page=1) }}" class="{{ 'active' if only_tracking is false else '' }}">仅看未启用</a>
+        </div>
+        <button class="stk-btn" type="button" id="stkToggleInternal">隐藏内部累计</button>
+        <a class="stk-btn" href="/api/v1/stock/export.csv?{{ qs() }}">⬇ 导出 CSV</a>
+        <a class="stk-btn" href="/stock-count" title="建一张盘点单,数完货把数粘回来提交对齐">📋 去盘点</a>
+      </div>
+
+      <div class="stk-card">
+        <table>
+          <thead>
+            <tr>
+              <th>编号</th>
+              <th>品名</th>
+              <th>规格</th>
+              <th>单位</th>
+              <th style="text-align:right;">当前仓库存</th>
+              <th>状态</th>
+              <th style="text-align:right;" class="stk-internal-col">内部累计</th>
+              <th class="stk-internal-col">更新时间</th>
+            </tr>
+          </thead>
+          <tbody>
+          {% if rows %}
+            {% for r in rows %}
+            <tr class="stk-row" data-pid="{{ r.product_id }}"
+                data-warehouse="{{ warehouse.id if warehouse else '' }}">
+              <td>{{ r.product_code }}</td>
+              <td>{{ r.product_name }}</td>
+              <td>{{ r.specification or '' }}</td>
+              <td>{{ r.base_unit or '' }}</td>
+              <td class="num qty {{ 'zero' if not r.display_quantity else '' }}">
+                {{ r.display_quantity }}{{ ' ' ~ r.base_unit if r.base_unit else '' }}
+              </td>
+              <td>
+                {% if r.is_tracking %}
+                  <span class="stk-badge on">已启用</span>
+                {% else %}
+                  <span class="stk-badge off">未启用</span>
+                {% endif %}
+              </td>
+              <td class="num stk-internal-col">{{ r.internal_total }}</td>
+              <td class="stk-muted stk-internal-col">{{ r.updated_at or '—' }}</td>
+            </tr>
+            {% endfor %}
+          {% else %}
+            <tr><td colspan="8" class="stk-empty">
+              {% if q %}没有匹配「{{ q }}」的商品{% else %}没有匹配当前筛选条件的商品{% endif %}
+            </td></tr>
+          {% endif %}
+          </tbody>
+        </table>
+      </div>
+
+      {% if pages > 1 %}
+      <div class="stk-pager">
+        {% if page > 1 %}<a href="/stock?{{ qs(page=page-1) }}">‹ 上一页</a>{% endif %}
+        {% for p in range(1, pages + 1) %}
+          {% if p == page %}
+            <span class="cur">{{ p }}</span>
+          {% elif p <= 2 or p > pages - 2 or (p >= page - 2 and p <= page + 2) %}
+            <a href="/stock?{{ qs(page=p) }}">{{ p }}</a>
+          {% elif p == 3 or p == pages - 2 %}
+            <span class="gap">…</span>
+          {% endif %}
+        {% endfor %}
+        {% if page < pages %}<a href="/stock?{{ qs(page=page+1) }}">下一页 ›</a>{% endif %}
+        <span class="stk-muted">共 {{ total }} 条 / {{ pages }} 页</span>
+      </div>
+      {% else %}
+        <div class="stk-pager"><span class="stk-muted">共 {{ total }} 条</span></div>
+      {% endif %}
+    </section>
+  </div>
+</div>
+
+<script>
+(function () {
+  var WH = {{ (warehouse.id if warehouse else 1) | tojson }};
+
+  // 内部累计列折叠
+  var toggleBtn = document.getElementById('stkToggleInternal');
+  var hidden = false;
+  if (toggleBtn) {
+    toggleBtn.addEventListener('click', function () {
+      hidden = !hidden;
+      document.querySelectorAll('.stk-internal-col').forEach(function (el) {
+        el.classList.toggle('stk-hidden-col', hidden);
+      });
+      toggleBtn.textContent = hidden ? '显示内部累计' : '隐藏内部累计';
+    });
+  }
+
+  // 行展开 → 拉该 SKU 的流水明细
+  document.querySelectorAll('tr.stk-row').forEach(function (tr) {
+    tr.addEventListener('click', function () {
+      var next = tr.nextElementSibling;
+      if (next && next.classList.contains('stk-detail')) { next.remove(); return; }
+      document.querySelectorAll('tr.stk-detail').forEach(function (d) { d.remove(); });
+
+      var pid = tr.getAttribute('data-pid');
+      var wid = tr.getAttribute('data-warehouse') || WH;
+      var detail = document.createElement('tr');
+      detail.className = 'stk-detail';
+      var td = document.createElement('td');
+      td.colSpan = 8;
+      td.innerHTML = '<div class="stk-detail-inner"><h4>加载流水明细…</h4></div>';
+      detail.appendChild(td);
+      tr.after(detail);
+
+      fetch('/api/v1/stock/ledger?product_id=' + encodeURIComponent(pid) +
+            '&warehouse_id=' + encodeURIComponent(wid) + '&page_size=20')
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          var box = detail.querySelector('.stk-detail-inner');
+          if (!d || !d.success) {
+            box.innerHTML = '<h4>加载失败：' + ((d && d.error) || '未知错误') + '</h4>';
+            return;
+          }
+          if (!d.rows.length) {
+            box.innerHTML = '<h4>该商品在本仓还没有流水记录</h4>';
+            return;
+          }
+          var html = '<h4>流水明细（最近 ' + d.rows.length + ' 条，共 ' + d.total + ' 条）</h4><table>' +
+            '<tr><th>业务日期</th><th>类型</th><th>数量</th><th>单位</th><th>原数量</th>' +
+            '<th>单据</th><th>备注</th></tr>';
+          d.rows.forEach(function (r) {
+            html += '<tr><td>' + (r.occurred_at || '—') + '</td>' +
+              '<td>' + (r.biz_type || '') + (r.is_reversal ? ' (红冲)' : '') + '</td>' +
+              '<td>' + r.quantity + '</td><td>' + (r.unit || '') + '</td>' +
+              '<td>' + (r.raw_quantity || 0) + ' ' + (r.raw_unit || '') + '</td>' +
+              '<td>' + (r.order_pk ? ('#' + r.order_pk) : '—') + '</td>' +
+              '<td>' + (r.memo || '') + '</td></tr>';
+          });
+          box.innerHTML = html + '</table>';
+        })
+        .catch(function (e) {
+          detail.querySelector('.stk-detail-inner').innerHTML =
+            '<h4>加载失败：' + e + '</h4>';
+        });
+    });
+  });
+})();
+</script>
+{% endblock %}

@@ -950,6 +950,16 @@
             <span class="group-supplier">{{ group.supplier }}</span>
             <span class="group-num">#{{ group.order_num }}</span>
             {% if group.doc_number %}<span id="docNumber{{ group.id }}" style="font-size:0.75rem;color:#0984e3;background:#e8f4fd;padding:0.15rem 0.5rem;border-radius:10px;margin-left:0.25rem;">{{ group.doc_number }}</span>{% endif %}
+            {# 2026-11-18 阶段 4:过账状态徽章(服务端渲染,口径同 /stock-status) #}
+            {% set sp = group.stock_post or {} %}
+            <span class="stock-badge-area" data-order-id="{{ group.id }}">
+                {% if sp.is_reversed %}
+                    <span class="stock-badge badge-rev" title="已红字冲销,余额回到过账前">↩ 已冲销</span>
+                {% elif sp.posted %}
+                    <span class="stock-badge badge-posted" title="已入账 {{ sp.posted }} 行">✓ 已过账</span>
+                {% endif %}
+                {% if sp.skipped %}<span class="stock-badge badge-skip" title="{{ sp.skipped }} 行未入账(点「过账」看原因)">⚠ {{ sp.skipped }} 行未入账</span>{% endif %}
+            </span>
             <!-- 紧邻订单号：批量添加 / 备注 / 上传图片 -->
             <div style="display: flex; gap: 0.5rem;" class="lock-hide">
                 <button class="btn btn-sm" style="background: linear-gradient(135deg, #00b894, #00cec9); color: #fff; font-weight: 600; border: none; box-shadow: 0 2px 6px rgba(0,184,148,.35);" onclick="openSmartFill({{ group.id }}, '{{ group.date }}', '{{ group.supplier }}')">🧠 智能添加</button>
@@ -963,6 +973,24 @@
             </div>
             <span class="lock-show" style="background:#fdcb6e; color:#2d3436; font-size:0.7rem; padding:0.2rem 0.5rem; border-radius:8px; margin-left:auto;">🔒 已锁定</span>
             <button type="button" class="btn btn-sm lock-show" style="background:#55efc4; color:#2d3436;" onclick="toggleInboundLock({{ group.id }}, false)">🔓 解锁</button>
+            {# 2026-11-18 阶段 4:过账 / 冲销。
+               ⚠️ 放在**独立容器**里(不受 lock-hide / lock-show 控制)——
+                  过账按钮要在「锁定前」也看得见(禁用态),提示用户先锁定,
+                  锁上后按钮自动可用,不用刷新页面。 #}
+            {% set _pending = sp.pending or 0 %}
+            {% set _skipped = sp.skipped or 0 %}
+            {% set _can_post = group.is_locked and (_pending > 0 or _skipped > 0) %}
+            <div style="display:flex; gap:0.5rem; margin-left:0.5rem;">
+                <button type="button" class="btn btn-sm stock-post-btn"
+                        style="background:#00b894; color:#fff;"
+                        {% if not _can_post %}disabled{% endif %}
+                        title="{% if not group.is_locked %}请先锁定订单{% elif not _can_post %}本单没有待入账的行{% else %}把这张单的数量计入库存{% endif %}"
+                        onclick="openStockPostModal({{ group.id }})">📥 过账</button>
+                <button type="button" class="btn btn-sm stock-reverse-btn"
+                        style="background:#e17055; color:#fff;{% if not sp.can_reverse %}display:none;{% endif %}"
+                        title="红字冲销:写入负数流水,余额回到过账前"
+                        onclick="openStockReverseModal({{ group.id }})">↩ 冲销</button>
+            </div>
         </div>
 
         {% if group.order_note %}
@@ -1261,6 +1289,9 @@
 
 {# 2026-09-18: 三页(出货/入库/装柜)共用的清点支数/桶数/令数/张数 弹框 #}
 {% include '_placement_count_modal.html' %}
+
+{# 2026-11-18 阶段 4: 入库过账弹框 + 冲销二次确认弹框 #}
+{% include '_stock_posting_modal.html' %}
 
 
 
@@ -1950,6 +1981,9 @@ setTimeout(() => {
                         syncVerifiedBadge(tr, verified);
                     });
                 }
+                // 2026-11-18 阶段 4:锁定状态变了 → 「📥 过账」按钮的可用性跟着变
+                //   (锁定前 disabled、锁定后可用;已过账无待入账行时也 disabled)。
+                if (typeof refreshStockBadges === 'function') refreshStockBadges(orderId);
             })
             .catch(function(err) {
                 alert('操作失败：' + err.message);
